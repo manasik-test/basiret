@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ENVIRONMENT: str = "development"
 
+    META_APP_ID: str
+    META_APP_SECRET: str
+    INSTAGRAM_REDIRECT_URI: str = "http://localhost:8000/api/v1/instagram/callback"
+    INSTAGRAM_TEST_TOKEN: str = ""
+
     class Config:
         env_file = ".env"
 
