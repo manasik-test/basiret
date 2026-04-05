@@ -42,6 +42,7 @@ services:
     container_name: basiret_celery
     volumes:
       - ./backend:/app
+      - huggingface_cache:/root/.cache/huggingface
     env_file:
       - .env
     depends_on:
@@ -63,6 +64,7 @@ services:
 
 volumes:
   postgres_data:
+  huggingface_cache:
 
 
 networks:

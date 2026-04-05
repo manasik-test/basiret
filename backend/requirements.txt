@@ -13,3 +13,10 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 cryptography==42.0.8
 pytest==8.2.0
+transformers==4.41.2
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
+easyocr==1.7.1
+langdetect==1.0.9
+sentencepiece==0.2.0
+protobuf==5.27.2

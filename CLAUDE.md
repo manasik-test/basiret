@@ -9,8 +9,8 @@ Student: Manasik Ibnouf | ID: 20234610 | Supervisor: Nomazwe Sibanda
 ---
 
 ## Current Status
-- Sprint 1 in progress — Docker + DB + GitHub setup
-- Docker environment running: FastAPI + PostgreSQL + Redis
+- Sprint 2 complete — Instagram data pipeline operational
+- Docker environment: FastAPI + PostgreSQL + Redis + Celery worker (4 containers)
 
 ---
 
@@ -119,5 +119,75 @@ PATCH /admin/users/:id, /admin/flags/:id
 
 ## Environment
 - Dev: Windows 11, Docker Desktop, Cursor + Claude Code
-- Ports: API=8000, Postgres=5432, Redis=6380
+- Ports: API=8000, Postgres=5433 (host), Redis=6382 (host)
 - Never commit .env
+
+---
+
+## Session Log — 2026-04-05
+
+### What was built
+
+**Sprint 1 (commits ab8ddfc → 085c78b):**
+- Git repo initialized on `main`, pushed to GitHub
+- `.gitignore` configured for Python/Node/Docker/IDE files
+- Alembic initialized in `backend/`, wired to `DATABASE_URL` from settings
+- 9 SQLAlchemy models created matching `db/init.sql` (with enums, relationships, indexes, constraints)
+- Baseline migration generated (empty — DB already has schema from init.sql)
+- 3 pytest smoke tests: app starts, health endpoint, all 9 tables exist
+
+**Sprint 2 (commit fc97a15):**
+- Instagram OAuth endpoints: `GET /auth-url`, `GET /callback` (short → long-lived token exchange)
+- Fernet token encryption (`app/core/encryption.py`) using PBKDF2-derived key from SECRET_KEY
+- Celery app + worker container added to docker-compose
+- `sync_instagram_posts` Celery task: fetches `/me/media`, upserts posts with raw JSONB, records engagement metrics
+- `POST /api/v1/instagram/sync` endpoint: triggers sync, auto-bootstraps test org/account from INSTAGRAM_TEST_TOKEN
+- `GET /api/v1/analytics/overview` endpoint: returns KPI totals (posts, likes, comments, engagement, connected accounts)
+- Verified end-to-end: 42 real posts synced from Instagram with engagement data
+
+### Key decisions
+- Token encryption uses Fernet with PBKDF2 key derivation from SECRET_KEY (not a separate encryption key)
+- Celery tasks use explicit `include` in config (autodiscover wasn't reliable with volume mounts)
+- Test org uses UUID `00000000-0000-0000-0000-000000000000` as placeholder until auth is built
+- Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
+
+**Sprint 3 (current commit):**
+- NLP pipeline Celery task (`app/tasks/nlp_analysis.py`): sentiment analysis + language detection + OCR
+- Sentiment model: `cardiffnlp/twitter-xlm-roberta-base-sentiment` (XLM-RoBERTa, multilingual EN+AR)
+- Language detection via `langdetect` — updates `post.language` column from `unknown` to detected lang
+- EasyOCR integration (en+ar) for image/carousel posts — extracts text from images before analysis
+- Combined analysis: caption + OCR text → language detect → sentiment classify → store in `analysis_result`
+- Two Celery tasks: `analyze_posts` (batch all unanalyzed) and `analyze_single_post_task` (on-demand by ID)
+- `POST /api/v1/analytics/analyze` endpoint: triggers batch analysis, returns task_id
+- `GET /api/v1/analytics/sentiment` endpoint: returns sentiment distribution (counts + avg scores)
+- HuggingFace model cache persisted via Docker volume (`huggingface_cache`) to survive rebuilds
+- Dockerfile updated: `libgl1` + `libglib2.0-0` system deps for EasyOCR/OpenCV, extended pip timeout
+- Verified end-to-end: 42/42 posts analyzed (12 positive, 30 neutral, 0 negative)
+
+### Key decisions
+- Token encryption uses Fernet with PBKDF2 key derivation from SECRET_KEY (not a separate encryption key)
+- Celery tasks use explicit `include` in config (autodiscover wasn't reliable with volume mounts)
+- Test org uses UUID `00000000-0000-0000-0000-000000000000` as placeholder until auth is built
+- Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
+- Sentiment + OCR models are lazy-loaded (once per worker process) to avoid startup cost
+- `torch` pinned to CPU-only build (`+cpu` wheel) to keep Docker image size manageable
+- OCR runs only on image/carousel posts; video/reel audio transcription deferred to Whisper integration
+- Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
+- Batch commits every 10 posts to avoid long-running DB transactions
+
+### Known issues / TODOs
+- `organization_id` is hardcoded in OAuth callback and sync — must wire to JWT in Sprint 6
+- `alembic stamp head` needs to be run once to mark existing DB as current before future migrations
+- Pydantic V2 deprecation warning: `class Config` → `ConfigDict` in settings (cosmetic)
+- SQLAlchemy `declarative_base()` deprecation warning (should use `sqlalchemy.orm.declarative_base`)
+- Instagram Basic Display API scope uses `instagram_business_basic` — verify this matches the Meta app type
+- Shares, saves, reach, impressions always 0 — these require Instagram Insights API (business/creator accounts)
+- Audio transcription with Whisper not yet implemented (Sprint 3 stretch goal → deferred)
+- Topic extraction (`analysis_result.topics`) stores empty array — needs keyword/topic model in future sprint
+- First analysis run per container is slow (~25 min) due to HuggingFace model download; subsequent runs use cached volume
+
+### What's next — Sprint 4
+- Behavior engine + K-means audience segmentation
+- Cluster users into audience segments stored in `audience_segment` table
+- `GET /api/v1/analytics/segments` endpoint
+- `POST /api/v1/analytics/segments/regenerate` to re-run clustering

@@ -2,15 +2,20 @@
 Analytics endpoints.
 
 GET /overview — basic KPI data from the database.
+POST /analyze — trigger NLP analysis for all unanalyzed posts.
+GET /sentiment — sentiment breakdown across all analyzed posts.
 """
+import sqlalchemy
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.post import Post
+from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
 from app.models.social_account import SocialAccount, Platform
+from app.tasks.nlp_analysis import analyze_posts
 
 router = APIRouter()
 
@@ -50,5 +55,49 @@ def analytics_overview(db: Session = Depends(get_db)):
             "total_engagement": total_engagement,
             "avg_engagement_per_post": avg_engagement,
             "connected_accounts": connected_accounts,
+        },
+    }
+
+
+@router.post("/analyze")
+def trigger_analysis():
+    """Queue NLP analysis for all unanalyzed posts."""
+    task = analyze_posts.delay()
+    return {
+        "success": True,
+        "data": {"task_id": task.id, "status": "queued"},
+    }
+
+
+@router.get("/sentiment")
+def sentiment_overview(db: Session = Depends(get_db)):
+    """Return sentiment distribution across all analyzed posts."""
+    total_analyzed = db.query(func.count(AnalysisResult.id)).scalar() or 0
+
+    breakdown = (
+        db.query(
+            AnalysisResult.sentiment,
+            func.count(AnalysisResult.id).label("count"),
+            func.round(func.avg(AnalysisResult.sentiment_score).cast(sqlalchemy.Numeric), 4).label("avg_score"),
+        )
+        .group_by(AnalysisResult.sentiment)
+        .all()
+    )
+
+    sentiment_data = {
+        row.sentiment: {"count": row.count, "avg_score": float(row.avg_score or 0)}
+        for row in breakdown
+    }
+
+    # Count posts still awaiting analysis
+    total_posts = db.query(func.count(Post.id)).scalar() or 0
+    pending = total_posts - total_analyzed
+
+    return {
+        "success": True,
+        "data": {
+            "total_analyzed": total_analyzed,
+            "pending_analysis": pending,
+            "sentiment": sentiment_data,
         },
     }
