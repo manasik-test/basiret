@@ -1,0 +1,54 @@
+services:
+  api:
+    build: ./backend
+    container_name: basiret_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - basiret_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: basiret_db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - basiret_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: basiret_redis
+    ports:
+      - "6382:6379"
+    networks:
+      - basiret_network
+
+volumes:
+  postgres_data:
+
+
+networks:
+  basiret_network:
+    driver: bridge
