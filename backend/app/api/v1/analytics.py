@@ -1,12 +1,14 @@
 """
 Analytics endpoints.
 
-GET /overview — basic KPI data from the database.
-POST /analyze — trigger NLP analysis for all unanalyzed posts.
-GET /sentiment — sentiment breakdown across all analyzed posts.
+GET  /overview             — basic KPI data from the database.
+POST /analyze              — trigger NLP analysis for all unanalyzed posts.
+GET  /sentiment            — sentiment breakdown across all analyzed posts.
+GET  /segments             — audience segments for a social account.
+POST /segments/regenerate  — trigger K-means clustering, returns task_id.
 """
 import sqlalchemy
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -15,7 +17,9 @@ from app.models.post import Post
 from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
 from app.models.social_account import SocialAccount, Platform
+from app.models.audience_segment import AudienceSegment
 from app.tasks.nlp_analysis import analyze_posts
+from app.tasks.segmentation import segment_audience
 
 router = APIRouter()
 
@@ -100,4 +104,50 @@ def sentiment_overview(db: Session = Depends(get_db)):
             "pending_analysis": pending,
             "sentiment": sentiment_data,
         },
+    }
+
+
+@router.get("/segments")
+def get_segments(social_account_id: str, db: Session = Depends(get_db)):
+    """Return audience segments for a social account."""
+    segments = (
+        db.query(AudienceSegment)
+        .filter(AudienceSegment.social_account_id == social_account_id)
+        .order_by(AudienceSegment.cluster_id)
+        .all()
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "social_account_id": social_account_id,
+            "segment_count": len(segments),
+            "generated_at": str(segments[0].created_at) if segments else None,
+            "segments": [
+                {
+                    "id": str(seg.id),
+                    "cluster_id": seg.cluster_id,
+                    "label": seg.segment_label,
+                    "size": seg.size_estimate,
+                    "characteristics": seg.characteristics,
+                }
+                for seg in segments
+            ],
+        },
+    }
+
+
+@router.post("/segments/regenerate")
+def regenerate_segments(social_account_id: str, db: Session = Depends(get_db)):
+    """Queue K-means segmentation for a social account."""
+    account = db.query(SocialAccount).filter(
+        SocialAccount.id == social_account_id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+
+    task = segment_audience.delay(social_account_id)
+    return {
+        "success": True,
+        "data": {"task_id": task.id, "status": "queued"},
     }

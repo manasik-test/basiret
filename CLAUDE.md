@@ -151,7 +151,7 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Test org uses UUID `00000000-0000-0000-0000-000000000000` as placeholder until auth is built
 - Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
 
-**Sprint 3 (current commit):**
+**Sprint 3 (commit 22e6f29):**
 - NLP pipeline Celery task (`app/tasks/nlp_analysis.py`): sentiment analysis + language detection + OCR
 - Sentiment model: `cardiffnlp/twitter-xlm-roberta-base-sentiment` (XLM-RoBERTa, multilingual EN+AR)
 - Language detection via `langdetect` — updates `post.language` column from `unknown` to detected lang
@@ -175,6 +175,35 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
 - Batch commits every 10 posts to avoid long-running DB transactions
 
+**Sprint 4 (current commit):**
+- K-means audience segmentation Celery task (`app/tasks/segmentation.py`)
+- 11-dimension feature vector per post: engagement (likes, comments, engagement_rate), sentiment (score, is_positive, is_negative), content type (is_image, is_video, is_carousel), temporal (hour_of_day, day_of_week)
+- StandardScaler on numeric features; binary features left unscaled
+- Automatic k selection via silhouette score (range 2–5); forced k=2 for small datasets (10–19 posts)
+- Human-readable cluster labels auto-generated from centroid values (e.g., "Low-Engagement Video Afternoon")
+- Rich `characteristics` JSONB per segment: centroid, post_ids, silhouette_score, avg_engagement, dominant_content_type, dominant_sentiment, typical_posting_time
+- `POST /api/v1/analytics/segments/regenerate` endpoint: queues Celery task, returns task_id
+- `GET /api/v1/analytics/segments` endpoint: returns segments for a social account
+- `scikit-learn==1.5.1` added to requirements
+- 13 new tests (unit + integration) in `tests/test_segmentation.py`
+- Verified end-to-end: 42 posts → 3 segments (silhouette=0.241), task completes in <1s
+- Full test suite: 16/16 passed
+
+### Key decisions
+- Token encryption uses Fernet with PBKDF2 key derivation from SECRET_KEY (not a separate encryption key)
+- Celery tasks use explicit `include` in config (autodiscover wasn't reliable with volume mounts)
+- Test org uses UUID `00000000-0000-0000-0000-000000000000` as placeholder until auth is built
+- Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
+- Sentiment + OCR models are lazy-loaded (once per worker process) to avoid startup cost
+- `torch` pinned to CPU-only build (`+cpu` wheel) to keep Docker image size manageable
+- OCR runs only on image/carousel posts; video/reel audio transcription deferred to Whisper integration
+- Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
+- Batch commits every 10 posts to avoid long-running DB transactions
+- Segmentation clusters **posts** (not followers) since Instagram Basic Display API doesn't expose follower-level engagement
+- Posts without engagement_metric rows are excluded from clustering (logged as warning)
+- Existing segments are fully replaced on regenerate (delete-then-insert)
+- scikit-learn KMeans uses `random_state=42` for reproducible results
+
 ### Known issues / TODOs
 - `organization_id` is hardcoded in OAuth callback and sync — must wire to JWT in Sprint 6
 - `alembic stamp head` needs to be run once to mark existing DB as current before future migrations
@@ -185,9 +214,11 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Audio transcription with Whisper not yet implemented (Sprint 3 stretch goal → deferred)
 - Topic extraction (`analysis_result.topics`) stores empty array — needs keyword/topic model in future sprint
 - First analysis run per container is slow (~25 min) due to HuggingFace model download; subsequent runs use cached volume
+- `engagement_rate` is 0 for all posts — segments differentiate mainly on likes, comments, content type, and posting time
+- Feature flag enforcement for segments endpoint deferred until JWT auth lands in Sprint 6
 
-### What's next — Sprint 4
-- Behavior engine + K-means audience segmentation
-- Cluster users into audience segments stored in `audience_segment` table
-- `GET /api/v1/analytics/segments` endpoint
-- `POST /api/v1/analytics/segments/regenerate` to re-run clustering
+### What's next — Sprint 5
+- React dashboard (frontend)
+- KPI cards, engagement chart, sentiment donut, top posts table
+- Audience segmentation view with persona cards
+- RTL-ready layout from day one

@@ -20,3 +20,4 @@ easyocr==1.7.1
 langdetect==1.0.9
 sentencepiece==0.2.0
 protobuf==5.27.2
+scikit-learn==1.5.1
