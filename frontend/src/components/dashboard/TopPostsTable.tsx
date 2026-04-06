@@ -65,7 +65,7 @@ export default function TopPostsTable() {
             <thead>
               <tr className="border-b border-border text-muted-foreground">
                 <th className="text-start pb-3 font-medium">{t('dashboard.type')}</th>
-                <th className="text-start pb-3 font-medium">Caption</th>
+                <th className="text-start pb-3 font-medium">{t('dashboard.caption')}</th>
                 <th className="text-start pb-3 font-medium">
                   <span className="flex items-center gap-1">
                     <Heart className="w-3.5 h-3.5" /> {t('dashboard.likes')}

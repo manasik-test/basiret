@@ -25,6 +25,7 @@
     "engagement": "Engagement",
     "date": "Date",
     "type": "Type",
+    "caption": "Caption",
     "noData": "No data available",
     "loading": "Loading..."
   },
