@@ -242,8 +242,56 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Vite dev server proxies `/api` to `http://api:8000` inside Docker network
 - `useEffect` on `i18n.language` syncs `document.documentElement.dir` on mount (not just on toggle click)
 
+**Sprint 6 (current commit):**
+- JWT auth system: `POST /auth/register` (creates user + org + starter subscription), `/auth/login` (access token + httpOnly refresh cookie), `/auth/refresh` (token rotation with Redis blacklist), `/auth/logout`, `GET /auth/me`
+- Security module (`app/core/security.py`): bcrypt password hashing, JWT creation/validation, Redis-backed refresh token blacklist with TTL
+- Auth dependencies (`app/core/deps.py`): `get_current_user`, `require_admin`, `require_system_admin`, `RequireFeature` (checks feature_flag table by plan tier)
+- All `/analytics/*` and `/instagram/*` endpoints now require JWT bearer token; return 401 if missing/invalid
+- Hardcoded `organization_id` (`00000000-...`) replaced with real `user.organization_id` from JWT in all endpoints
+- All analytics queries scoped to the authenticated user's organization (multi-tenant)
+- Feature flag middleware: sentiment and segments endpoints gated by `RequireFeature`; returns 403 with `{locked: true}` for starter plan
+- Stripe billing endpoints: `GET /billing/plans`, `GET /billing/subscription`, `POST /billing/create-checkout` (Stripe Checkout session), `POST /billing/portal`, `POST /webhooks/stripe` (signature-verified, updates subscription on payment)
+- Admin endpoints (system_admin only): `GET /admin/users`, `PATCH /admin/users/:id`, `GET /admin/orgs`, `GET /admin/flags`, `PATCH /admin/flags/:id`
+- CORS middleware added to FastAPI (allows frontend origin + credentials)
+- `stripe==9.12.0` added to requirements; `bcrypt==4.0.1` pinned (passlib compatibility fix)
+- Frontend: `AuthContext` with in-memory token storage, session restore via refresh cookie on mount
+- Frontend: Axios interceptor auto-refreshes on 401, queues concurrent requests, rejects all on failure (no hanging promises)
+- Frontend: `ProtectedRoute` wrapper redirects to `/login` if no session; optional `requiredRole` check
+- Frontend: Login page with glassmorphism style, password eye toggle, error handling
+- Frontend: Multi-step onboarding wizard at `/register` — Step 1 (registration form), Step 2 (Connect Instagram with permissions info), Step 3 ("You're all set!" completion)
+- Frontend: Step indicator component (numbered circles with labels, connector lines, checkmarks for completed steps)
+- Frontend: Sidebar updated to React Router `Link`, admin nav for system_admin, logout button, user name display
+- Frontend: `LockedFeature` component — blurred overlay with lock icon, click opens pricing modal, "Upgrade Now" redirects to Stripe Checkout
+- Frontend: Admin panel at `/admin` — user management table (role dropdown, activate/deactivate) + feature flag toggle switches
+- Frontend: API error handling fixed — Pydantic validation arrays extracted to readable messages, client-side password validation
+- Frontend: i18n translations added for auth, admin, pricing, onboarding (EN + AR)
+- `.env.example` updated with `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_INSIGHTS_PRICE_ID`, `FRONTEND_URL`
+- TypeScript 6 clean (zero errors), Vite production build succeeds
+- Full test suite: 16/16 passed (integration tests updated to verify auth enforcement)
+
+### Key decisions
+- Token encryption uses Fernet with PBKDF2 key derivation from SECRET_KEY (not a separate encryption key)
+- Celery tasks use explicit `include` in config (autodiscover wasn't reliable with volume mounts)
+- Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
+- Sentiment + OCR models are lazy-loaded (once per worker process) to avoid startup cost
+- `torch` pinned to CPU-only build (`+cpu` wheel) to keep Docker image size manageable
+- OCR runs only on image/carousel posts; video/reel audio transcription deferred to Whisper integration
+- Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
+- Batch commits every 10 posts to avoid long-running DB transactions
+- Segmentation clusters **posts** (not followers) since Instagram Basic Display API doesn't expose follower-level engagement
+- Frontend uses relative imports (no path aliases) due to TypeScript 6 deprecating `baseUrl`/`paths`
+- Recharts charts wrapped in `dir="ltr"` divs; surrounding text labels use `dir="auto"` for proper RTL
+- Engagement chart and top posts table use mock data derived from real API totals (no time-series endpoint yet)
+- Vite dev server proxies `/api` to `http://api:8000` inside Docker network
+- Access token stored in memory (not localStorage) to prevent XSS token theft
+- Refresh token sent as httpOnly cookie scoped to `/api/v1/auth` path
+- Refresh token rotation: old token blacklisted in Redis on each refresh (prevents replay)
+- `bcrypt==4.0.1` pinned to avoid passlib compatibility bug with bcrypt>=4.1
+- Registration creates user as `admin` role of a new organization (not `viewer`)
+- Onboarding wizard is a single React component with local state transitions (no router navigation between steps) to avoid state-timing bugs
+- Stripe webhook endpoint has no JWT auth — verified by Stripe signature instead
+
 ### Known issues / TODOs
-- `organization_id` is hardcoded in OAuth callback and sync — must wire to JWT in Sprint 6
 - `alembic stamp head` needs to be run once to mark existing DB as current before future migrations
 - Pydantic V2 deprecation warning: `class Config` → `ConfigDict` in settings (cosmetic)
 - SQLAlchemy `declarative_base()` deprecation warning (should use `sqlalchemy.orm.declarative_base`)
@@ -253,14 +301,15 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Topic extraction (`analysis_result.topics`) stores empty array — needs keyword/topic model in future sprint
 - First analysis run per container is slow (~25 min) due to HuggingFace model download; subsequent runs use cached volume
 - `engagement_rate` is 0 for all posts — segments differentiate mainly on likes, comments, content type, and posting time
-- Feature flag enforcement for segments endpoint deferred until JWT auth lands in Sprint 6
 - Engagement chart uses synthetic trend data — needs dedicated time-series API endpoint
 - Top posts table uses mock data — needs `GET /api/v1/analytics/posts` endpoint
 - Vite production build chunk >500KB due to Recharts — consider code-splitting in future sprint
 - Audience segmentation view with persona cards not yet built (stretch goal for Sprint 5)
+- Invite flow (`POST /auth/invite`) not yet implemented
+- Forgot password / reset password flow not yet implemented
+- Instagram OAuth callback should redirect back to frontend onboarding step 2 after success
 
-### What's next — Sprint 6
-- Auth system: JWT login/register, role-based access, invite flow
-- Stripe integration: checkout, subscription management, webhook handler
-- Feature flag enforcement on Pro-only endpoints
-- Admin dashboard (system_admin role)
+### What's next — Sprint 7
+- Testing + SUS evaluation
+- End-to-end test coverage for auth flow, billing, and admin panel
+- Performance testing and optimization

@@ -4,6 +4,8 @@ Instagram endpoints — OAuth flow + data sync.
 GET  /auth-url   → returns the Meta OAuth authorization URL
 GET  /callback   → exchanges code for long-lived token, stores in social_account
 POST /sync       → triggers Celery task to fetch posts from Instagram
+GET  /accounts   → list connected Instagram accounts
+DELETE /accounts/:id → disconnect an Instagram account
 """
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -14,7 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.deps import get_current_user
 from app.core.encryption import encrypt_token
+from app.models.user import User
 from app.models.social_account import SocialAccount, Platform
 from app.tasks.instagram_sync import sync_instagram_posts
 
@@ -28,7 +32,7 @@ ME_URL = "https://graph.instagram.com/me"
 
 
 @router.get("/auth-url")
-def get_auth_url():
+def get_auth_url(user: User = Depends(get_current_user)):
     """Return the Instagram OAuth authorization URL."""
     params = {
         "client_id": settings.META_APP_ID,
@@ -40,7 +44,11 @@ def get_auth_url():
 
 
 @router.get("/callback")
-async def oauth_callback(code: str, db: Session = Depends(get_db)):
+async def oauth_callback(
+    code: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Exchange authorization code for a long-lived token and store it."""
 
     # 1. Exchange code → short-lived token
@@ -86,12 +94,11 @@ async def oauth_callback(code: str, db: Session = Depends(get_db)):
     if me_resp.status_code == 200:
         username = me_resp.json().get("username")
 
-    # 4. Upsert social_account
-    # TODO: organization_id should come from the authenticated user's JWT.
-    #       Hardcoded lookup for now — will be replaced in Sprint 6 (Auth).
+    # 4. Upsert social_account — scoped to the authenticated user's organization
     account = db.query(SocialAccount).filter_by(
         platform=Platform.instagram,
         platform_account_id=ig_user_id,
+        organization_id=user.organization_id,
     ).first()
 
     token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
@@ -109,8 +116,7 @@ async def oauth_callback(code: str, db: Session = Depends(get_db)):
             username=username,
             access_token_encrypted=encrypted,
             token_expires_at=token_expires_at,
-            # TODO: set organization_id from JWT once auth is implemented
-            organization_id="00000000-0000-0000-0000-000000000000",
+            organization_id=user.organization_id,
         )
         db.add(account)
 
@@ -129,36 +135,30 @@ async def oauth_callback(code: str, db: Session = Depends(get_db)):
 
 
 @router.post("/sync")
-def trigger_sync(db: Session = Depends(get_db)):
-    """Trigger Instagram post sync for all active accounts.
+def trigger_sync(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger Instagram post sync for the user's organization accounts.
 
     For dev/testing: if no accounts exist yet, creates one using
-    INSTAGRAM_TEST_TOKEN from .env so the pipeline can be tested
-    before real OAuth is wired end-to-end.
+    INSTAGRAM_TEST_TOKEN from .env so the pipeline can be tested.
     """
-    accounts = db.query(SocialAccount).filter_by(
-        platform=Platform.instagram,
-        is_active=True,
+    accounts = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+        SocialAccount.platform == Platform.instagram,
+        SocialAccount.is_active == True,
     ).all()
 
-    # Dev convenience: bootstrap a test org + account if none exist
+    # Dev convenience: bootstrap a test account if none exist
     if not accounts and settings.INSTAGRAM_TEST_TOKEN:
-        from app.models.organization import Organization
-
-        test_org_id = "00000000-0000-0000-0000-000000000000"
-        org = db.query(Organization).filter_by(id=test_org_id).first()
-        if not org:
-            org = Organization(id=test_org_id, name="Test Organization", slug="test-org")
-            db.add(org)
-            db.flush()
-
         test_account = SocialAccount(
             platform=Platform.instagram,
             platform_account_id="test_user",
             username="test_user",
             access_token_encrypted=encrypt_token(settings.INSTAGRAM_TEST_TOKEN),
             token_expires_at=datetime.now(timezone.utc) + timedelta(days=60),
-            organization_id=test_org_id,
+            organization_id=user.organization_id,
         )
         db.add(test_account)
         db.commit()
@@ -174,3 +174,22 @@ def trigger_sync(db: Session = Depends(get_db)):
         task_ids.append({"account_id": str(account.id), "task_id": task.id})
 
     return {"success": True, "data": {"tasks": task_ids}}
+
+
+@router.delete("/accounts/{account_id}")
+def disconnect_account(
+    account_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Disconnect (deactivate) an Instagram account."""
+    account = db.query(SocialAccount).filter(
+        SocialAccount.id == account_id,
+        SocialAccount.organization_id == user.organization_id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account.is_active = False
+    db.commit()
+    return {"success": True, "data": None}

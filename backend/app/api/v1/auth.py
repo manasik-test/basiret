@@ -1,0 +1,232 @@
+"""
+Auth endpoints.
+
+POST /register  — create user + organization, return tokens
+POST /login     — authenticate, return access token + set refresh cookie
+POST /refresh   — rotate access token using refresh cookie
+POST /logout    — blacklist refresh token in Redis
+GET  /me        — return current user profile
+"""
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
+from pydantic import BaseModel, EmailStr, field_validator
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    blacklist_refresh_token,
+    is_token_blacklisted,
+)
+from app.core.deps import get_current_user
+from app.models.organization import Organization
+from app.models.user import User, UserRole
+from app.models.subscription import Subscription
+
+router = APIRouter()
+
+REFRESH_COOKIE = "refresh_token"
+REFRESH_MAX_AGE = settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400
+
+
+# ── Schemas ─────────────────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
+    organization_name: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+# ── Helpers ─────────────────────────────────────────────────
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug or "org"
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=REFRESH_COOKIE,
+        value=token,
+        httponly=True,
+        secure=settings.ENVIRONMENT != "development",
+        samesite="lax",
+        max_age=REFRESH_MAX_AGE,
+        path="/api/v1/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=REFRESH_COOKIE, path="/api/v1/auth")
+
+
+# ── Endpoints ───────────────────────────────────────────────
+
+@router.post("/register")
+def register(body: RegisterRequest, response: Response, db: Session = Depends(get_db)):
+    """Create a new user and organization. Returns access token + sets refresh cookie."""
+
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Create organization
+    slug = _slugify(body.organization_name)
+    existing_slug = db.query(Organization).filter(Organization.slug == slug).first()
+    if existing_slug:
+        slug = f"{slug}-{str(id(body))[-6:]}"
+
+    org = Organization(name=body.organization_name, slug=slug)
+    db.add(org)
+    db.flush()
+
+    # Create user as admin of the new org
+    user = User(
+        organization_id=org.id,
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        full_name=body.full_name,
+        role=UserRole.admin,
+    )
+    db.add(user)
+    db.flush()
+
+    # Create starter subscription
+    sub = Subscription(organization_id=org.id)
+    db.add(sub)
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(str(user.id), str(org.id), user.role.value)
+    refresh_token, _ = create_refresh_token(str(user.id))
+    _set_refresh_cookie(response, refresh_token)
+
+    return {
+        "success": True,
+        "data": {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role.value,
+                "organization_id": str(org.id),
+                "organization_name": org.name,
+            },
+        },
+    }
+
+
+@router.post("/login")
+def login(body: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    """Authenticate user. Returns access token + sets httpOnly refresh cookie."""
+
+    user = db.query(User).filter(User.email == body.email).first()
+    if not user or not user.hashed_password or not verify_password(body.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    access_token = create_access_token(str(user.id), str(user.organization_id), user.role.value)
+    refresh_token, _ = create_refresh_token(str(user.id))
+    _set_refresh_cookie(response, refresh_token)
+
+    return {
+        "success": True,
+        "data": {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": user.role.value,
+                "organization_id": str(user.organization_id),
+                "organization_name": user.organization.name,
+            },
+        },
+    }
+
+
+@router.post("/refresh")
+def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
+    """Issue a new access token using the refresh cookie."""
+
+    token = request.cookies.get(REFRESH_COOKIE)
+    if not token:
+        raise HTTPException(status_code=401, detail="Refresh token missing")
+
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    jti = payload.get("jti")
+    if not jti or is_token_blacklisted(jti):
+        raise HTTPException(status_code=401, detail="Refresh token revoked")
+
+    user = db.query(User).filter(User.id == payload["sub"]).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    # Rotate: blacklist old, issue new
+    blacklist_refresh_token(jti)
+    access_token = create_access_token(str(user.id), str(user.organization_id), user.role.value)
+    new_refresh, _ = create_refresh_token(str(user.id))
+    _set_refresh_cookie(response, new_refresh)
+
+    return {
+        "success": True,
+        "data": {
+            "access_token": access_token,
+            "token_type": "bearer",
+        },
+    }
+
+
+@router.post("/logout")
+def logout(request: Request, response: Response):
+    """Blacklist the refresh token and clear the cookie."""
+
+    token = request.cookies.get(REFRESH_COOKIE)
+    if token:
+        payload = decode_token(token)
+        if payload and payload.get("jti"):
+            blacklist_refresh_token(payload["jti"])
+
+    _clear_refresh_cookie(response)
+    return {"success": True, "data": None}
+
+
+@router.get("/me")
+def me(user: User = Depends(get_current_user)):
+    """Return current authenticated user profile."""
+    return {
+        "success": True,
+        "data": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.value,
+            "organization_id": str(user.organization_id),
+            "organization_name": user.organization.name,
+        },
+    }

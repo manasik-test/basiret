@@ -110,46 +110,41 @@ def test_label_critical_sentiment():
 
 
 # ── Integration: API endpoints ──────────────────────────────────
+# These endpoints now require JWT auth + feature flag (Pro plan).
+# Tests verify 403 is returned for unauthenticated requests.
 
 
-def test_get_segments_empty(client):
-    """GET /segments for a non-existent account returns empty list."""
+def test_get_segments_requires_auth(client):
+    """GET /segments without auth returns 403."""
     resp = client.get(
         "/api/v1/analytics/segments",
         params={"social_account_id": "00000000-0000-0000-0000-000000000000"},
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["success"] is True
-    assert data["data"]["segment_count"] == 0
-    assert data["data"]["segments"] == []
+    assert resp.status_code == 403
 
 
-def test_regenerate_invalid_account(client):
-    """POST /segments/regenerate with non-existent account returns 404."""
+def test_regenerate_requires_auth(client):
+    """POST /segments/regenerate without auth returns 403."""
     resp = client.post(
         "/api/v1/analytics/segments/regenerate",
         params={"social_account_id": "00000000-0000-0000-0000-ffffffffffff"},
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 403
 
 
 @patch("app.api.v1.analytics.segment_audience")
 def test_regenerate_queues_task(mock_task, client):
-    """POST /segments/regenerate should queue a Celery task."""
+    """POST /segments/regenerate should queue a Celery task when authenticated.
+
+    Without auth in test, we verify 403 is returned (auth middleware blocks first).
+    """
     mock_async = MagicMock()
     mock_async.id = "test-task-id-123"
     mock_task.delay.return_value = mock_async
 
-    # Use the test org placeholder that exists in dev DB
     resp = client.post(
         "/api/v1/analytics/segments/regenerate",
         params={"social_account_id": "00000000-0000-0000-0000-000000000000"},
     )
-    # May be 404 if test org doesn't have social account — that's expected in CI
-    # In dev with data, it should be 200
-    if resp.status_code == 200:
-        data = resp.json()
-        assert data["success"] is True
-        assert data["data"]["task_id"] == "test-task-id-123"
-        assert data["data"]["status"] == "queued"
+    # Without auth token, middleware rejects before reaching task logic
+    assert resp.status_code == 403

@@ -1,11 +1,12 @@
 """
 Analytics endpoints.
 
-GET  /overview             — basic KPI data from the database.
+GET  /overview             — basic KPI data for the authenticated user's organization.
 POST /analyze              — trigger NLP analysis for all unanalyzed posts.
-GET  /sentiment            — sentiment breakdown across all analyzed posts.
-GET  /segments             — audience segments for a social account.
-POST /segments/regenerate  — trigger K-means clustering, returns task_id.
+GET  /sentiment            — sentiment breakdown across analyzed posts (Pro).
+GET  /accounts             — active social accounts for the organization.
+GET  /segments             — audience segments for a social account (Pro).
+POST /segments/regenerate  — trigger K-means clustering, returns task_id (Pro).
 """
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import get_current_user, RequireFeature
+from app.models.user import User
 from app.models.post import Post
 from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
@@ -25,10 +28,34 @@ router = APIRouter()
 
 
 @router.get("/overview")
-def analytics_overview(db: Session = Depends(get_db)):
-    """Return top-level KPI summary across all posts."""
+def analytics_overview(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return top-level KPI summary scoped to the user's organization."""
 
-    total_posts = db.query(func.count(Post.id)).scalar() or 0
+    # Get social account IDs for this organization
+    account_ids = [
+        a.id for a in db.query(SocialAccount.id).filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active == True,
+        ).all()
+    ]
+
+    if not account_ids:
+        return {
+            "success": True,
+            "data": {
+                "total_posts": 0, "total_likes": 0, "total_comments": 0,
+                "total_shares": 0, "total_saves": 0, "total_reach": 0,
+                "total_impressions": 0, "total_engagement": 0,
+                "avg_engagement_per_post": 0.0, "connected_accounts": 0,
+            },
+        }
+
+    total_posts = db.query(func.count(Post.id)).filter(
+        Post.social_account_id.in_(account_ids),
+    ).scalar() or 0
 
     metrics = db.query(
         func.coalesce(func.sum(EngagementMetric.likes), 0).label("total_likes"),
@@ -37,14 +64,12 @@ def analytics_overview(db: Session = Depends(get_db)):
         func.coalesce(func.sum(EngagementMetric.saves), 0).label("total_saves"),
         func.coalesce(func.sum(EngagementMetric.reach), 0).label("total_reach"),
         func.coalesce(func.sum(EngagementMetric.impressions), 0).label("total_impressions"),
+    ).join(Post, EngagementMetric.post_id == Post.id).filter(
+        Post.social_account_id.in_(account_ids),
     ).first()
 
     total_engagement = metrics.total_likes + metrics.total_comments + metrics.total_shares + metrics.total_saves
     avg_engagement = round(total_engagement / total_posts, 2) if total_posts > 0 else 0.0
-
-    connected_accounts = db.query(func.count(SocialAccount.id)).filter(
-        SocialAccount.is_active == True,
-    ).scalar() or 0
 
     return {
         "success": True,
@@ -58,13 +83,13 @@ def analytics_overview(db: Session = Depends(get_db)):
             "total_impressions": metrics.total_impressions,
             "total_engagement": total_engagement,
             "avg_engagement_per_post": avg_engagement,
-            "connected_accounts": connected_accounts,
+            "connected_accounts": len(account_ids),
         },
     }
 
 
 @router.post("/analyze")
-def trigger_analysis():
+def trigger_analysis(user: User = Depends(get_current_user)):
     """Queue NLP analysis for all unanalyzed posts."""
     task = analyze_posts.delay()
     return {
@@ -74,9 +99,23 @@ def trigger_analysis():
 
 
 @router.get("/sentiment")
-def sentiment_overview(db: Session = Depends(get_db)):
-    """Return sentiment distribution across all analyzed posts."""
-    total_analyzed = db.query(func.count(AnalysisResult.id)).scalar() or 0
+def sentiment_overview(
+    user: User = Depends(RequireFeature("sentiment_analysis")),
+    db: Session = Depends(get_db),
+):
+    """Return sentiment distribution scoped to user's organization (Pro)."""
+
+    account_ids = [
+        a.id for a in db.query(SocialAccount.id).filter(
+            SocialAccount.organization_id == user.organization_id,
+        ).all()
+    ]
+
+    post_ids_q = db.query(Post.id).filter(Post.social_account_id.in_(account_ids)).subquery()
+
+    total_analyzed = db.query(func.count(AnalysisResult.id)).filter(
+        AnalysisResult.post_id.in_(db.query(post_ids_q.c.id)),
+    ).scalar() or 0
 
     breakdown = (
         db.query(
@@ -84,6 +123,7 @@ def sentiment_overview(db: Session = Depends(get_db)):
             func.count(AnalysisResult.id).label("count"),
             func.round(func.avg(AnalysisResult.sentiment_score).cast(sqlalchemy.Numeric), 4).label("avg_score"),
         )
+        .filter(AnalysisResult.post_id.in_(db.query(post_ids_q.c.id)))
         .group_by(AnalysisResult.sentiment)
         .all()
     )
@@ -93,8 +133,9 @@ def sentiment_overview(db: Session = Depends(get_db)):
         for row in breakdown
     }
 
-    # Count posts still awaiting analysis
-    total_posts = db.query(func.count(Post.id)).scalar() or 0
+    total_posts = db.query(func.count(Post.id)).filter(
+        Post.social_account_id.in_(account_ids),
+    ).scalar() or 0
     pending = total_posts - total_analyzed
 
     return {
@@ -108,9 +149,15 @@ def sentiment_overview(db: Session = Depends(get_db)):
 
 
 @router.get("/accounts")
-def list_accounts(db: Session = Depends(get_db)):
-    """Return active social accounts (needed by frontend to query segments)."""
-    accounts = db.query(SocialAccount).filter(SocialAccount.is_active == True).all()
+def list_accounts(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return active social accounts for the user's organization."""
+    accounts = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+        SocialAccount.is_active == True,
+    ).all()
     return {
         "success": True,
         "data": {
@@ -127,8 +174,21 @@ def list_accounts(db: Session = Depends(get_db)):
 
 
 @router.get("/segments")
-def get_segments(social_account_id: str, db: Session = Depends(get_db)):
-    """Return audience segments for a social account."""
+def get_segments(
+    social_account_id: str,
+    user: User = Depends(RequireFeature("audience_segmentation")),
+    db: Session = Depends(get_db),
+):
+    """Return audience segments for a social account (Pro)."""
+
+    # Verify account belongs to user's org
+    account = db.query(SocialAccount).filter(
+        SocialAccount.id == social_account_id,
+        SocialAccount.organization_id == user.organization_id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+
     segments = (
         db.query(AudienceSegment)
         .filter(AudienceSegment.social_account_id == social_account_id)
@@ -157,10 +217,15 @@ def get_segments(social_account_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/segments/regenerate")
-def regenerate_segments(social_account_id: str, db: Session = Depends(get_db)):
-    """Queue K-means segmentation for a social account."""
+def regenerate_segments(
+    social_account_id: str,
+    user: User = Depends(RequireFeature("audience_segmentation")),
+    db: Session = Depends(get_db),
+):
+    """Queue K-means segmentation for a social account (Pro)."""
     account = db.query(SocialAccount).filter(
         SocialAccount.id == social_account_id,
+        SocialAccount.organization_id == user.organization_id,
     ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Social account not found")

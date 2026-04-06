@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
+import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
+import { useAuth } from '../../contexts/AuthContext'
 import {
   LayoutDashboard,
   BarChart3,
@@ -8,6 +10,8 @@ import {
   Lightbulb,
   Settings,
   Sparkles,
+  Shield,
+  LogOut,
 } from 'lucide-react'
 
 const navItems = [
@@ -21,7 +25,9 @@ const navItems = [
 
 export default function Sidebar() {
   const { t } = useTranslation()
-  const currentPath = '/'
+  const { user, logout } = useAuth()
+  const location = useLocation()
+  const currentPath = location.pathname
 
   return (
     <>
@@ -40,9 +46,9 @@ export default function Sidebar() {
           {navItems.map(({ key, icon: Icon, href }) => {
             const active = currentPath === href
             return (
-              <a
+              <Link
                 key={key}
-                href={href}
+                to={href}
                 className={cn(
                   'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active
@@ -52,20 +58,52 @@ export default function Sidebar() {
               >
                 <Icon className="w-5 h-5 shrink-0" />
                 <span>{t(`nav.${key}`)}</span>
-              </a>
+              </Link>
             )
           })}
+
+          {/* Admin link — system_admin only */}
+          {user?.role === 'system_admin' && (
+            <Link
+              to="/admin"
+              className={cn(
+                'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                currentPath === '/admin'
+                  ? 'bg-primary text-primary-foreground shadow-md'
+                  : 'text-foreground/70 hover:bg-muted hover:text-foreground',
+              )}
+            >
+              <Shield className="w-5 h-5 shrink-0" />
+              <span>{t('nav.admin')}</span>
+            </Link>
+          )}
         </nav>
+
+        {/* User info + Logout */}
+        <div className="px-4 pb-3 space-y-2">
+          {user && (
+            <div className="px-3 py-2 text-xs text-muted-foreground truncate">
+              {user.full_name}
+            </div>
+          )}
+          <button
+            onClick={logout}
+            className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-sm font-medium text-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            {t('nav.logout')}
+          </button>
+        </div>
 
         {/* Upgrade CTA */}
         <div className="px-4 pb-6">
-          <a
-            href="/upgrade"
+          <Link
+            to="/upgrade"
             className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-cta text-cta-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
           >
             <Sparkles className="w-4 h-4" />
             {t('nav.upgrade')}
-          </a>
+          </Link>
         </div>
       </aside>
 
@@ -74,9 +112,9 @@ export default function Sidebar() {
         {navItems.slice(0, 5).map(({ key, icon: Icon, href }) => {
           const active = currentPath === href
           return (
-            <a
+            <Link
               key={key}
-              href={href}
+              to={href}
               className={cn(
                 'flex flex-col items-center gap-0.5 px-2 py-1 text-xs font-medium transition-colors',
                 active ? 'text-primary' : 'text-foreground/50',
@@ -84,7 +122,7 @@ export default function Sidebar() {
             >
               <Icon className="w-5 h-5" />
               <span>{t(`nav.${key}`)}</span>
-            </a>
+            </Link>
           )
         })}
       </nav>
