@@ -1,0 +1,15 @@
+import type { ReactNode } from 'react'
+import Sidebar from './Sidebar'
+import TopBar from './TopBar'
+
+export default function AppLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-screen">
+      <Sidebar />
+      <main className="md:ms-64 pb-20 md:pb-0">
+        <TopBar />
+        <div className="px-6 pb-6">{children}</div>
+      </main>
+    </div>
+  )
+}

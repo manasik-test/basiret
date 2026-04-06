@@ -175,7 +175,7 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
 - Batch commits every 10 posts to avoid long-running DB transactions
 
-**Sprint 4 (current commit):**
+**Sprint 4 (commit adc9cdd):**
 - K-means audience segmentation Celery task (`app/tasks/segmentation.py`)
 - 11-dimension feature vector per post: engagement (likes, comments, engagement_rate), sentiment (score, is_positive, is_negative), content type (is_image, is_video, is_carousel), temporal (hour_of_day, day_of_week)
 - StandardScaler on numeric features; binary features left unscaled
@@ -204,6 +204,44 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Existing segments are fully replaced on regenerate (delete-then-insert)
 - scikit-learn KMeans uses `random_state=42` for reproducible results
 
+**Sprint 5 (current commit):**
+- React + Vite + TypeScript frontend scaffolded in `frontend/` with Tailwind CSS v4
+- Frontend Docker container added to docker-compose on port 3000 with API proxy to backend
+- i18next configured for EN/AR with browser language detection; `dir="rtl"` synced on mount via `useEffect`
+- Glassmorphism UI: semi-transparent cards with backdrop-blur on `#F5F3FF` background
+- Brand colors as Tailwind theme tokens: primary `#664FA1`, accent `#A5DDEC`, CTA `#BF499B`, text `#484848`
+- Fixed left sidebar with 7 nav items (active state in primary), collapses to bottom tab bar on mobile
+- Top bar with date range selector and EN/AR language toggle
+- KPI cards row: Total Reach, Avg Engagement Rate, Sentiment Score, Active Segments
+- Engagement trend area chart (Recharts) with likes + comments, gradient fills
+- Sentiment donut chart showing positive/neutral/negative distribution
+- Top posts table with content type icons, likes, comments, dates
+- All dashboard components connected to real API via React Query hooks
+- `GET /api/v1/analytics/accounts` endpoint added to backend (returns active social accounts for frontend)
+- Sentiment API response transformed in frontend: nested `sentiment.positive.count` → flat `{ positive, neutral, negative, avg_score }`
+- Charts pinned to `dir="ltr"` so axes always read left-to-right in RTL mode; titles use `dir="auto"`
+- Chart grid row uses `dir="ltr"` so engagement chart stays left and donut stays right regardless of page direction
+- TypeScript 6 clean (zero errors), Vite production build succeeds
+- Full test suite: 16/16 passed
+
+### Key decisions
+- Token encryption uses Fernet with PBKDF2 key derivation from SECRET_KEY (not a separate encryption key)
+- Celery tasks use explicit `include` in config (autodiscover wasn't reliable with volume mounts)
+- Test org uses UUID `00000000-0000-0000-0000-000000000000` as placeholder until auth is built
+- Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
+- Sentiment + OCR models are lazy-loaded (once per worker process) to avoid startup cost
+- `torch` pinned to CPU-only build (`+cpu` wheel) to keep Docker image size manageable
+- OCR runs only on image/carousel posts; video/reel audio transcription deferred to Whisper integration
+- Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
+- Batch commits every 10 posts to avoid long-running DB transactions
+- Segmentation clusters **posts** (not followers) since Instagram Basic Display API doesn't expose follower-level engagement
+- Frontend uses relative imports (no path aliases) due to TypeScript 6 deprecating `baseUrl`/`paths`
+- Recharts charts wrapped in `dir="ltr"` divs; surrounding text labels use `dir="auto"` for proper RTL
+- Engagement chart and top posts table use mock data derived from real API totals (no time-series endpoint yet)
+- `.dockerignore` excludes `node_modules` and `dist` from frontend Docker build context
+- Vite dev server proxies `/api` to `http://api:8000` inside Docker network
+- `useEffect` on `i18n.language` syncs `document.documentElement.dir` on mount (not just on toggle click)
+
 ### Known issues / TODOs
 - `organization_id` is hardcoded in OAuth callback and sync — must wire to JWT in Sprint 6
 - `alembic stamp head` needs to be run once to mark existing DB as current before future migrations
@@ -216,9 +254,13 @@ PATCH /admin/users/:id, /admin/flags/:id
 - First analysis run per container is slow (~25 min) due to HuggingFace model download; subsequent runs use cached volume
 - `engagement_rate` is 0 for all posts — segments differentiate mainly on likes, comments, content type, and posting time
 - Feature flag enforcement for segments endpoint deferred until JWT auth lands in Sprint 6
+- Engagement chart uses synthetic trend data — needs dedicated time-series API endpoint
+- Top posts table uses mock data — needs `GET /api/v1/analytics/posts` endpoint
+- Vite production build chunk >500KB due to Recharts — consider code-splitting in future sprint
+- Audience segmentation view with persona cards not yet built (stretch goal for Sprint 5)
 
-### What's next — Sprint 5
-- React dashboard (frontend)
-- KPI cards, engagement chart, sentiment donut, top posts table
-- Audience segmentation view with persona cards
-- RTL-ready layout from day one
+### What's next — Sprint 6
+- Auth system: JWT login/register, role-based access, invite flow
+- Stripe integration: checkout, subscription management, webhook handler
+- Feature flag enforcement on Pro-only endpoints
+- Admin dashboard (system_admin role)

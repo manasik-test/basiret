@@ -107,6 +107,25 @@ def sentiment_overview(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/accounts")
+def list_accounts(db: Session = Depends(get_db)):
+    """Return active social accounts (needed by frontend to query segments)."""
+    accounts = db.query(SocialAccount).filter(SocialAccount.is_active == True).all()
+    return {
+        "success": True,
+        "data": {
+            "accounts": [
+                {
+                    "id": str(a.id),
+                    "platform": a.platform.value if a.platform else "instagram",
+                    "account_name": a.username,
+                }
+                for a in accounts
+            ],
+        },
+    }
+
+
 @router.get("/segments")
 def get_segments(social_account_id: str, db: Session = Depends(get_db)):
     """Return audience segments for a social account."""

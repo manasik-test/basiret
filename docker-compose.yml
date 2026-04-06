@@ -1,4 +1,17 @@
 services:
+  frontend:
+    build: ./frontend
+    container_name: basiret_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    networks:
+      - basiret_network
+
   api:
     build: ./backend
     container_name: basiret_api
