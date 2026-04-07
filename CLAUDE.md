@@ -308,10 +308,64 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Invite flow (`POST /auth/invite`) not yet implemented
 - Forgot password / reset password flow not yet implemented
 - Instagram OAuth callback should redirect back to frontend onboarding step 2 after success
-- Stripe webhook uses `whsec_test_placeholder` — replace with real webhook secret after configuring endpoint in Stripe Dashboard (Settings → Webhooks → Add endpoint → URL: `https://yourdomain/api/v1/billing/webhooks/stripe`)
-- Stripe webhook endpoint needs to be publicly reachable for production (use `stripe listen --forward-to localhost:8000/api/v1/billing/webhooks/stripe` for local dev testing)
+- Stripe webhook fully functional — see `docs/STRIPE_SETUP.md` for local testing with Stripe CLI
+- Stripe CLI pre-installed in API container; run `docker compose exec api stripe listen --forward-to localhost:8000/api/v1/billing/webhooks/stripe` for local dev
+- For production: add webhook endpoint in Stripe Dashboard (Settings → Webhooks → URL: `https://yourdomain/api/v1/billing/webhooks/stripe`)
 
-### What's next — Sprint 7
-- Testing + SUS evaluation
-- End-to-end test coverage for auth flow, billing, and admin panel
-- Performance testing and optimization
+**Sprint 7 (current commit):**
+- Comprehensive test suite: 60 integration tests across 8 test files, all passing against real containers
+- Shared `conftest.py` with fixtures: DB session, auth helpers (starter/insights/system_admin/viewer users), test data seeding with auto-cleanup
+- `test_auth.py` (9 tests): register, login, logout, refresh token rotation, duplicate email, wrong password, weak password, nonexistent email, `/me` endpoint
+- `test_protected_routes.py` (4 tests): 401 without token, 401 bad token, 403 non-admin on admin endpoints, 403 viewer on admin endpoints
+- `test_billing.py` (9 tests): list plans, get subscription, no-auth guard, create checkout session, portal guard, webhook checkout.session.completed (verifies plan upgrade + feature flag seeding), webhook payment_failed (past_due), webhook subscription.deleted (downgrade), webhook invalid signature (400)
+- `test_feature_flags.py` (4 tests): starter blocked from sentiment, starter blocked from segments, insights can access sentiment with seeded data, disabled flag still blocks
+- `test_instagram.py` (5 tests): auth URL generation, auth URL requires auth, sync triggers Celery task, disconnect account, disconnect nonexistent account (404)
+- `test_analytics.py` (6 tests): overview empty, overview with seeded data (verifies totals), accounts list, trigger analysis, segments with data, regenerate segments
+- `test_admin.py` (7 tests): list users, update user role, invalid role (400), deactivate user, list organizations, list feature flags, toggle feature flag
+- GitHub Actions CI pipeline (`.github/workflows/ci.yml`): runs on every push to any branch
+  - `backend-tests` job: Python 3.11, real PostgreSQL 15 + Redis 7 service containers, `pytest tests/ -v`
+  - `frontend-build` job: Node 20, `npm install` + `tsc --noEmit` + `npm run build`
+- Stripe webhook handler rewritten (`app/api/v1/billing.py`):
+  - `checkout.session.completed`: upgrades plan to insights, seeds feature flags (`sentiment_analysis`, `audience_segmentation`, `content_recommendations`)
+  - `invoice.payment_succeeded`: confirms active status, fetches Stripe subscription for period dates
+  - `invoice.payment_failed`: marks subscription `past_due`
+  - `customer.subscription.updated`: syncs status + period dates
+  - `customer.subscription.deleted`: downgrades to starter, clears Stripe fields
+  - `_seed_feature_flags()` helper ensures Pro endpoints unlock immediately after payment
+  - Structured logging on every webhook event
+- Stripe CLI installed in backend Dockerfile for local webhook testing
+- `docs/STRIPE_SETUP.md`: step-by-step guide for local Stripe testing (API keys, price creation, CLI auth, webhook listener, test cards, troubleshooting)
+- Full test suite: 60/60 passed in ~16s
+
+### Key decisions
+- Token encryption uses Fernet with PBKDF2 key derivation from SECRET_KEY (not a separate encryption key)
+- Celery tasks use explicit `include` in config (autodiscover wasn't reliable with volume mounts)
+- Instagram sync creates one engagement_metric row per sync per post (append, not upsert) to track changes over time
+- Sentiment + OCR models are lazy-loaded (once per worker process) to avoid startup cost
+- `torch` pinned to CPU-only build (`+cpu` wheel) to keep Docker image size manageable
+- OCR runs only on image/carousel posts; video/reel audio transcription deferred to Whisper integration
+- Per-post error handling in batch task: failed posts are skipped (logged) without aborting the batch
+- Batch commits every 10 posts to avoid long-running DB transactions
+- Segmentation clusters **posts** (not followers) since Instagram Basic Display API doesn't expose follower-level engagement
+- Frontend uses relative imports (no path aliases) due to TypeScript 6 deprecating `baseUrl`/`paths`
+- Recharts charts wrapped in `dir="ltr"` divs; surrounding text labels use `dir="auto"` for proper RTL
+- Engagement chart and top posts table use mock data derived from real API totals (no time-series endpoint yet)
+- Vite dev server proxies `/api` to `http://api:8000` inside Docker network
+- Access token stored in memory (not localStorage) to prevent XSS token theft
+- Refresh token sent as httpOnly cookie scoped to `/api/v1/auth` path
+- Refresh token rotation: old token blacklisted in Redis on each refresh (prevents replay)
+- `bcrypt==4.0.1` pinned to avoid passlib compatibility bug with bcrypt>=4.1
+- Registration creates user as `admin` role of a new organization (not `viewer`)
+- Onboarding wizard is a single React component with local state transitions (no router navigation between steps) to avoid state-timing bugs
+- Stripe webhook endpoint has no JWT auth — verified by Stripe signature instead
+- Webhook tests use HMAC-SHA256 to generate real Stripe-compatible signatures (no mocking of `construct_event`)
+- Test fixtures use UUID-suffixed emails/slugs to avoid collisions between parallel test runs
+- Tests run against real PostgreSQL + Redis containers — no SQLite or mocks for data layer
+- CI uses `npm install` (not `npm ci`) to tolerate minor lock file drift across Node versions
+- Stripe CLI installed via official Debian package in Dockerfile so devs can run `stripe listen` inside the container
+
+### What's next — Sprint 8
+- Documentation + final report
+- SUS usability evaluation
+- Performance profiling and optimization
+- Production deployment configuration (Nginx, Let's Encrypt, VPS)
