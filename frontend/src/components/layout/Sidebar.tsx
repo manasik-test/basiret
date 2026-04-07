@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { useAuth } from '../../contexts/AuthContext'
+import { createCheckout } from '../../api/billing'
 import {
   LayoutDashboard,
   BarChart3,
@@ -22,6 +24,32 @@ const navItems = [
   { key: 'recommendations', icon: Lightbulb, href: '/recommendations' },
   { key: 'settings', icon: Settings, href: '/settings' },
 ] as const
+
+function UpgradeButton() {
+  const { t } = useTranslation()
+  const [loading, setLoading] = useState(false)
+
+  async function handleUpgrade() {
+    setLoading(true)
+    try {
+      const url = await createCheckout()
+      window.location.href = url
+    } catch {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={handleUpgrade}
+      disabled={loading}
+      className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-cta text-cta-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+    >
+      <Sparkles className="w-4 h-4" />
+      {loading ? '...' : t('nav.upgrade')}
+    </button>
+  )
+}
 
 export default function Sidebar() {
   const { t } = useTranslation()
@@ -97,13 +125,7 @@ export default function Sidebar() {
 
         {/* Upgrade CTA */}
         <div className="px-4 pb-6">
-          <Link
-            to="/upgrade"
-            className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-cta text-cta-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
-          >
-            <Sparkles className="w-4 h-4" />
-            {t('nav.upgrade')}
-          </Link>
+          <UpgradeButton />
         </div>
       </aside>
 

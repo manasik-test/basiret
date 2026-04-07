@@ -308,6 +308,8 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Invite flow (`POST /auth/invite`) not yet implemented
 - Forgot password / reset password flow not yet implemented
 - Instagram OAuth callback should redirect back to frontend onboarding step 2 after success
+- Stripe webhook uses `whsec_test_placeholder` — replace with real webhook secret after configuring endpoint in Stripe Dashboard (Settings → Webhooks → Add endpoint → URL: `https://yourdomain/api/v1/billing/webhooks/stripe`)
+- Stripe webhook endpoint needs to be publicly reachable for production (use `stripe listen --forward-to localhost:8000/api/v1/billing/webhooks/stripe` for local dev testing)
 
 ### What's next — Sprint 7
 - Testing + SUS evaluation

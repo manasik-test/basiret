@@ -8,7 +8,7 @@ import {
   type AdminUser,
   type AdminFlag,
 } from '../api/admin'
-import { Shield, Users, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Shield, Users, ToggleLeft } from 'lucide-react'
 
 export default function Admin() {
   const { t } = useTranslation()
@@ -172,12 +172,17 @@ export default function Admin() {
                     </td>
                     <td className="py-3 text-foreground">{flag.feature_name}</td>
                     <td className="py-3">
-                      <button onClick={() => toggleFlag(flag)} className="text-primary">
-                        {flag.is_enabled ? (
-                          <ToggleRight className="w-6 h-6" />
-                        ) : (
-                          <ToggleLeft className="w-6 h-6 text-muted-foreground" />
-                        )}
+                      <button
+                        onClick={() => toggleFlag(flag)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          flag.is_enabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                            flag.is_enabled ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
                       </button>
                     </td>
                   </tr>
