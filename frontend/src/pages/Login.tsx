@@ -19,7 +19,7 @@ export default function Login() {
   // Navigate only after React has committed the user state
   useEffect(() => {
     if (loggedIn && user) {
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     }
   }, [loggedIn, user, navigate])
 

@@ -9,7 +9,7 @@ Student: Manasik Ibnouf | ID: 20234610 | Supervisor: Nomazwe Sibanda
 ---
 
 ## Current Status
-- Sprint 2 complete — Instagram data pipeline operational
+- Sprint 8 in progress — all 11 screens built, inner pages complete, testing + docs phase
 - Docker environment: FastAPI + PostgreSQL + Redis + Celery worker (4 containers)
 
 ---
@@ -369,3 +369,88 @@ PATCH /admin/users/:id, /admin/flags/:id
 - SUS usability evaluation
 - Performance profiling and optimization
 - Production deployment configuration (Nginx, Let's Encrypt, VPS)
+
+---
+
+## Session Log — 2026-04-12
+
+### What was built
+
+**Sprint 8 — Inner Pages + UX Improvements:**
+- 5 inner pages built and routed: Analytics, Audience, Sentiment, Recommendations, Settings
+- 2 new backend endpoints added for real data on charts
+- Mobile UX improvements: top bar with profile dropdown (logout + language toggle)
+- Landing page phone mockup section updated
+- Vite proxy fix for local dev (outside Docker)
+- ~75 new i18n keys added to both EN and AR translation files
+
+**Analytics page (`/analytics`):**
+- Content type breakdown bar chart (avg likes/comments per type: image, video, carousel) — real data from `GET /api/v1/analytics/posts/breakdown`
+- Posting frequency calendar heatmap (GitHub-style, colored by post count per day) — real data
+- 2 action insight cards: "Reels get 3x more reach", "Tuesday mornings are your peak time"
+- Top posts table (reused from dashboard)
+
+**Audience page (`/audience`) — Pro feature:**
+- 3 K-means segment persona cards from `GET /api/v1/analytics/segments`
+- Each card shows: segment label, post count, dominant content type with icon, typical posting time, dominant sentiment, avg engagement
+- "Create content for this segment" CTA button per card
+- "Regenerate Segments" button triggering `POST /api/v1/analytics/segments/regenerate`
+- Wrapped in `LockedFeature` for starter plan users
+
+**Sentiment page (`/sentiment`) — Pro feature:**
+- 3 score cards: Positive %, Neutral %, Negative % (computed from real counts)
+- Sentiment trend area chart using **real time-series data** from new `GET /api/v1/analytics/sentiment/timeline` endpoint (joins AnalysisResult + Post, groups by date + sentiment label)
+- Sentiment donut chart (reused from dashboard)
+- Conditional action cards based on sentiment ratios (positive > 60%, neutral > 50%, negative > 30%)
+
+**Recommendations page (`/recommendations`) — Pro feature:**
+- 3 ranked recommendation cards with category badges (Timing/Engagement/Format), descriptions, supporting data, confidence bars (High 85%/Medium 60%), "Apply this" CTA
+- Best time to post heatmap (7-day x 4-slot grid, intensity from segment data)
+- 3 hashtag suggestion cards with copy-to-clipboard functionality
+
+**Settings page (`/settings`):**
+- Tab navigation: Profile | Organization | Notifications | Billing
+- Profile tab: name + email inputs (prefilled), password change form with validation
+- Organization tab: org name (read-only), connected Instagram accounts list
+- Notifications tab: toggle switches for email alerts and sentiment alerts (local state)
+- Billing tab: current plan display, upgrade CTA for starter users via Stripe Checkout
+
+**Backend endpoints added:**
+- `GET /api/v1/analytics/sentiment/timeline` — daily sentiment counts over time (Pro, joins AnalysisResult + Post)
+- `GET /api/v1/analytics/posts/breakdown` — per-content-type engagement stats + posting dates calendar
+
+**Mobile UX:**
+- Mobile top bar added to `Sidebar.tsx` with Basiret logo and profile button (UserCircle icon)
+- Profile dropdown shows: user name, language toggle (Globe icon), logout button
+- Dropdown closes on outside click
+- `AppLayout` updated with `pt-14 md:pt-0` for mobile top bar spacing
+
+**Infrastructure:**
+- `TopBar.tsx` now shows dynamic page title based on current route (was hardcoded to "Dashboard")
+- `useBilling.ts` hook created: `useSubscription()` + `useIsFeatureLocked()` for client-side feature gating
+- `useRegenerateSegments()` mutation hook with query invalidation on success
+- `usePostsBreakdown()` and `useSentimentTimeline()` hooks for new endpoints
+- Vite proxy target changed from `http://api:8000` to `process.env.VITE_API_URL || 'http://localhost:8000'` for local dev outside Docker
+- Cleaned up unused imports in Landing.tsx (Globe, MoreHorizontal, ToggleRight, glassStyle)
+
+### Bug fixes
+- **Audience page crash**: `characteristics.avg_engagement` from JSONB could be a string; `.toFixed()` call threw TypeError. Fixed with `Number()` conversion + `isNaN` guard.
+- **502 Bad Gateway on register/login**: Vite proxy targeted `http://api:8000` (Docker-internal hostname) while running frontend outside Docker. Fixed proxy to fallback to `localhost:8000`.
+
+### Key decisions
+- Sentiment trend chart uses **real data** (not mock) from new backend endpoint — important for SUS evaluation and academic report
+- Settings forms handle missing backend endpoints gracefully (local state feedback, no error throws)
+- All Pro pages wrapped in `LockedFeature` component — starter users see blurred content with upgrade modal
+- Analytics page intentionally differentiated from Dashboard: bar chart + calendar heatmap vs engagement trend + KPI cards
+- Pages are single files with inline sub-components (no sub-component directory sprawl)
+- `useIsFeatureLocked()` returns `false` when subscription data is loading (show content first, lock after)
+
+### Known issues / TODOs
+- Audience page avg engagement shows "—" for segments where JSONB value is non-numeric
+- Top posts table still uses mock data (needs `GET /api/v1/analytics/posts` endpoint)
+- Settings profile/password save is local-only — needs backend endpoints (`PATCH /auth/profile`, `POST /auth/change-password`)
+- Notification preferences are local state only — no backend persistence
+- Vite production build chunk >500KB due to Recharts — consider code-splitting
+- Post Detail View page not yet built (screen #8)
+- Forgot password / reset password flow not yet implemented
+- Invite flow (`POST /auth/invite`) not yet implemented

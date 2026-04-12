@@ -309,7 +309,7 @@ function StepComplete() {
         <p className="text-sm text-muted-foreground mt-2">{t('onboarding.completeDesc')}</p>
       </div>
       <button
-        onClick={() => navigate('/', { replace: true })}
+        onClick={() => navigate('/dashboard', { replace: true })}
         className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
       >
         {t('onboarding.goToDashboard')}

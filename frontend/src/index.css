@@ -54,3 +54,52 @@
   border: 1px solid rgba(255, 255, 255, 0.4);
   box-shadow: 0 8px 32px rgba(102, 79, 161, 0.12);
 }
+
+/* Bento card — glassmorphism + hover */
+.bento-card {
+  background: rgba(255, 255, 255, 0.35) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 4px 30px rgba(102, 79, 161, 0.06), inset 0 1px 0 rgba(255,255,255,0.4) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.bento-card:hover {
+  background: rgba(255, 255, 255, 0.5) !important;
+  border-color: rgba(102, 79, 161, 0.2) !important;
+  box-shadow: 0 12px 48px rgba(102, 79, 161, 0.14), inset 0 1px 0 rgba(255,255,255,0.5) !important;
+  transform: translateY(-3px);
+}
+
+/* Floating animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.animate-float { animation: float 6s ease-in-out infinite; }
+
+@keyframes float-slow {
+  0%, 100% { transform: var(--float-base) translateY(0px); }
+  50% { transform: var(--float-base) translateY(-14px); }
+}
+@keyframes float-medium {
+  0%, 100% { transform: var(--float-base) translateY(0px); }
+  50% { transform: var(--float-base) translateY(-18px); }
+}
+@keyframes float-fast {
+  0%, 100% { transform: var(--float-base) translateY(0px); }
+  50% { transform: var(--float-base) translateY(-10px); }
+}
+
+/* Global film grain noise overlay — visual glue across sections */
+.landing-canvas::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}

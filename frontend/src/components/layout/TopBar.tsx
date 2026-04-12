@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
 import { Globe, ChevronDown } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
@@ -7,9 +8,21 @@ function applyDir(lang: string) {
   document.documentElement.lang = lang
 }
 
+const pageTitleMap: Record<string, string> = {
+  '/dashboard': 'nav.dashboard',
+  '/analytics': 'nav.analytics',
+  '/audience': 'nav.audience',
+  '/sentiment': 'nav.sentiment',
+  '/recommendations': 'nav.recommendations',
+  '/settings': 'nav.settings',
+  '/admin': 'nav.admin',
+}
+
 export default function TopBar() {
   const { t, i18n } = useTranslation()
+  const { pathname } = useLocation()
   const [dateRange, setDateRange] = useState('last30')
+  const titleKey = pageTitleMap[pathname] || 'nav.dashboard'
 
   // Sync dir on initial load (i18next may restore 'ar' from localStorage)
   useEffect(() => {
@@ -23,7 +36,7 @@ export default function TopBar() {
 
   return (
     <header className="flex items-center justify-between px-6 py-4">
-      <h1 className="text-2xl font-bold text-foreground">{t('dashboard.title')}</h1>
+      <h1 className="text-2xl font-bold text-foreground">{t(titleKey)}</h1>
 
       <div className="flex items-center gap-3">
         {/* Date range selector */}

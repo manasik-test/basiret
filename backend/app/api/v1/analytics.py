@@ -1,16 +1,18 @@
 """
 Analytics endpoints.
 
-GET  /overview             — basic KPI data for the authenticated user's organization.
-POST /analyze              — trigger NLP analysis for all unanalyzed posts.
-GET  /sentiment            — sentiment breakdown across analyzed posts (Pro).
-GET  /accounts             — active social accounts for the organization.
-GET  /segments             — audience segments for a social account (Pro).
-POST /segments/regenerate  — trigger K-means clustering, returns task_id (Pro).
+GET  /overview              — basic KPI data for the authenticated user's organization.
+GET  /posts/breakdown       — per-content-type engagement stats + posting dates.
+POST /analyze               — trigger NLP analysis for all unanalyzed posts.
+GET  /sentiment             — sentiment breakdown across analyzed posts (Pro).
+GET  /sentiment/timeline    — daily sentiment counts over time (Pro).
+GET  /accounts              — active social accounts for the organization.
+GET  /segments              — audience segments for a social account (Pro).
+POST /segments/regenerate   — trigger K-means clustering, returns task_id (Pro).
 """
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, cast, Date
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -88,6 +90,70 @@ def analytics_overview(
     }
 
 
+@router.get("/posts/breakdown")
+def posts_breakdown(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Per-content-type engagement stats + posting dates for the org."""
+
+    account_ids = [
+        a.id for a in db.query(SocialAccount.id).filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active == True,
+        ).all()
+    ]
+
+    if not account_ids:
+        return {"success": True, "data": {"by_type": [], "posting_dates": []}}
+
+    # Avg engagement per content type
+    type_stats = (
+        db.query(
+            Post.content_type,
+            func.count(Post.id).label("count"),
+            func.coalesce(func.avg(EngagementMetric.likes), 0).label("avg_likes"),
+            func.coalesce(func.avg(EngagementMetric.comments), 0).label("avg_comments"),
+        )
+        .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id.in_(account_ids))
+        .group_by(Post.content_type)
+        .all()
+    )
+
+    by_type = [
+        {
+            "content_type": row.content_type or "unknown",
+            "count": row.count,
+            "avg_likes": round(float(row.avg_likes), 1),
+            "avg_comments": round(float(row.avg_comments), 1),
+        }
+        for row in type_stats
+    ]
+
+    # Posting dates (for calendar heatmap)
+    date_counts = (
+        db.query(
+            cast(Post.posted_at, Date).label("date"),
+            func.count(Post.id).label("count"),
+        )
+        .filter(Post.social_account_id.in_(account_ids))
+        .group_by(cast(Post.posted_at, Date))
+        .order_by(cast(Post.posted_at, Date))
+        .all()
+    )
+
+    posting_dates = [
+        {"date": str(row.date), "count": row.count}
+        for row in date_counts
+    ]
+
+    return {
+        "success": True,
+        "data": {"by_type": by_type, "posting_dates": posting_dates},
+    }
+
+
 @router.post("/analyze")
 def trigger_analysis(user: User = Depends(get_current_user)):
     """Queue NLP analysis for all unanalyzed posts."""
@@ -145,6 +211,50 @@ def sentiment_overview(
             "pending_analysis": pending,
             "sentiment": sentiment_data,
         },
+    }
+
+
+@router.get("/sentiment/timeline")
+def sentiment_timeline(
+    user: User = Depends(RequireFeature("sentiment_analysis")),
+    db: Session = Depends(get_db),
+):
+    """Return daily sentiment counts over time, scoped to user's organization (Pro)."""
+
+    account_ids = [
+        a.id for a in db.query(SocialAccount.id).filter(
+            SocialAccount.organization_id == user.organization_id,
+        ).all()
+    ]
+
+    rows = (
+        db.query(
+            cast(Post.posted_at, Date).label("date"),
+            AnalysisResult.sentiment,
+            func.count(AnalysisResult.id).label("count"),
+        )
+        .join(Post, AnalysisResult.post_id == Post.id)
+        .filter(Post.social_account_id.in_(account_ids))
+        .group_by(cast(Post.posted_at, Date), AnalysisResult.sentiment)
+        .order_by(cast(Post.posted_at, Date))
+        .all()
+    )
+
+    # Group into { date: { positive: N, neutral: N, negative: N } }
+    by_date: dict[str, dict[str, int]] = {}
+    for row in rows:
+        d = str(row.date)
+        if d not in by_date:
+            by_date[d] = {"positive": 0, "neutral": 0, "negative": 0}
+        by_date[d][row.sentiment] = row.count
+
+    timeline = [
+        {"date": d, **counts} for d, counts in by_date.items()
+    ]
+
+    return {
+        "success": True,
+        "data": {"timeline": timeline},
     }
 
 

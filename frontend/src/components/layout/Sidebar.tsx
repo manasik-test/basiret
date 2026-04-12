@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
@@ -14,10 +14,12 @@ import {
   Sparkles,
   Shield,
   LogOut,
+  UserCircle,
+  Globe,
 } from 'lucide-react'
 
 const navItems = [
-  { key: 'dashboard', icon: LayoutDashboard, href: '/' },
+  { key: 'dashboard', icon: LayoutDashboard, href: '/dashboard' },
   { key: 'analytics', icon: BarChart3, href: '/analytics' },
   { key: 'audience', icon: Users, href: '/audience' },
   { key: 'sentiment', icon: SmilePlus, href: '/sentiment' },
@@ -48,6 +50,77 @@ function UpgradeButton() {
       <Sparkles className="w-4 h-4" />
       {loading ? '...' : t('nav.upgrade')}
     </button>
+  )
+}
+
+function MobileTopBar() {
+  const { t, i18n } = useTranslation()
+  const { user, logout } = useAuth()
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const isAr = i18n.language === 'ar'
+
+  function toggleLang() {
+    const next = isAr ? 'en' : 'ar'
+    i18n.changeLanguage(next)
+    document.documentElement.dir = next === 'ar' ? 'rtl' : 'ltr'
+    setOpen(false)
+  }
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  return (
+    <div className="md:hidden fixed top-0 inset-x-0 glass-strong z-30 flex items-center justify-between px-4 py-3 border-b border-border">
+      {/* Logo */}
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
+          <Sparkles className="w-4 h-4 text-primary-foreground" />
+        </div>
+        <span className="text-lg font-bold text-primary tracking-tight">Basiret</span>
+      </div>
+
+      {/* Profile button + dropdown */}
+      <div ref={menuRef} className="relative">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted transition-colors"
+        >
+          <UserCircle className="w-6 h-6 text-foreground/70" />
+        </button>
+
+        {open && (
+          <div className="absolute end-0 top-full mt-1 w-48 rounded-lg glass-strong border border-border shadow-lg py-1 z-50">
+            {user && (
+              <div className="px-3 py-2 text-sm text-foreground font-medium truncate border-b border-border">
+                {user.full_name}
+              </div>
+            )}
+            <button
+              onClick={toggleLang}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <Globe className="w-4 h-4" />
+              {isAr ? 'English' : 'العربية'}
+            </button>
+            <button
+              onClick={() => { setOpen(false); logout() }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              {t('nav.logout')}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -128,6 +201,9 @@ export default function Sidebar() {
           <UpgradeButton />
         </div>
       </aside>
+
+      {/* Mobile top bar with profile menu */}
+      <MobileTopBar />
 
       {/* Mobile bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 glass-strong z-30 flex items-center justify-around py-2 border-t border-border">
