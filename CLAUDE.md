@@ -454,3 +454,17 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Post Detail View page not yet built (screen #8)
 - Forgot password / reset password flow not yet implemented
 - Invite flow (`POST /auth/invite`) not yet implemented
+
+---
+
+## Session Log — 2026-04-12 (Landing page polish)
+
+### What was built
+- **Glassy navbar on scroll**: Navbar gets glassmorphism background (`blur(16px)`, semi-transparent white, border + shadow) when `scrollY > 20`, transparent at top. Uses `useState` + `useEffect` scroll listener with `{ passive: true }`.
+- **Larger phone mockup on desktop**: Phone SVG in ProblemStatement section changed from fixed `w-[440px]` to responsive `w-[320px] md:w-[560px]` (~27% larger on desktop).
+- **Randomly scattered chips**: Feature chips in ProblemStatement section repositioned from symmetrical grid to organic, asymmetric placement with slight rotations (-5deg to +5deg) for a more natural feel.
+
+### Key decisions
+- Scroll threshold of 20px chosen so the glass effect kicks in immediately without being visible on initial load
+- Chip rotations kept subtle (±5deg max) to look organic without hurting readability
+- Phone SVG uses responsive width classes rather than a fixed size to work across breakpoints
