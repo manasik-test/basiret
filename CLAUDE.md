@@ -468,3 +468,79 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Scroll threshold of 20px chosen so the glass effect kicks in immediately without being visible on initial load
 - Chip rotations kept subtle (±5deg max) to look organic without hurting readability
 - Phone SVG uses responsive width classes rather than a fixed size to work across breakpoints
+
+---
+
+## Session Log — 2026-04-17
+
+### What was built
+
+**AI-Powered Insights Generation (Gemini 2.5 Flash Lite):**
+- New `insight_result` table: `social_account_id`, `week_start`, `summary`, `score` (1-100), `score_change`, `insights` (JSONB), `best_post_id`, `next_best_time`, `generated_at`
+- New SQLAlchemy model `InsightResult` (`app/models/insight_result.py`), registered in `__init__.py`
+- `google-generativeai==0.7.2` added to requirements; `protobuf` downgraded to `4.25.3` for compatibility
+- `GEMINI_API_KEY` added to `Settings`, `.env.example`
+
+**Celery Task — `generate_weekly_insights`** (`app/tasks/insights.py`):
+- Gathers 7-day metrics: total posts, impressions, engagement per post, sentiment breakdown, top 5 posts, best posting time, historical comparison
+- Builds structured user message matching the prompt schema from `prompts josn.txt`
+- System prompt enforces: 3 actionable insights (not observations) with priority/title/finding/action/timeframe/expected_impact, health score 1-100, best post, next best time
+- Calls Gemini 2.5 Flash Lite with `response_mime_type="application/json"` for structured output
+- Fallback: if no posts in last 7 days, uses all-time post range
+- Resolves `best_post_id` from Gemini response back to a real DB UUID
+- Computes `score_change` against previous insight if one exists
+- Registered in Celery config (`app/core/celery_app.py`)
+
+**Gemini Persona Descriptions in Segmentation** (`app/tasks/segmentation.py`):
+- Added `_generate_persona_descriptions()` — calls Gemini 2.5 Flash Lite to generate 2-3 sentence persona descriptions for each K-means cluster
+- Persona stored in `characteristics.persona_description` JSONB field
+- Graceful fallback: empty strings if `GEMINI_API_KEY` not set or Gemini call fails
+
+**API Endpoints** (`app/api/v1/analytics.py`):
+- `GET /api/v1/analytics/insights` — returns latest AI-generated insight for the user's first active account (Pro, gated by `RequireFeature("content_recommendations")`)
+- `POST /api/v1/analytics/insights/generate` — queues Celery task, returns `task_id` (Pro)
+- `content_recommendations` feature flag seeded for all 3 plan tiers in `init.sql`
+
+**Frontend — DoThisToday Dashboard Component** (`frontend/src/components/dashboard/DoThisToday.tsx`):
+- Shows top 3 AI actions with priority badges (High=CTA pink, Medium=primary purple, Low=accent blue)
+- Health score progress bar with +/- change indicator
+- AI-written summary text
+- "Next best time to post" footer with clock icon
+- Generate/Refresh button triggers Celery task
+- Empty state with CTA to generate first insights
+- Wrapped in `LockedFeature` for starter plan users
+- Placed in Dashboard between KPI cards and charts
+
+**Frontend API Layer:**
+- `InsightAction` and `InsightData` TypeScript interfaces in `api/analytics.ts`
+- `fetchInsights()` and `generateInsights()` fetch functions
+- `useInsights()` and `useGenerateInsights()` React Query hooks in `hooks/useAnalytics.ts`
+- 10 new i18n keys in both `en.json` and `ar.json` (insights section)
+
+**Infrastructure:**
+- `insight_result` table + index added to `db/init.sql`
+- `content_recommendations` feature flag seeded for starter/insights/enterprise in `init.sql`
+- Celery task list now includes `app.tasks.insights`
+
+### Verified end-to-end
+- `POST /insights/generate` → Celery picks up task → gathers 42 posts metrics → calls Gemini 2.5 Flash Lite → stores structured JSON → `GET /insights` returns score=65, 3 prioritized actions, best_post_id resolved, next_best_time="Tuesday, 16:00"
+- Task completes in ~3 seconds
+- Full test suite: 60/60 passed in ~13s
+- TypeScript clean (zero errors), Vite production build succeeds
+
+### Key decisions
+- Gemini model: started with `gemini-1.5-flash` (deprecated, 404), then `gemini-2.0-flash` (rate limited on free tier), settled on `gemini-2.5-flash-lite` (available, free tier sufficient)
+- `protobuf` downgraded from `5.27.2` to `4.25.3` to resolve dependency conflict with `google-ai-generativelanguage` which requires `protobuf<5.0.0`
+- Insights endpoints gated by `content_recommendations` feature flag (matches billing webhook seeding)
+- Persona descriptions in segmentation are best-effort — Gemini failure doesn't block K-means results
+- `response_mime_type="application/json"` used instead of parsing markdown-wrapped JSON — Gemini returns clean JSON every time
+- Score change computed server-side against previous insight (not trusting Gemini's self-reported `score_change`)
+
+### Known issues / TODOs
+- Gemini free tier has daily quota limits — production should use a paid API key
+- `gemini-2.0-flash` quota was exhausted during testing; `gemini-2.5-flash-lite` used as fallback — can switch back when quota resets
+- Audience page persona descriptions only appear after regenerating segments (existing segments don't have them)
+- Weekly insight generation should be scheduled via Celery Beat (not just on-demand) for production
+- Post Detail View page not yet built (screen #8)
+- Forgot password / reset password flow not yet implemented
+- Invite flow (`POST /auth/invite`) not yet implemented

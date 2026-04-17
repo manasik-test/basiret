@@ -136,6 +136,38 @@ CREATE TABLE audience_segment (
 );
 
 -- ─────────────────────────────────────────
+-- INSIGHT RESULT
+-- ─────────────────────────────────────────
+CREATE TABLE insight_result (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    week_start TIMESTAMPTZ NOT NULL,
+    summary VARCHAR(500),
+    score FLOAT,
+    score_change FLOAT,
+    insights JSONB,
+    best_post_id UUID REFERENCES post(id) ON DELETE SET NULL,
+    next_best_time VARCHAR(100),
+    generated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─────────────────────────────────────────
+-- INSIGHT RESULT
+-- ─────────────────────────────────────────
+CREATE TABLE insight_result (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    week_start TIMESTAMPTZ NOT NULL,
+    summary VARCHAR(500),
+    score FLOAT,
+    score_change FLOAT,
+    insights JSONB,
+    best_post_id UUID REFERENCES post(id) ON DELETE SET NULL,
+    next_best_time VARCHAR(100),
+    generated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─────────────────────────────────────────
 -- FEATURE FLAG
 -- ─────────────────────────────────────────
 CREATE TABLE feature_flag (
@@ -151,16 +183,19 @@ INSERT INTO feature_flag (plan_tier, feature_name, is_enabled) VALUES
 ('starter',    'sentiment_analysis',     FALSE),
 ('starter',    'audience_segmentation',  FALSE),
 ('starter',    'recommendations',        FALSE),
+('starter',    'content_recommendations', FALSE),
 ('starter',    'arabic_nlp',            FALSE),
 ('starter',    'history_12mo',          FALSE),
 ('insights',   'sentiment_analysis',     TRUE),
 ('insights',   'audience_segmentation',  TRUE),
 ('insights',   'recommendations',        TRUE),
+('insights',   'content_recommendations', TRUE),
 ('insights',   'arabic_nlp',            TRUE),
 ('insights',   'history_12mo',          TRUE),
 ('enterprise', 'sentiment_analysis',     TRUE),
 ('enterprise', 'audience_segmentation',  TRUE),
 ('enterprise', 'recommendations',        TRUE),
+('enterprise', 'content_recommendations', TRUE),
 ('enterprise', 'arabic_nlp',            TRUE),
 ('enterprise', 'history_12mo',          TRUE);
 
@@ -171,3 +206,4 @@ CREATE INDEX idx_analysis_post ON analysis_result(post_id);
 CREATE INDEX idx_engagement_post ON engagement_metric(post_id);
 CREATE INDEX idx_user_org ON "user"(organization_id);
 CREATE INDEX idx_social_account_org ON social_account(organization_id);
+CREATE INDEX idx_insight_account ON insight_result(social_account_id);

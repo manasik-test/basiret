@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     INSTAGRAM_REDIRECT_URI: str = "http://localhost:8000/api/v1/instagram/callback"
     INSTAGRAM_TEST_TOKEN: str = ""
 
+    # Gemini AI
+    GEMINI_API_KEY: str = ""
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

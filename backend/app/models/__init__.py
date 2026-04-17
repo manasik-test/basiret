@@ -7,6 +7,7 @@ from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
 from app.models.audience_segment import AudienceSegment
 from app.models.feature_flag import FeatureFlag
+from app.models.insight_result import InsightResult
 
 __all__ = [
     "Organization",
@@ -18,4 +19,5 @@ __all__ = [
     "EngagementMetric",
     "AudienceSegment",
     "FeatureFlag",
+    "InsightResult",
 ]

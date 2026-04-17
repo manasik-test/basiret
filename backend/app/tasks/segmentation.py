@@ -3,7 +3,9 @@ Celery task: K-means audience segmentation.
 
 Clusters posts by engagement patterns, content type, sentiment, and temporal
 features to identify audience archetypes for a social account.
+Uses Google Gemini 1.5 Flash for rich persona descriptions.
 """
+import json
 import logging
 import numpy as np
 from sklearn.cluster import KMeans
@@ -11,7 +13,9 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 from sqlalchemy import and_, func
 
+import google.generativeai as genai
 from app.core.celery_app import celery
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.post import Post
 from app.models.engagement_metric import EngagementMetric
@@ -201,13 +205,87 @@ def _generate_cluster_label(centroid: np.ndarray) -> str:
     return f"{eng_label} {content_label}{sentiment_part} {time_label}"
 
 
+def _generate_persona_descriptions(segments_data: list[dict]) -> list[str]:
+    """Call Gemini 1.5 Flash to generate rich persona descriptions for each segment."""
+    if not settings.GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY not set — skipping persona descriptions")
+        return ["" for _ in segments_data]
+
+    try:
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            "gemini-2.5-flash-lite",
+            system_instruction=(
+                "You are a marketing analyst. Given audience segment data from K-means clustering, "
+                "write a short, vivid persona description (2-3 sentences) for each segment. "
+                "Describe who this audience is, what content they engage with, and when they're active. "
+                "Respond ONLY in valid JSON: an array of strings, one description per segment. "
+                "No preamble, no markdown."
+            ),
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.5,
+            ),
+        )
+
+        prompt = "Generate persona descriptions for these audience segments:\n\n"
+        for i, seg in enumerate(segments_data):
+            prompt += (
+                f"Segment {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
+                f"dominant content: {seg['dominant_content_type']}, "
+                f"sentiment: {seg['dominant_sentiment']}, "
+                f"posting time: {seg['typical_posting_time']}, "
+                f"avg likes: {seg['avg_likes']}, avg comments: {seg['avg_comments']}\n"
+            )
+
+        response = model.generate_content(prompt)
+        descriptions = json.loads(response.text)
+        if isinstance(descriptions, list) and len(descriptions) == len(segments_data):
+            return descriptions
+        logger.warning("Gemini returned %d descriptions for %d segments", len(descriptions), len(segments_data))
+        return descriptions + [""] * (len(segments_data) - len(descriptions))
+    except Exception as exc:
+        logger.error("Gemini persona generation failed: %s", exc)
+        return ["" for _ in segments_data]
+
+
 def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, silhouette):
-    """Delete old segments and insert new cluster rows."""
+    """Delete old segments and insert new cluster rows with AI persona descriptions."""
     db.query(AudienceSegment).filter(
         AudienceSegment.social_account_id == social_account_id,
     ).delete()
 
     labels_arr = np.array(labels)
+
+    # Pre-compute segment data for Gemini batch call
+    segments_data = []
+    for cluster_id in range(k):
+        mask = labels_arr == cluster_id
+        centroid = centroids[cluster_id]
+        segments_data.append({
+            "label": _generate_cluster_label(centroid),
+            "size": int(mask.sum()),
+            "dominant_content_type": max(
+                ["image", "video", "carousel"],
+                key=lambda ct: centroid[FEATURE_NAMES.index(f"is_{ct}")],
+            ),
+            "dominant_sentiment": (
+                "positive" if centroid[4] > 0.5
+                else "negative" if centroid[5] > 0.5
+                else "neutral"
+            ),
+            "typical_posting_time": (
+                "Morning" if 6 <= centroid[9] < 12
+                else "Afternoon" if 12 <= centroid[9] < 18
+                else "Evening" if 18 <= centroid[9] < 24
+                else "Night"
+            ),
+            "avg_likes": round(float(centroid[0]), 2),
+            "avg_comments": round(float(centroid[1]), 2),
+        })
+
+    # Get AI persona descriptions
+    persona_descriptions = _generate_persona_descriptions(segments_data)
 
     for cluster_id in range(k):
         mask = labels_arr == cluster_id
@@ -227,26 +305,15 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
                 "post_ids": cluster_post_ids,
                 "silhouette_score": round(silhouette, 4),
                 "k": k,
-                "dominant_content_type": max(
-                    ["image", "video", "carousel"],
-                    key=lambda ct: centroid[FEATURE_NAMES.index(f"is_{ct}")],
-                ),
+                "dominant_content_type": segments_data[cluster_id]["dominant_content_type"],
                 "avg_engagement": {
                     "likes": round(float(centroid[0]), 2),
                     "comments": round(float(centroid[1]), 2),
                     "engagement_rate": round(float(centroid[2]), 4),
                 },
-                "dominant_sentiment": (
-                    "positive" if centroid[4] > 0.5
-                    else "negative" if centroid[5] > 0.5
-                    else "neutral"
-                ),
-                "typical_posting_time": (
-                    "Morning" if 6 <= centroid[9] < 12
-                    else "Afternoon" if 12 <= centroid[9] < 18
-                    else "Evening" if 18 <= centroid[9] < 24
-                    else "Night"
-                ),
+                "dominant_sentiment": segments_data[cluster_id]["dominant_sentiment"],
+                "typical_posting_time": segments_data[cluster_id]["typical_posting_time"],
+                "persona_description": persona_descriptions[cluster_id] if cluster_id < len(persona_descriptions) else "",
             },
         )
         db.add(segment)

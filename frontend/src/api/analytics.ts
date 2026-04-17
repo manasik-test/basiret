@@ -142,3 +142,35 @@ export async function regenerateSegments(socialAccountId: string): Promise<{ tas
   )
   return res.data
 }
+
+export interface InsightAction {
+  priority: 'high' | 'medium' | 'low'
+  title: string
+  finding: string
+  action: string
+  timeframe: string
+  expected_impact: string
+}
+
+export interface InsightData {
+  id: string
+  social_account_id: string
+  week_start: string
+  summary: string
+  score: number
+  score_change: number
+  insights: InsightAction[]
+  best_post_id: string | null
+  next_best_time: string
+  generated_at: string
+}
+
+export async function fetchInsights(): Promise<InsightData | null> {
+  const res = await api.get<unknown, ApiResponse<InsightData | null>>('/analytics/insights')
+  return res.data
+}
+
+export async function generateInsights(): Promise<{ task_id: string }> {
+  const res = await api.post<unknown, ApiResponse<{ task_id: string; status: string }>>('/analytics/insights/generate')
+  return res.data
+}

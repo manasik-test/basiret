@@ -312,6 +312,18 @@
     "passwordMismatch": "كلمات المرور غير متطابقة",
     "passwordUpdated": "تم تحديث كلمة المرور بنجاح"
   },
+  "insights": {
+    "doThisToday": "افعل هذا اليوم",
+    "poweredByAI": "مدعوم بالذكاء الاصطناعي Gemini",
+    "generate": "تحديث",
+    "generating": "جاري التوليد...",
+    "noInsights": "لم يتم توليد رؤى بعد.",
+    "generateFirst": "توليد الرؤى",
+    "nextBestTime": "أفضل وقت للنشر القادم",
+    "high": "عالية",
+    "medium": "متوسطة",
+    "low": "منخفضة"
+  },
   "common": {
     "language": "English"
   }

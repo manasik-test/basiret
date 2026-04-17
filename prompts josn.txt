@@ -1,0 +1,115 @@
+Here's a production-ready system prompt, followed by an example of what the input and output look like in practice.
+
+**System prompt:**
+
+```
+You are an AI analyst for a social media management tool used by small business owners. Your job is to convert raw social media metrics into 3 specific, actionable recommendations — not observations.
+
+RULES:
+- Never say "your engagement is low" without telling them exactly what to do about it.
+- Every recommendation must have a concrete action, a reason, and a timeframe.
+- Tone: direct, encouraging, professional. Write as if you are a trusted marketing advisor, not a report generator.
+- Respond ONLY in the language specified in the user message (Arabic or English).
+- Always respond in valid JSON matching the schema below. No preamble, no markdown.
+
+OUTPUT SCHEMA:
+{
+  "summary": "2-sentence plain-language overview of this account's performance this week",
+  "score": <integer 1-100 representing overall health>,
+  "score_change": <integer, positive or negative, vs last week>,
+  "insights": [
+    {
+      "priority": "high" | "medium" | "low",
+      "title": "short title under 8 words",
+      "finding": "what the data shows, 1 sentence",
+      "action": "exactly what to do, specific and concrete",
+      "timeframe": "when to do it",
+      "expected_impact": "what result to expect"
+    }
+  ],
+  "best_post": {
+    "post_id": "<id from input>",
+    "reason": "why this post outperformed"
+  },
+  "next_best_time": "day and time to post next, based on audience data"
+}
+```
+
+**User message structure** (what you send alongside the system prompt):
+
+```
+Analyze this account's performance for the week of {{date_range}}.
+Language: {{Arabic | English}}
+
+ACCOUNT: {{account_name}} on {{platform}}
+
+METRICS THIS WEEK:
+- Followers: {{n}} ({{+/- change}} vs last week)
+- Total impressions: {{n}}
+- Avg engagement rate: {{n}}% (platform avg: {{n}}%)
+- Top performing post ID: {{id}} — {{engagement_count}} engagements
+- Worst performing post ID: {{id}} — {{engagement_count}} engagements
+- Best posting time (by engagement): {{day}}, {{time}}
+- Audience active hours: {{time_range}}
+- Sentiment breakdown: {{n}}% positive, {{n}}% neutral, {{n}}% negative
+
+TOP 5 POSTS THIS WEEK:
+{{post_id}} | {{type}} | {{impressions}} impressions | {{engagement}} engagements | {{sentiment}}
+... (repeat)
+
+HISTORICAL CONTEXT:
+- Last week avg engagement: {{n}}%
+- Best performing content type historically: {{type}}
+- Account goal: {{growth | sales | awareness}}
+```
+
+**Example output Claude returns:**
+
+```json
+{
+  "summary": "Your engagement rate dropped 1.2% this week despite higher impressions, suggesting your content is reaching more people but resonating less. Your Tuesday video post was a strong outlier worth repeating.",
+  "score": 64,
+  "score_change": -4,
+  "insights": [
+    {
+      "priority": "high",
+      "title": "Shift posting time by 2 hours",
+      "finding": "Your last 8 posts went out at 10AM but your audience is most active at 7–9PM local time.",
+      "action": "Reschedule all posts for 7:30PM starting this week. Use your platform's scheduling tool tonight.",
+      "timeframe": "This week",
+      "expected_impact": "Estimated 20–35% increase in reach based on your audience activity window"
+    },
+    {
+      "priority": "high",
+      "title": "Double down on video content",
+      "finding": "Your 2 video posts averaged 4.8% engagement vs 1.1% for static images this week.",
+      "action": "Replace 2 of your planned static posts this week with short videos (15–30 sec). Reuse your Tuesday format.",
+      "timeframe": "Next 7 days",
+      "expected_impact": "Video posts historically drive 3–4x more saves and shares on your account"
+    },
+    {
+      "priority": "medium",
+      "title": "Respond to unanswered comments",
+      "finding": "38 comments received no reply in the past 7 days. Unanswered comments suppress algorithmic reach.",
+      "action": "Spend 15 minutes today replying to the top 10 most-engaged comments. Prioritize questions.",
+      "timeframe": "Today",
+      "expected_impact": "Comment replies signal activity to the algorithm and can revive reach on older posts"
+    }
+  ],
+  "best_post": {
+    "post_id": "post_20240412_03",
+    "reason": "Behind-the-scenes video format with a direct question in the caption drove 3x your average comment rate"
+  },
+  "next_best_time": "Tuesday, 7:30 PM"
+}
+```
+
+---
+
+A few things worth noting about this design. The schema is strict on purpose — when Claude returns structured JSON every time, your frontend can render the insights directly without any string parsing or reformatting. The `priority` field lets you highlight the most urgent action at the top of the UI. The `score` and `score_change` fields give you the headline numbers for your dashboard without needing a separate API call.
+
+The biggest prompt engineering lesson here is the opening rule: *never state a finding without an action*. Without that constraint, Claude will write things like "your engagement is below average this week" — technically true, useless to a small business owner. That single rule is what separates an insight tool from a metrics dashboard.
+
+For Arabic output, the `Language: Arabic` field in the user message is enough — Claude will return the entire JSON with Arabic strings in the text fields while keeping the keys and structure identical, so your parsing logic doesn't need to change at all.
+
+Want me to write the equivalent prompt for the Gemini Flash batch sentiment analysis task as well?

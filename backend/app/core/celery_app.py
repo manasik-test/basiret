@@ -17,5 +17,5 @@ celery.conf.update(
 )
 
 celery.conf.update(
-    include=["app.tasks.instagram_sync", "app.tasks.nlp_analysis", "app.tasks.segmentation"],
+    include=["app.tasks.instagram_sync", "app.tasks.nlp_analysis", "app.tasks.segmentation", "app.tasks.insights"],
 )

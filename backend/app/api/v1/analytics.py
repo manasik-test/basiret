@@ -9,6 +9,8 @@ GET  /sentiment/timeline    — daily sentiment counts over time (Pro).
 GET  /accounts              — active social accounts for the organization.
 GET  /segments              — audience segments for a social account (Pro).
 POST /segments/regenerate   — trigger K-means clustering, returns task_id (Pro).
+GET  /insights              — latest AI-generated weekly insight (Pro).
+POST /insights/generate     — trigger Gemini insight generation, returns task_id (Pro).
 """
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,8 +25,10 @@ from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
 from app.models.social_account import SocialAccount, Platform
 from app.models.audience_segment import AudienceSegment
+from app.models.insight_result import InsightResult
 from app.tasks.nlp_analysis import analyze_posts
 from app.tasks.segmentation import segment_audience
+from app.tasks.insights import generate_weekly_insights
 
 router = APIRouter()
 
@@ -341,6 +345,68 @@ def regenerate_segments(
         raise HTTPException(status_code=404, detail="Social account not found")
 
     task = segment_audience.delay(social_account_id)
+    return {
+        "success": True,
+        "data": {"task_id": task.id, "status": "queued"},
+    }
+
+
+@router.get("/insights")
+def get_insights(
+    user: User = Depends(RequireFeature("content_recommendations")),
+    db: Session = Depends(get_db),
+):
+    """Return the latest AI-generated insight for the user's first active account."""
+    account = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+        SocialAccount.is_active == True,
+    ).first()
+
+    if not account:
+        return {"success": True, "data": None}
+
+    insight = (
+        db.query(InsightResult)
+        .filter(InsightResult.social_account_id == account.id)
+        .order_by(InsightResult.generated_at.desc())
+        .first()
+    )
+
+    if not insight:
+        return {"success": True, "data": None}
+
+    return {
+        "success": True,
+        "data": {
+            "id": str(insight.id),
+            "social_account_id": str(insight.social_account_id),
+            "week_start": str(insight.week_start),
+            "summary": insight.summary,
+            "score": insight.score,
+            "score_change": insight.score_change,
+            "insights": insight.insights,
+            "best_post_id": str(insight.best_post_id) if insight.best_post_id else None,
+            "next_best_time": insight.next_best_time,
+            "generated_at": str(insight.generated_at),
+        },
+    }
+
+
+@router.post("/insights/generate")
+def trigger_insights(
+    user: User = Depends(RequireFeature("content_recommendations")),
+    db: Session = Depends(get_db),
+):
+    """Queue AI insight generation for the user's first active account."""
+    account = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+        SocialAccount.is_active == True,
+    ).first()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="No active social account found")
+
+    task = generate_weekly_insights.delay(str(account.id))
     return {
         "success": True,
         "data": {"task_id": task.id, "status": "queued"},

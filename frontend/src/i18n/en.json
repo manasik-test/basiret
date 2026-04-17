@@ -312,6 +312,18 @@
     "passwordMismatch": "Passwords do not match",
     "passwordUpdated": "Password updated successfully"
   },
+  "insights": {
+    "doThisToday": "Do This Today",
+    "poweredByAI": "Powered by Gemini AI",
+    "generate": "Refresh",
+    "generating": "Generating...",
+    "noInsights": "No insights generated yet.",
+    "generateFirst": "Generate Insights",
+    "nextBestTime": "Next best time to post",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low"
+  },
   "common": {
     "language": "العربية"
   }

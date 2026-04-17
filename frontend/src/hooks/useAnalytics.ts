@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown, fetchAccounts, fetchSegments, regenerateSegments } from '../api/analytics'
+import { fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown, fetchAccounts, fetchSegments, regenerateSegments, fetchInsights, generateInsights } from '../api/analytics'
 
 export function useOverview() {
   return useQuery({
@@ -62,6 +62,25 @@ export function useRegenerateSegments() {
     mutationFn: () => regenerateSegments(firstAccountId!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['analytics', 'segments'] })
+    },
+  })
+}
+
+export function useInsights() {
+  return useQuery({
+    queryKey: ['analytics', 'insights'],
+    queryFn: fetchInsights,
+    staleTime: 60_000,
+  })
+}
+
+export function useGenerateInsights() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: generateInsights,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'insights'] })
     },
   })
 }
