@@ -37,7 +37,10 @@ def get_auth_url(user: User = Depends(get_current_user)):
     params = {
         "client_id": settings.META_APP_ID,
         "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
-        "scope": "instagram_business_basic",
+        # `instagram_business_manage_comments` is required to read /{media-id}/comments.
+        # Without it, comment fetching gracefully degrades (logged + skipped) so existing
+        # tokens that only have `instagram_business_basic` keep working for post sync.
+        "scope": "instagram_business_basic,instagram_business_manage_comments",
         "response_type": "code",
     }
     return {"url": f"{AUTH_BASE}?{urlencode(params)}"}

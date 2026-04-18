@@ -89,13 +89,27 @@ CREATE TABLE post (
 );
 
 -- ─────────────────────────────────────────
+-- COMMENT (Instagram comments per post)
+-- ─────────────────────────────────────────
+CREATE TABLE comment (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    post_id UUID NOT NULL REFERENCES post(id) ON DELETE CASCADE,
+    platform_comment_id VARCHAR(255) NOT NULL UNIQUE,
+    text TEXT,
+    author_username VARCHAR(255),
+    created_at TIMESTAMPTZ,
+    fetched_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─────────────────────────────────────────
 -- ANALYSIS RESULT
 -- ─────────────────────────────────────────
 CREATE TYPE sentiment_label AS ENUM ('positive', 'neutral', 'negative');
 
 CREATE TABLE analysis_result (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    post_id UUID UNIQUE NOT NULL REFERENCES post(id) ON DELETE CASCADE,
+    post_id UUID UNIQUE REFERENCES post(id) ON DELETE CASCADE,
+    comment_id UUID UNIQUE REFERENCES comment(id) ON DELETE CASCADE,
     sentiment sentiment_label,
     sentiment_score FLOAT,
     topics JSONB,
@@ -103,7 +117,8 @@ CREATE TABLE analysis_result (
     audio_transcript TEXT,
     language_detected language_code,
     model_used VARCHAR(100),
-    analyzed_at TIMESTAMPTZ DEFAULT NOW()
+    analyzed_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT analysis_result_target_xor CHECK ((post_id IS NOT NULL) <> (comment_id IS NOT NULL))
 );
 
 -- ─────────────────────────────────────────
@@ -202,7 +217,10 @@ INSERT INTO feature_flag (plan_tier, feature_name, is_enabled) VALUES
 -- Indexes
 CREATE INDEX idx_post_social_account ON post(social_account_id);
 CREATE INDEX idx_post_posted_at ON post(posted_at DESC);
+CREATE INDEX idx_comment_post ON comment(post_id);
+CREATE INDEX idx_comment_created ON comment(created_at);
 CREATE INDEX idx_analysis_post ON analysis_result(post_id);
+CREATE INDEX idx_analysis_comment ON analysis_result(comment_id);
 CREATE INDEX idx_engagement_post ON engagement_metric(post_id);
 CREATE INDEX idx_user_org ON "user"(organization_id);
 CREATE INDEX idx_social_account_org ON social_account(organization_id);

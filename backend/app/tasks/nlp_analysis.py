@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.celery_app import celery
 from app.core.database import SessionLocal
 from app.models.post import Post, LanguageCode
+from app.models.comment import Comment
 from app.models.analysis_result import AnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,25 @@ def _extract_ocr_text(media_url: str) -> str | None:
         return None
 
 
+def _analyze_single_comment(comment: Comment, db: Session) -> bool:
+    """Analyze one comment and insert an analysis_result row."""
+    text = (comment.text or "").strip()
+    lang = _detect_language(text)
+    sentiment, score = _run_sentiment(text)
+    result = AnalysisResult(
+        comment_id=comment.id,
+        sentiment=sentiment,
+        sentiment_score=score,
+        topics=[],
+        ocr_text=None,
+        audio_transcript=None,
+        language_detected=lang,
+        model_used=MODEL_NAME,
+    )
+    db.add(result)
+    return True
+
+
 def _analyze_single_post(post: Post, db: Session) -> bool:
     """Analyze one post and insert an analysis_result row. Returns True on success."""
     caption = post.caption or ""
@@ -162,10 +182,9 @@ def _analyze_single_post(post: Post, db: Session) -> bool:
 
 @celery.task(name="analyze_posts", bind=True, max_retries=2)
 def analyze_posts(self):
-    """Analyze all posts that don't have an analysis_result yet."""
+    """Analyze all posts AND comments that don't have an analysis_result yet."""
     db = SessionLocal()
     try:
-        # Find posts without analysis results
         posts = (
             db.query(Post)
             .outerjoin(AnalysisResult, Post.id == AnalysisResult.post_id)
@@ -173,35 +192,105 @@ def analyze_posts(self):
             .all()
         )
 
-        if not posts:
-            logger.info("No unanalyzed posts found")
-            return {"status": "ok", "analyzed": 0, "skipped": 0}
+        comments = (
+            db.query(Comment)
+            .outerjoin(AnalysisResult, Comment.id == AnalysisResult.comment_id)
+            .filter(AnalysisResult.id.is_(None))
+            .filter(Comment.text.isnot(None))
+            .all()
+        )
 
-        logger.info("Found %d posts to analyze", len(posts))
+        if not posts and not comments:
+            logger.info("No unanalyzed posts or comments found")
+            return {
+                "status": "ok",
+                "posts_analyzed": 0, "posts_skipped": 0,
+                "comments_analyzed": 0, "comments_skipped": 0,
+            }
 
-        analyzed = 0
-        skipped = 0
+        logger.info("Found %d posts and %d comments to analyze", len(posts), len(comments))
 
+        posts_analyzed = posts_skipped = 0
         for post in posts:
             try:
                 _analyze_single_post(post, db)
-                analyzed += 1
-                # Commit in batches of 10 to avoid long transactions
-                if analyzed % 10 == 0:
+                posts_analyzed += 1
+                if posts_analyzed % 10 == 0:
                     db.commit()
-                    logger.info("Progress: %d/%d analyzed", analyzed, len(posts))
+                    logger.info("Posts progress: %d/%d", posts_analyzed, len(posts))
             except Exception as exc:
                 logger.error("Failed to analyze post %s: %s", post.id, exc)
                 db.rollback()
-                skipped += 1
+                posts_skipped += 1
 
         db.commit()
-        logger.info("Analysis complete: %d analyzed, %d skipped", analyzed, skipped)
-        return {"status": "ok", "analyzed": analyzed, "skipped": skipped}
+
+        comments_analyzed = comments_skipped = 0
+        for comment in comments:
+            try:
+                _analyze_single_comment(comment, db)
+                comments_analyzed += 1
+                if comments_analyzed % 25 == 0:
+                    db.commit()
+                    logger.info("Comments progress: %d/%d", comments_analyzed, len(comments))
+            except Exception as exc:
+                logger.error("Failed to analyze comment %s: %s", comment.id, exc)
+                db.rollback()
+                comments_skipped += 1
+
+        db.commit()
+        logger.info(
+            "Analysis complete: posts %d/%d, comments %d/%d",
+            posts_analyzed, posts_skipped, comments_analyzed, comments_skipped,
+        )
+        return {
+            "status": "ok",
+            "posts_analyzed": posts_analyzed, "posts_skipped": posts_skipped,
+            "comments_analyzed": comments_analyzed, "comments_skipped": comments_skipped,
+        }
 
     except Exception as exc:
         db.rollback()
         logger.error("analyze_posts failed: %s", exc)
+        raise self.retry(exc=exc, countdown=120)
+    finally:
+        db.close()
+
+
+@celery.task(name="analyze_comments", bind=True, max_retries=2)
+def analyze_comments(self):
+    """Analyze only unanalyzed comments. Useful right after a sync."""
+    db = SessionLocal()
+    try:
+        comments = (
+            db.query(Comment)
+            .outerjoin(AnalysisResult, Comment.id == AnalysisResult.comment_id)
+            .filter(AnalysisResult.id.is_(None))
+            .filter(Comment.text.isnot(None))
+            .all()
+        )
+
+        if not comments:
+            return {"status": "ok", "analyzed": 0, "skipped": 0}
+
+        analyzed = skipped = 0
+        for comment in comments:
+            try:
+                _analyze_single_comment(comment, db)
+                analyzed += 1
+                if analyzed % 25 == 0:
+                    db.commit()
+            except Exception as exc:
+                logger.error("Failed to analyze comment %s: %s", comment.id, exc)
+                db.rollback()
+                skipped += 1
+
+        db.commit()
+        return {"status": "ok", "analyzed": analyzed, "skipped": skipped}
+
+    except Exception as exc:
+        db.rollback()
+        logger.error("analyze_comments failed: %s", exc)
         raise self.retry(exc=exc, countdown=120)
     finally:
         db.close()

@@ -174,3 +174,71 @@ export async function generateInsights(): Promise<{ task_id: string }> {
   const res = await api.post<unknown, ApiResponse<{ task_id: string; status: string }>>('/analytics/insights/generate')
   return res.data
 }
+
+export interface CommentSentimentEntry {
+  id: string
+  post_id: string
+  platform_comment_id: string
+  text: string | null
+  author_username: string | null
+  created_at: string | null
+  sentiment: 'positive' | 'neutral' | 'negative' | null
+  sentiment_score: number | null
+  language: 'en' | 'ar' | 'unknown' | null
+}
+
+export interface CommentsAnalyticsData {
+  total_comments: number
+  total_analyzed: number
+  sentiment_counts: { positive: number; neutral: number; negative: number }
+  comments: CommentSentimentEntry[]
+}
+
+export async function fetchCommentsAnalytics(accountId?: string): Promise<CommentsAnalyticsData> {
+  const qs = accountId ? `?account_id=${accountId}` : ''
+  const res = await api.get<unknown, ApiResponse<CommentsAnalyticsData>>(`/analytics/comments${qs}`)
+  return res.data
+}
+
+export type SentimentKey = 'positive' | 'neutral' | 'negative'
+
+export interface Keyword {
+  term: string
+  count: number
+  sentiment: SentimentKey
+}
+
+export interface NeedsAttentionPost {
+  post_id: string
+  platform_post_id: string
+  caption: string
+  permalink: string | null
+  negative_count: number
+}
+
+export interface SampleComment {
+  id: string
+  post_id: string
+  text: string
+  author_username: string | null
+  created_at: string | null
+  language: 'en' | 'ar' | 'unknown' | null
+}
+
+export interface SentimentSummaryData {
+  total_week: number
+  total_prev_week: number
+  current_counts: Record<SentimentKey, number>
+  previous_counts: Record<SentimentKey, number>
+  wow_change: Record<SentimentKey, number>
+  keywords: Keyword[]
+  highlights: string
+  needs_attention: NeedsAttentionPost[]
+  samples: Record<SentimentKey, SampleComment | null>
+}
+
+export async function fetchSentimentSummary(accountId?: string): Promise<SentimentSummaryData> {
+  const qs = accountId ? `?account_id=${accountId}` : ''
+  const res = await api.get<unknown, ApiResponse<SentimentSummaryData>>(`/analytics/sentiment/summary${qs}`)
+  return res.data
+}

@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Float, Text, DateTime, ForeignKey, Enum, Index, func
+from sqlalchemy import Column, String, Float, Text, DateTime, ForeignKey, Enum, Index, CheckConstraint, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -9,10 +9,16 @@ class AnalysisResult(Base):
     __tablename__ = "analysis_result"
     __table_args__ = (
         Index("idx_analysis_post", "post_id"),
+        Index("idx_analysis_comment", "comment_id"),
+        CheckConstraint(
+            "(post_id IS NOT NULL) <> (comment_id IS NOT NULL)",
+            name="analysis_result_target_xor",
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    post_id = Column(UUID(as_uuid=True), ForeignKey("post.id", ondelete="CASCADE"), unique=True, nullable=False)
+    post_id = Column(UUID(as_uuid=True), ForeignKey("post.id", ondelete="CASCADE"), unique=True, nullable=True)
+    comment_id = Column(UUID(as_uuid=True), ForeignKey("comment.id", ondelete="CASCADE"), unique=True, nullable=True)
     sentiment = Column(Enum("positive", "neutral", "negative", name="sentiment_label", create_type=False))
     sentiment_score = Column(Float)
     topics = Column(JSONB)
@@ -23,3 +29,4 @@ class AnalysisResult(Base):
     analyzed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     post = relationship("Post", back_populates="analysis_result")
+    comment = relationship("Comment", back_populates="analysis_result")

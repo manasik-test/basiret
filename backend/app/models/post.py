@@ -44,3 +44,4 @@ class Post(Base):
     social_account = relationship("SocialAccount", back_populates="posts")
     analysis_result = relationship("AnalysisResult", back_populates="post", uselist=False, cascade="all, delete-orphan")
     engagement_metrics = relationship("EngagementMetric", back_populates="post", cascade="all, delete-orphan")
+    comments = relationship("Comment", back_populates="post", cascade="all, delete-orphan")

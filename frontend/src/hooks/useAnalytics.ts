@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown, fetchAccounts, fetchSegments, regenerateSegments, fetchInsights, generateInsights } from '../api/analytics'
+import { fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown, fetchAccounts, fetchSegments, regenerateSegments, fetchInsights, generateInsights, fetchCommentsAnalytics, fetchSentimentSummary } from '../api/analytics'
 
 export function useOverview() {
   return useQuery({
@@ -82,5 +82,21 @@ export function useGenerateInsights() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['analytics', 'insights'] })
     },
+  })
+}
+
+export function useCommentsAnalytics(accountId?: string) {
+  return useQuery({
+    queryKey: ['analytics', 'comments', accountId ?? 'all'],
+    queryFn: () => fetchCommentsAnalytics(accountId),
+    staleTime: 60_000,
+  })
+}
+
+export function useSentimentSummary(accountId?: string) {
+  return useQuery({
+    queryKey: ['analytics', 'sentiment-summary', accountId ?? 'all'],
+    queryFn: () => fetchSentimentSummary(accountId),
+    staleTime: 5 * 60_000,
   })
 }

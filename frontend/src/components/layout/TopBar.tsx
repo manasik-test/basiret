@@ -14,6 +14,7 @@ const pageTitleMap: Record<string, string> = {
   '/my-audience': 'nav.myAudience',
   '/content-plan': 'nav.contentPlan',
   '/competitors': 'nav.competitors',
+  '/sentiment': 'nav.sentiment',
   '/trends': 'nav.trends',
   '/my-goals': 'nav.myGoals',
   '/ask-basiret': 'nav.askBasiret',

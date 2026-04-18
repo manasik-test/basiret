@@ -5,22 +5,30 @@ GET  /overview              — basic KPI data for the authenticated user's orga
 GET  /posts/breakdown       — per-content-type engagement stats + posting dates.
 POST /analyze               — trigger NLP analysis for all unanalyzed posts.
 GET  /sentiment             — sentiment breakdown across analyzed posts (Pro).
+GET  /sentiment/summary     — intelligence summary: WoW counts, keywords, highlights, needs-attention, samples (Pro).
 GET  /sentiment/timeline    — daily sentiment counts over time (Pro).
+GET  /comments              — full comment feed with per-comment sentiment (Pro).
 GET  /accounts              — active social accounts for the organization.
 GET  /segments              — audience segments for a social account (Pro).
 POST /segments/regenerate   — trigger K-means clustering, returns task_id (Pro).
 GET  /insights              — latest AI-generated weekly insight (Pro).
 POST /insights/generate     — trigger Gemini insight generation, returns task_id (Pro).
 """
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, cast, Date
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, RequireFeature
 from app.models.user import User
 from app.models.post import Post
+from app.models.comment import Comment
 from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
 from app.models.social_account import SocialAccount, Platform
@@ -29,6 +37,124 @@ from app.models.insight_result import InsightResult
 from app.tasks.nlp_analysis import analyze_posts
 from app.tasks.segmentation import segment_audience
 from app.tasks.insights import generate_weekly_insights
+
+logger = logging.getLogger(__name__)
+
+
+# ── Keyword extraction helpers (shared by sentiment summary) ─────────────
+
+_STOPWORDS_EN = {
+    "a", "an", "the", "and", "or", "but", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "shall",
+    "to", "of", "in", "on", "at", "for", "with", "by", "from", "as", "about", "into",
+    "i", "you", "he", "she", "it", "we", "they", "me", "my", "your", "yours", "his", "her",
+    "hers", "its", "our", "ours", "their", "theirs", "mine",
+    "this", "that", "these", "those", "here", "there", "what", "when", "where", "why", "how",
+    "not", "no", "so", "too", "very", "just", "also", "only", "even", "if", "then", "than",
+    "can", "cannot", "cant", "yes", "yeah", "ok", "okay", "lol", "omg", "wow", "yep", "nope",
+    "am", "pm", "u", "ur", "pls", "plz", "hi", "hey", "hello",
+    "some", "any", "all", "most", "more", "less", "such", "like",
+}
+
+_STOPWORDS_AR = {
+    "في", "من", "إلى", "الى", "على", "عن", "مع", "هذا", "هذه", "ذلك", "تلك", "هناك",
+    "هو", "هي", "أنا", "انا", "أنت", "انت", "نحن", "هم", "هن", "كان", "كانت", "يكون",
+    "أن", "ان", "إن", "لا", "لم", "لن", "ما", "ماذا", "متى", "أين", "اين", "كيف",
+    "الذي", "التي", "كل", "بعض", "قد", "و", "أو", "او", "ثم", "لكن", "أيضا", "ايضا",
+    "يا", "والله", "الله", "مش", "مو", "يعني", "بس", "شو", "شي",
+}
+
+_STOPWORDS = _STOPWORDS_EN | _STOPWORDS_AR
+_WORD_SPLIT = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _tokenize(text: str) -> list[str]:
+    """Tokenize a comment into keyword candidates (lowercased, stopword-filtered)."""
+    if not text:
+        return []
+    lowered = text.lower()
+    out: list[str] = []
+    for tok in _WORD_SPLIT.split(lowered):
+        if len(tok) < 3 or tok.isdigit() or tok in _STOPWORDS:
+            continue
+        out.append(tok)
+    return out
+
+
+def _extract_keywords(
+    analyzed_comments: list[tuple[str, str]], top_n: int = 5
+) -> list[dict]:
+    """Take [(text, sentiment)] → top N keywords with dominant sentiment + total count."""
+    counts: dict[str, dict[str, int]] = {}
+    for text, sentiment in analyzed_comments:
+        for tok in _tokenize(text):
+            bucket = counts.setdefault(tok, {"positive": 0, "neutral": 0, "negative": 0})
+            if sentiment in bucket:
+                bucket[sentiment] += 1
+
+    ranked = sorted(
+        counts.items(),
+        key=lambda kv: sum(kv[1].values()),
+        reverse=True,
+    )[:top_n]
+
+    keywords = []
+    for term, per_sentiment in ranked:
+        total = sum(per_sentiment.values())
+        dominant = max(per_sentiment.items(), key=lambda kv: kv[1])[0]
+        keywords.append({"term": term, "count": total, "sentiment": dominant})
+    return keywords
+
+
+def _generate_highlights(
+    *,
+    total_week: int,
+    current_counts: dict[str, int],
+    wow_change: dict[str, int],
+    keywords: list[dict],
+) -> str:
+    """Ask Gemini for a 2-sentence audience-intelligence summary. Empty string on failure."""
+    if not settings.GEMINI_API_KEY or total_week == 0:
+        return ""
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            "gemini-2.5-flash-lite",
+            system_instruction=(
+                "You are an audience-insights writer for a social media analytics tool. "
+                "Given comment-sentiment data from an Instagram creator's past week, write "
+                "EXACTLY TWO sentences summarizing what the audience is saying. "
+                "Be specific — reference the percentages, top keywords, and week-over-week "
+                "trend direction. Use a neutral, professional tone. "
+                "No markdown, no bullets, no emojis, no preamble."
+            ),
+            generation_config=genai.GenerationConfig(temperature=0.4),
+        )
+
+        def pct(n: int) -> int:
+            return round(100 * n / total_week) if total_week else 0
+
+        kw_line = ", ".join(
+            f"{k['term']} ({k['sentiment']}, n={k['count']})" for k in keywords
+        ) or "(none)"
+        user_msg = (
+            f"Total comments this week: {total_week}\n"
+            f"Sentiment this week: {pct(current_counts.get('positive', 0))}% positive, "
+            f"{pct(current_counts.get('neutral', 0))}% neutral, "
+            f"{pct(current_counts.get('negative', 0))}% negative\n"
+            f"Week-over-week percentage-point change: "
+            f"positive {wow_change.get('positive', 0):+d}, "
+            f"neutral {wow_change.get('neutral', 0):+d}, "
+            f"negative {wow_change.get('negative', 0):+d}\n"
+            f"Top keywords: {kw_line}"
+        )
+        resp = model.generate_content(user_msg)
+        return (resp.text or "").strip()
+    except Exception as exc:
+        logger.warning("Gemini highlights generation failed: %s", exc)
+        return ""
 
 router = APIRouter()
 
@@ -214,6 +340,278 @@ def sentiment_overview(
             "total_analyzed": total_analyzed,
             "pending_analysis": pending,
             "sentiment": sentiment_data,
+        },
+    }
+
+
+@router.get("/comments")
+def comments_analytics(
+    account_id: str | None = None,
+    limit: int = 200,
+    user: User = Depends(RequireFeature("sentiment_analysis")),
+    db: Session = Depends(get_db),
+):
+    """Return comment-sentiment analytics for the user's organization (Pro).
+
+    Differentiator vs. Meta Business Suite: Meta shows raw comment text only.
+    BASIRET classifies every comment with multilingual XLM-RoBERTa and surfaces
+    sentiment counts + language-aware samples (Arabic comments preserved as-is
+    for client-side RTL rendering).
+    """
+    accounts_q = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+    )
+    if account_id:
+        accounts_q = accounts_q.filter(SocialAccount.id == account_id)
+    account_ids = [a.id for a in accounts_q.all()]
+
+    if not account_ids:
+        return {
+            "success": True,
+            "data": {
+                "total_comments": 0,
+                "total_analyzed": 0,
+                "sentiment_counts": {"positive": 0, "neutral": 0, "negative": 0},
+                "comments": [],
+            },
+        }
+
+    post_ids_subq = db.query(Post.id).filter(Post.social_account_id.in_(account_ids)).subquery()
+
+    base_q = db.query(Comment).filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
+    total_comments = base_q.count()
+
+    analyzed_q = (
+        db.query(
+            Comment,
+            AnalysisResult.sentiment,
+            AnalysisResult.sentiment_score,
+            AnalysisResult.language_detected,
+        )
+        .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
+        .filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
+    )
+
+    sentiment_counts = {"positive": 0, "neutral": 0, "negative": 0}
+    rows = (
+        db.query(AnalysisResult.sentiment, func.count(AnalysisResult.id))
+        .join(Comment, AnalysisResult.comment_id == Comment.id)
+        .filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
+        .group_by(AnalysisResult.sentiment)
+        .all()
+    )
+    for label, count in rows:
+        if label in sentiment_counts:
+            sentiment_counts[label] = count
+    total_analyzed = sum(sentiment_counts.values())
+
+    feed_rows = (
+        analyzed_q.order_by(Comment.created_at.desc().nullslast())
+        .limit(min(max(limit, 1), 500))
+        .all()
+    )
+
+    comments_payload = [
+        {
+            "id": str(c.id),
+            "post_id": str(c.post_id),
+            "platform_comment_id": c.platform_comment_id,
+            "text": c.text,
+            "author_username": c.author_username,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "sentiment": sentiment,
+            "sentiment_score": float(score) if score is not None else None,
+            "language": language,
+        }
+        for (c, sentiment, score, language) in feed_rows
+    ]
+
+    return {
+        "success": True,
+        "data": {
+            "total_comments": total_comments,
+            "total_analyzed": total_analyzed,
+            "sentiment_counts": sentiment_counts,
+            "comments": comments_payload,
+        },
+    }
+
+
+@router.get("/sentiment/summary")
+def sentiment_summary(
+    account_id: str | None = None,
+    user: User = Depends(RequireFeature("sentiment_analysis")),
+    db: Session = Depends(get_db),
+):
+    """Audience-intelligence summary for the Sentiment page (Pro).
+
+    Replaces the former scrollable-feed shape with a compact intelligence digest:
+      - current-week sentiment counts + week-over-week percentage-point deltas
+      - top 5 keywords extracted from analyzed comments with dominant sentiment
+      - a 2-sentence Gemini-generated "highlights" summary
+      - posts needing attention (>2 negative comments) with caption + permalink
+      - three sample comments (one positive, one neutral, one negative)
+
+    Week boundaries use the comment's `created_at` (the Instagram timestamp) so
+    the WoW delta reflects audience reactions, not sync times.
+    """
+    # Scope to the user's org, optionally filter to a single account
+    accounts_q = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+    )
+    if account_id:
+        accounts_q = accounts_q.filter(SocialAccount.id == account_id)
+    account_ids = [a.id for a in accounts_q.all()]
+
+    empty_counts = {"positive": 0, "neutral": 0, "negative": 0}
+    empty_response = {
+        "success": True,
+        "data": {
+            "total_week": 0,
+            "total_prev_week": 0,
+            "current_counts": dict(empty_counts),
+            "previous_counts": dict(empty_counts),
+            "wow_change": dict(empty_counts),
+            "keywords": [],
+            "highlights": "",
+            "needs_attention": [],
+            "samples": {"positive": None, "neutral": None, "negative": None},
+        },
+    }
+    if not account_ids:
+        return empty_response
+
+    post_ids_subq = db.query(Post.id).filter(
+        Post.social_account_id.in_(account_ids),
+    ).subquery()
+
+    now = datetime.now(timezone.utc)
+    wk1_start = now - timedelta(days=7)
+    wk2_start = now - timedelta(days=14)
+
+    # ── Week-over-week counts ────────────────────────────────────────
+    def _bucket_counts(start: datetime, end: datetime) -> dict[str, int]:
+        rows = (
+            db.query(AnalysisResult.sentiment, func.count(AnalysisResult.id))
+            .join(Comment, AnalysisResult.comment_id == Comment.id)
+            .filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
+            .filter(Comment.created_at >= start)
+            .filter(Comment.created_at < end)
+            .group_by(AnalysisResult.sentiment)
+            .all()
+        )
+        out = dict(empty_counts)
+        for label, n in rows:
+            if label in out:
+                out[label] = n
+        return out
+
+    current_counts = _bucket_counts(wk1_start, now)
+    previous_counts = _bucket_counts(wk2_start, wk1_start)
+    total_week = sum(current_counts.values())
+    total_prev = sum(previous_counts.values())
+
+    def _pp(n: int, total: int) -> int:
+        return round(100 * n / total) if total else 0
+
+    wow_change = {
+        label: _pp(current_counts[label], total_week) - _pp(previous_counts[label], total_prev)
+        for label in ("positive", "neutral", "negative")
+    }
+
+    # ── Keywords (from all analyzed comments in current + previous week) ─
+    kw_rows = (
+        db.query(Comment.text, AnalysisResult.sentiment)
+        .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
+        .filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
+        .filter(Comment.created_at >= wk2_start)
+        .filter(Comment.text.isnot(None))
+        .all()
+    )
+    keywords = _extract_keywords(
+        [(text, sentiment) for (text, sentiment) in kw_rows],
+        top_n=5,
+    )
+
+    # ── Needs attention: posts with >2 negative comments (all-time window) ─
+    attention_rows = (
+        db.query(
+            Post.id,
+            Post.caption,
+            Post.raw_data,
+            Post.platform_post_id,
+            func.count(AnalysisResult.id).label("neg_count"),
+        )
+        .join(Comment, Comment.post_id == Post.id)
+        .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
+        .filter(AnalysisResult.sentiment == "negative")
+        .filter(Post.social_account_id.in_(account_ids))
+        .group_by(Post.id, Post.caption, Post.raw_data, Post.platform_post_id)
+        .having(func.count(AnalysisResult.id) > 2)
+        .order_by(func.count(AnalysisResult.id).desc())
+        .limit(10)
+        .all()
+    )
+    needs_attention = [
+        {
+            "post_id": str(row.id),
+            "platform_post_id": row.platform_post_id,
+            "caption": (row.caption or "")[:280],
+            "permalink": (row.raw_data or {}).get("permalink") if row.raw_data else None,
+            "negative_count": row.neg_count,
+        }
+        for row in attention_rows
+    ]
+
+    # ── Samples: one per sentiment, most recent first ─────────────────
+    def _sample(sentiment: str) -> dict | None:
+        row = (
+            db.query(Comment, AnalysisResult.language_detected)
+            .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
+            .filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
+            .filter(AnalysisResult.sentiment == sentiment)
+            .filter(Comment.text.isnot(None))
+            .order_by(Comment.created_at.desc().nullslast())
+            .first()
+        )
+        if not row:
+            return None
+        c, lang = row
+        return {
+            "id": str(c.id),
+            "post_id": str(c.post_id),
+            "text": c.text,
+            "author_username": c.author_username,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "language": lang,
+        }
+
+    samples = {
+        "positive": _sample("positive"),
+        "neutral": _sample("neutral"),
+        "negative": _sample("negative"),
+    }
+
+    # ── Gemini highlights (synchronous, graceful fallback) ────────────
+    highlights = _generate_highlights(
+        total_week=total_week,
+        current_counts=current_counts,
+        wow_change=wow_change,
+        keywords=keywords,
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "total_week": total_week,
+            "total_prev_week": total_prev,
+            "current_counts": current_counts,
+            "previous_counts": previous_counts,
+            "wow_change": wow_change,
+            "keywords": keywords,
+            "highlights": highlights,
+            "needs_attention": needs_attention,
+            "samples": samples,
         },
     }
 

@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Analytics from './pages/Analytics'
 import Audience from './pages/Audience'
 import Recommendations from './pages/Recommendations'
+import Sentiment from './pages/Sentiment'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import Admin from './pages/Admin'
@@ -80,6 +81,14 @@ export default function App() {
             }
           />
           <Route
+            path="/sentiment"
+            element={
+              <ProtectedRoute>
+                <AppLayout><Sentiment /></AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/trends"
             element={
               <ProtectedRoute>
@@ -130,7 +139,6 @@ export default function App() {
           <Route path="/analytics" element={<Navigate to="/my-posts" replace />} />
           <Route path="/audience" element={<Navigate to="/my-audience" replace />} />
           <Route path="/recommendations" element={<Navigate to="/content-plan" replace />} />
-          <Route path="/sentiment" element={<Navigate to="/dashboard" replace />} />
 
           {/* Catch-all redirect */}
           <Route path="*" element={<Navigate to="/" replace />} />
