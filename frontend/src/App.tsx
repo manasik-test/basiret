@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Swords, TrendingUp, Target, MessageCircleQuestion } from 'lucide-react'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
@@ -6,12 +7,12 @@ import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import Analytics from './pages/Analytics'
 import Audience from './pages/Audience'
-import Sentiment from './pages/Sentiment'
 import Recommendations from './pages/Recommendations'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
+import ComingSoon from './pages/ComingSoon'
 
 export default function App() {
   return (
@@ -45,7 +46,7 @@ export default function App() {
             }
           />
           <Route
-            path="/analytics"
+            path="/my-posts"
             element={
               <ProtectedRoute>
                 <AppLayout><Analytics /></AppLayout>
@@ -53,7 +54,7 @@ export default function App() {
             }
           />
           <Route
-            path="/audience"
+            path="/my-audience"
             element={
               <ProtectedRoute>
                 <AppLayout><Audience /></AppLayout>
@@ -61,18 +62,50 @@ export default function App() {
             }
           />
           <Route
-            path="/sentiment"
+            path="/content-plan"
             element={
               <ProtectedRoute>
-                <AppLayout><Sentiment /></AppLayout>
+                <AppLayout><Recommendations /></AppLayout>
               </ProtectedRoute>
             }
           />
           <Route
-            path="/recommendations"
+            path="/competitors"
             element={
               <ProtectedRoute>
-                <AppLayout><Recommendations /></AppLayout>
+                <AppLayout>
+                  <ComingSoon titleKey="nav.competitors" questionKey="comingSoon.competitorsQ" icon={Swords} />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trends"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <ComingSoon titleKey="nav.trends" questionKey="comingSoon.trendsQ" icon={TrendingUp} />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/my-goals"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <ComingSoon titleKey="nav.myGoals" questionKey="comingSoon.myGoalsQ" icon={Target} />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/ask-basiret"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <ComingSoon titleKey="nav.askBasiret" questionKey="comingSoon.askBasiretQ" icon={MessageCircleQuestion} />
+                </AppLayout>
               </ProtectedRoute>
             }
           />
@@ -92,6 +125,12 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* Redirect legacy paths */}
+          <Route path="/analytics" element={<Navigate to="/my-posts" replace />} />
+          <Route path="/audience" element={<Navigate to="/my-audience" replace />} />
+          <Route path="/recommendations" element={<Navigate to="/content-plan" replace />} />
+          <Route path="/sentiment" element={<Navigate to="/dashboard" replace />} />
 
           {/* Catch-all redirect */}
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -149,7 +149,7 @@ export default function Audience() {
   const isLocked = useIsFeatureLocked('audience_segmentation')
 
   return (
-    <LockedFeature locked={isLocked} featureName={t('nav.audience')}>
+    <LockedFeature locked={isLocked} featureName={t('nav.myAudience')}>
       <AudienceContent />
     </LockedFeature>
   )

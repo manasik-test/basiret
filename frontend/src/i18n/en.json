@@ -1,14 +1,61 @@
 {
   "nav": {
-    "dashboard": "Dashboard",
-    "analytics": "Analytics",
-    "audience": "Audience",
-    "sentiment": "Sentiment",
-    "recommendations": "Recommendations",
+    "home": "Home",
+    "myPosts": "My Posts",
+    "myAudience": "My Audience",
+    "contentPlan": "Content Plan",
+    "competitors": "Competitors",
+    "trends": "Trends",
+    "myGoals": "My Goals",
+    "askBasiret": "Ask Basiret",
     "settings": "Settings",
     "upgrade": "Upgrade to Pro",
     "admin": "Admin Panel",
     "logout": "Log out"
+  },
+  "comingSoon": {
+    "badge": "Coming soon",
+    "competitorsQ": "Who are your competitors, and how do you compare to them on Instagram?",
+    "trendsQ": "What's trending in your niche right now, and which formats are taking off?",
+    "myGoalsQ": "What growth goals are you chasing, and how close are you to hitting them?",
+    "askBasiretQ": "Ask Basiret anything about your audience, your content, or your next move."
+  },
+  "home": {
+    "greetingMorning": "Good morning, {{name}}",
+    "greetingAfternoon": "Good afternoon, {{name}}",
+    "greetingEvening": "Good evening, {{name}}",
+    "patternsTitle": "Your content patterns",
+    "patternsSubtitle": "How your content performs across different formats and times",
+    "patternsEmpty": "Not enough data yet. Once posts are analyzed, your content patterns appear here.",
+    "whatsWorkingTitle": "What's working",
+    "whatsWorkingEmpty": "Publish a few posts to unlock insights here.",
+    "growthHealthTitle": "Your growth health",
+    "growthHealthSubtitle": "A snapshot of how your Instagram presence is trending.",
+    "bar": {
+      "consistency": "Consistency",
+      "consistencyHint": "Based on active posting days in the last 2 weeks",
+      "consistencyLastPost": "Last post: {{date}}",
+      "audienceFit": "Audience fit",
+      "audienceFitHint": "Share of positive sentiment across analyzed posts",
+      "variety": "Content variety",
+      "varietyHint": "Mix of images, videos, and carousels",
+      "instagramPerf": "Instagram performance",
+      "instagramPerfHint": "Average engagement per post vs. a 100-engagement benchmark"
+    },
+    "bullets": {
+      "typeWinner": "Your {{type}} posts are getting the most engagement",
+      "noClearWinner": "No clear content-type winner yet — keep testing formats",
+      "noPosts": "No posts analyzed yet — sync your Instagram to begin",
+      "sentimentStrong": "Audience sentiment is strongly positive ({{pct}}%)",
+      "sentimentMixed": "Sentiment is mostly neutral — sharper CTAs can help",
+      "sentimentConcern": "Negative sentiment is high ({{pct}}%) — address concerns openly",
+      "consistencyGood": "You've posted {{n}} times this week — great cadence",
+      "consistencyUneven": "Only {{n}} post(s) this week — cadence is uneven",
+      "consistencyGap": "You haven't posted this week",
+      "varietyGood": "Your content mix is well-balanced across formats",
+      "varietyLow": "Try adding a third content format to broaden reach",
+      "varietyMono": "You're relying on one content format — mix it up"
+    }
   },
   "auth": {
     "signIn": "Sign in",

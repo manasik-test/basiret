@@ -544,3 +544,79 @@ PATCH /admin/users/:id, /admin/flags/:id
 - Post Detail View page not yet built (screen #8)
 - Forgot password / reset password flow not yet implemented
 - Invite flow (`POST /auth/invite`) not yet implemented
+- **Regenerate Segments race condition** (fix before real users): `POST /analytics/segments/regenerate` queues a Celery task that does delete-then-insert without locking. Multiple clicks in quick succession queue multiple tasks that interleave — each sees an empty table after its own delete, then all insert their own k rows, producing duplicate segment sets (observed on 2026-04-18: 3 clicks → 9 rows for k=3). Mitigate by debouncing the frontend button while the mutation `isPending`, and/or taking a Postgres advisory lock keyed on `social_account_id` inside the Celery task so regenerations serialize.
+- Gemini env var in `.env` was originally named `Gemini_API_Key` but the backend reads `GEMINI_API_KEY` (pydantic is case-sensitive on Linux), so persona-description generation silently skipped on every regeneration until fixed on 2026-04-18. Audit `.env.example` to ensure the uppercase form is documented; consider a startup warning if the key is absent.
+
+---
+
+## Session Log — 2026-04-18
+
+### What was built
+
+**Sprint 8 — Navigation restructure + Home dashboard redesign:**
+
+**Navigation rename + 4 new placeholder pages:**
+- Sidebar labels renamed: Dashboard → Home, Analytics → My Posts, Audience → My Audience, Recommendations → Content Plan
+- Sentiment removed as a standalone nav entry — merged into Home's "What's working" insights and the Growth Health "Audience fit" bar
+- 4 new placeholder pages added, each wrapped in a reusable `ComingSoon` component ([frontend/src/pages/ComingSoon.tsx](frontend/src/pages/ComingSoon.tsx)): `/competitors`, `/trends`, `/my-goals`, `/ask-basiret`. Each shows its page-specific guiding question + "Coming soon" badge (e.g. "Who are your competitors, and how do you compare to them on Instagram?")
+- Routes reorganized with semantic paths: `/my-posts`, `/my-audience`, `/content-plan`. Legacy paths (`/analytics`, `/audience`, `/recommendations`, `/sentiment`) redirect to the new URLs so bookmarks keep working
+- Mobile bottom tab bar filters to the 5 primary nav items via a `primary: true` flag (Home / My Posts / My Audience / Content Plan / Settings); the 4 coming-soon pages live only in the desktop sidebar
+- `TopBar.tsx` `pageTitleMap` updated for all new routes so the page header resolves correctly
+- `Sentiment.tsx` page file deleted
+
+**Home dashboard redesign ([frontend/src/pages/Dashboard.tsx](frontend/src/pages/Dashboard.tsx)):**
+- **Top greeting**: time-of-day aware ("Good morning/afternoon/evening, {firstName}") with locale-formatted date; first name pulled from `useAuth()` and split off `full_name`
+- **Do This Today**: existing `DoThisToday` Gemini insights component kept intact in its slot
+- **Two-column middle section**:
+  - Left — "Your content patterns" (originally "Who is your audience" — renamed to clarify these are content clusters, not audience personas): top-3 K-means segments by size, each rendered as a `PersonaCard` showing the Gemini-written `characteristics.persona_description` as primary text (falls back to cluster label if description is empty/missing), size percentage pill, and small tags below for dominant content type + typical posting time
+  - Right — "What's working": up to 4 insight bullets with green/amber/red dot colors, all derived from real post data (no hardcoded copy). Derivations: (1) content-type winner when one format's avg_likes exceeds runner-up by >20%, (2) sentiment bucket (green ≥60% positive, red ≥30% negative, amber otherwise), (3) posting cadence (green ≥3 posts/week, amber 1-2, red 0), (4) content variety (green ≥3 formats, amber 2, red 1)
+- **Bottom — "Your growth health"**:
+  - Big score number (from `insights.score` when available, else computed as the average of the four bars × 100) with trend arrow showing `score_change` delta when non-zero
+  - Four color-thresholded bars: Consistency (active posting days in last 14 / 7), Audience fit (positive sentiment share), Content variety (distinct content types / 3), Instagram performance (avg engagement per post vs 100-engagement benchmark)
+  - Consistency helper text swaps to "Last post: {date}" (locale-formatted) when score is 0% and a last post exists, so users understand why the bar is empty
+- Bar color thresholds: ≥70% emerald, ≥40% amber, else red
+- Dashboard is wired up entirely through existing React Query hooks (`useOverview`, `useSentiment`, `useSegments`, `usePostsBreakdown`, `useInsights`) — no new hooks needed
+
+**Gemini prompt reframed for content patterns ([backend/app/tasks/segmentation.py](backend/app/tasks/segmentation.py)):**
+- System instruction rewritten from "marketing analyst describing audience personas" to "content-performance analyst describing the creator's own post clusters"
+- Every description MUST start verbatim with: `Content posted in the <time> performs like this:` where `<time>` is lowercased `typical_posting_time` (morning/afternoon/evening/night) — the system prompt explicitly forbids "this user…" / "they are…" audience-persona framing
+- User prompt relabeled "clusters" instead of "segments" to reinforce framing
+
+**i18n updates (EN + AR):**
+- `nav.*`: new keys `home`, `myPosts`, `myAudience`, `contentPlan`, `competitors`, `trends`, `myGoals`, `askBasiret` (old `dashboard`/`analytics`/`audience`/`sentiment`/`recommendations` keys removed)
+- New namespaces: `comingSoon.*` (badge + 4 guiding questions) and `home.*` (greetings, section headings + subtitles, 4 bar labels + helper hints, 11 bullet variants with interpolation for `{{type}}` / `{{pct}}` / `{{n}}` / `{{date}}` / `{{name}}`)
+- New key `home.bar.consistencyLastPost` for the "Last post: {date}" helper
+- Content-patterns section labelled "Your content patterns" (EN) / "أنماط محتواك" (AR) with subtitle "How your content performs across different formats and times" (EN) / "كيف يؤدي محتواك عبر مختلف الأنماط والأوقات" (AR)
+
+**Infrastructure / bug fixes:**
+- Env-var case fix in `.env`: `Gemini_API_Key` → `GEMINI_API_KEY` so pydantic-settings can read it on Linux (case-sensitive). Before this fix, `_generate_persona_descriptions()` silently hit the `if not settings.GEMINI_API_KEY` guard on every regeneration and returned empty strings. `docker compose up -d api celery` required (not just `restart`) because restart preserves the container's baked-in env
+- `LockedFeature` titles on [Audience.tsx](frontend/src/pages/Audience.tsx) and [Recommendations.tsx](frontend/src/pages/Recommendations.tsx) updated to reference the new nav keys (`nav.myAudience`, `nav.contentPlan`)
+- Legacy `sentiment.*` i18n block left in place as dead keys (no references) — safe to prune in a later cleanup pass
+
+### Verified end-to-end
+- TypeScript check passes with zero errors (`npx tsc --noEmit`)
+- Vite production build succeeds (879 KB JS, 47 KB CSS, gzipped 262 KB / 9 KB)
+- Dev server (`npx vite --host` → `http://localhost:3000`) reachable; all new routes render with correct labels
+- Segments regenerated with new Gemini prompt produce descriptions that begin "Content posted in the morning/afternoon performs like this:" as required
+- Home "Your content patterns" cards render Gemini descriptions as primary text with content-type + time-of-day tags below
+- Legacy bookmarks (`/analytics`, `/audience`, `/recommendations`, `/sentiment`) correctly redirect
+
+### Key decisions
+- URL paths renamed to match the new nav labels (`/my-posts`, `/my-audience`, `/content-plan`) rather than kept as legacy. Redirects added for bookmark continuity
+- One reusable `ComingSoon` component parameterized by `titleKey`/`questionKey`/`icon` instead of four near-identical page files. Keeps the "coming soon" surface cheap to add/remove
+- Mobile bottom tab bar uses a `primary: true` flag on nav items rather than a slice index, so adding or reordering placeholder items won't accidentally push Settings off the bar
+- `ContentPatterns` component name (internal) + `patternsTitle`/`patternsSubtitle`/`patternsEmpty` i18n keys chosen deliberately to stop calling these clusters "audience" anywhere — they're post clusters, not people
+- Persona description fallback is "cluster label if description empty", not a hardcoded default sentence — existing segments generated before Gemini integration still render acceptably rather than showing blank cards
+- Bar color thresholds (70/40) picked so "green" implies active/healthy, "amber" implies needs attention, "red" implies urgent. Same thresholds used for the "What's working" bullet dot colors to keep visual semantics consistent across the two sections
+- `TopBar` page title left showing "Home" on `/dashboard` even though the dashboard body already starts with a greeting — the two serve different roles (breadcrumb vs. hero) and removing the top-bar title produced a visually awkward gap
+- Gemini prompt was reframed at the system-instruction level (not by post-processing frontend text) so the DB content is correct for any future consumer (e.g. AI insights job could cite a cluster description verbatim)
+- AR translations kept for all new copy — RTL-ready-from-day-one invariant preserved
+- Older audience_segment rows (generated before Gemini prompt + env-var fix) were cleaned up in place via `DELETE FROM audience_segment WHERE created_at < (SELECT MAX(created_at) FROM audience_segment)` to resolve the 9-row duplicate set caused by the regenerate race condition
+
+### Known issues / TODOs
+- `Regenerate Segments` race condition still present — see entry in previous session's known-issues list. Must be fixed before exposing to more users
+- Gemini descriptions are English-only regardless of UI language; Arabic UI users see Arabic chrome but English persona sentences. Acceptable for MVP; a future pass could detect `i18n.language` at generation time and pass it into the Gemini system prompt
+- `home.bar.instagramPerf` uses a 100-engagement-per-post benchmark for the 0-100% normalization — arbitrary and may need per-account calibration for low-follower-count users
+- `useIsFeatureLocked('audience_segmentation')` wrapping on `/my-audience` page is correct, but the Home "Your content patterns" section does NOT currently lock for starter-plan users — it silently renders whatever segments exist. Decision deferred: should the Home section also respect the feature flag, or should starter users see a preview as a conversion prompt?
+- Vite production build chunk still >500 KB due to Recharts — unchanged from prior sprints, same suggested fix (dynamic import of chart components)
+- AR translation of "Content posted in the [time] performs like this:" intro isn't applied because the description text itself is produced by Gemini in English; the AR UI shows an English sentence inside an RTL card

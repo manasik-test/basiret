@@ -5,11 +5,14 @@ import { cn } from '../../lib/utils'
 import { useAuth } from '../../contexts/AuthContext'
 import { createCheckout } from '../../api/billing'
 import {
-  LayoutDashboard,
-  BarChart3,
+  Home,
+  FileText,
   Users,
-  SmilePlus,
-  Lightbulb,
+  CalendarRange,
+  Swords,
+  TrendingUp,
+  Target,
+  MessageCircleQuestion,
   Settings,
   Sparkles,
   Shield,
@@ -19,12 +22,15 @@ import {
 } from 'lucide-react'
 
 const navItems = [
-  { key: 'dashboard', icon: LayoutDashboard, href: '/dashboard' },
-  { key: 'analytics', icon: BarChart3, href: '/analytics' },
-  { key: 'audience', icon: Users, href: '/audience' },
-  { key: 'sentiment', icon: SmilePlus, href: '/sentiment' },
-  { key: 'recommendations', icon: Lightbulb, href: '/recommendations' },
-  { key: 'settings', icon: Settings, href: '/settings' },
+  { key: 'home', icon: Home, href: '/dashboard', primary: true },
+  { key: 'myPosts', icon: FileText, href: '/my-posts', primary: true },
+  { key: 'myAudience', icon: Users, href: '/my-audience', primary: true },
+  { key: 'contentPlan', icon: CalendarRange, href: '/content-plan', primary: true },
+  { key: 'competitors', icon: Swords, href: '/competitors', primary: false },
+  { key: 'trends', icon: TrendingUp, href: '/trends', primary: false },
+  { key: 'myGoals', icon: Target, href: '/my-goals', primary: false },
+  { key: 'askBasiret', icon: MessageCircleQuestion, href: '/ask-basiret', primary: false },
+  { key: 'settings', icon: Settings, href: '/settings', primary: true },
 ] as const
 
 function UpgradeButton() {
@@ -207,7 +213,7 @@ export default function Sidebar() {
 
       {/* Mobile bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 glass-strong z-30 flex items-center justify-around py-2 border-t border-border">
-        {navItems.slice(0, 5).map(({ key, icon: Icon, href }) => {
+        {navItems.filter((i) => i.primary).map(({ key, icon: Icon, href }) => {
           const active = currentPath === href
           return (
             <Link

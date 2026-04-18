@@ -243,7 +243,7 @@ export default function Recommendations() {
   const isLocked = useIsFeatureLocked('content_recommendations')
 
   return (
-    <LockedFeature locked={isLocked} featureName={t('nav.recommendations')}>
+    <LockedFeature locked={isLocked} featureName={t('nav.contentPlan')}>
       <RecommendationsContent />
     </LockedFeature>
   )

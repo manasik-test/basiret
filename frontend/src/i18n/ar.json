@@ -1,14 +1,61 @@
 {
   "nav": {
-    "dashboard": "لوحة التحكم",
-    "analytics": "التحليلات",
-    "audience": "الجمهور",
-    "sentiment": "المشاعر",
-    "recommendations": "التوصيات",
+    "home": "الرئيسية",
+    "myPosts": "منشوراتي",
+    "myAudience": "جمهوري",
+    "contentPlan": "خطة المحتوى",
+    "competitors": "المنافسون",
+    "trends": "الاتجاهات",
+    "myGoals": "أهدافي",
+    "askBasiret": "اسأل بصيرة",
     "settings": "الإعدادات",
     "upgrade": "ترقية إلى Pro",
     "admin": "لوحة الإدارة",
     "logout": "تسجيل الخروج"
+  },
+  "comingSoon": {
+    "badge": "قريباً",
+    "competitorsQ": "من هم منافسوك، وكيف تقارن بهم على إنستغرام؟",
+    "trendsQ": "ما الذي يتصدر مجالك الآن، وأي الأنماط في صعود؟",
+    "myGoalsQ": "ما أهداف النمو التي تسعى إليها، وكم تبعد عن تحقيقها؟",
+    "askBasiretQ": "اسأل بصيرة أي شيء عن جمهورك أو محتواك أو خطوتك القادمة."
+  },
+  "home": {
+    "greetingMorning": "صباح الخير، {{name}}",
+    "greetingAfternoon": "مساء الخير، {{name}}",
+    "greetingEvening": "مساء الخير، {{name}}",
+    "patternsTitle": "أنماط محتواك",
+    "patternsSubtitle": "كيف يؤدي محتواك عبر مختلف الأنماط والأوقات",
+    "patternsEmpty": "لا توجد بيانات كافية بعد. ستظهر أنماط محتواك هنا عند تحليل المنشورات.",
+    "whatsWorkingTitle": "ما الذي ينجح",
+    "whatsWorkingEmpty": "انشر بعض المنشورات لتظهر الرؤى هنا.",
+    "growthHealthTitle": "صحة نموك",
+    "growthHealthSubtitle": "لمحة عن كيف يتطور حضورك على إنستغرام.",
+    "bar": {
+      "consistency": "الانتظام",
+      "consistencyHint": "بناءً على أيام النشر النشطة خلال الأسبوعين الماضيين",
+      "consistencyLastPost": "آخر منشور: {{date}}",
+      "audienceFit": "ملاءمة الجمهور",
+      "audienceFitHint": "نسبة المشاعر الإيجابية في المنشورات المحللة",
+      "variety": "تنوع المحتوى",
+      "varietyHint": "مزيج من الصور والفيديوهات والكاروسيل",
+      "instagramPerf": "أداء إنستغرام",
+      "instagramPerfHint": "متوسط التفاعل لكل منشور مقارنةً بمعيار 100 تفاعل"
+    },
+    "bullets": {
+      "typeWinner": "منشورات {{type}} تحصل على أعلى تفاعل",
+      "noClearWinner": "لا يوجد فائز واضح بعد من حيث نوع المحتوى — استمر في التجربة",
+      "noPosts": "لا توجد منشورات محللة بعد — زامن إنستغرام للبدء",
+      "sentimentStrong": "مشاعر الجمهور إيجابية بقوة ({{pct}}%)",
+      "sentimentMixed": "المشاعر محايدة في الغالب — CTAs أوضح يمكن أن تساعد",
+      "sentimentConcern": "المشاعر السلبية مرتفعة ({{pct}}%) — عالج المخاوف بصراحة",
+      "consistencyGood": "نشرت {{n}} مرات هذا الأسبوع — إيقاع ممتاز",
+      "consistencyUneven": "{{n}} منشور فقط هذا الأسبوع — الإيقاع غير منتظم",
+      "consistencyGap": "لم تنشر هذا الأسبوع",
+      "varietyGood": "مزيج المحتوى متوازن عبر الأنماط",
+      "varietyLow": "جرّب إضافة نوع ثالث من المحتوى لتوسيع الوصول",
+      "varietyMono": "تعتمد على نوع واحد من المحتوى — نوّعه"
+    }
   },
   "auth": {
     "signIn": "تسجيل الدخول",

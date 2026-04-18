@@ -9,11 +9,14 @@ function applyDir(lang: string) {
 }
 
 const pageTitleMap: Record<string, string> = {
-  '/dashboard': 'nav.dashboard',
-  '/analytics': 'nav.analytics',
-  '/audience': 'nav.audience',
-  '/sentiment': 'nav.sentiment',
-  '/recommendations': 'nav.recommendations',
+  '/dashboard': 'nav.home',
+  '/my-posts': 'nav.myPosts',
+  '/my-audience': 'nav.myAudience',
+  '/content-plan': 'nav.contentPlan',
+  '/competitors': 'nav.competitors',
+  '/trends': 'nav.trends',
+  '/my-goals': 'nav.myGoals',
+  '/ask-basiret': 'nav.askBasiret',
   '/settings': 'nav.settings',
   '/admin': 'nav.admin',
 }

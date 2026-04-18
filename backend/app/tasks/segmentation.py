@@ -206,7 +206,13 @@ def _generate_cluster_label(centroid: np.ndarray) -> str:
 
 
 def _generate_persona_descriptions(segments_data: list[dict]) -> list[str]:
-    """Call Gemini 1.5 Flash to generate rich persona descriptions for each segment."""
+    """Call Gemini to generate content-pattern descriptions for each K-means cluster.
+
+    Framing: these describe how the creator's *content* performs across format/time
+    buckets, not audience personas. Each description must begin with
+    'Content posted in the <time> performs like this:' so the reader understands
+    immediately that the cluster is a content pattern, not a person.
+    """
     if not settings.GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY not set — skipping persona descriptions")
         return ["" for _ in segments_data]
@@ -216,11 +222,17 @@ def _generate_persona_descriptions(segments_data: list[dict]) -> list[str]:
         model = genai.GenerativeModel(
             "gemini-2.5-flash-lite",
             system_instruction=(
-                "You are a marketing analyst. Given audience segment data from K-means clustering, "
-                "write a short, vivid persona description (2-3 sentences) for each segment. "
-                "Describe who this audience is, what content they engage with, and when they're active. "
-                "Respond ONLY in valid JSON: an array of strings, one description per segment. "
-                "No preamble, no markdown."
+                "You are a content-performance analyst. Given K-means clusters of a creator's "
+                "own posts (NOT audience segments), write a short content-pattern description "
+                "(2-3 sentences) for each cluster. "
+                "Every description MUST start verbatim with: "
+                "'Content posted in the <time> performs like this:' where <time> is the lowercase "
+                "typical_posting_time value provided (morning/afternoon/evening/night). "
+                "After that sentence opener, describe what the content format looks like, how it "
+                "engages, and a concrete takeaway for the creator. Focus on content and timing "
+                "patterns — do NOT describe hypothetical audience members ('this user...', "
+                "'they are...'). Respond ONLY in valid JSON: an array of strings, one description "
+                "per cluster. No preamble, no markdown."
             ),
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
@@ -228,13 +240,13 @@ def _generate_persona_descriptions(segments_data: list[dict]) -> list[str]:
             ),
         )
 
-        prompt = "Generate persona descriptions for these audience segments:\n\n"
+        prompt = "Generate content-pattern descriptions for these clusters:\n\n"
         for i, seg in enumerate(segments_data):
             prompt += (
-                f"Segment {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
+                f"Cluster {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
                 f"dominant content: {seg['dominant_content_type']}, "
                 f"sentiment: {seg['dominant_sentiment']}, "
-                f"posting time: {seg['typical_posting_time']}, "
+                f"typical_posting_time: {seg['typical_posting_time']}, "
                 f"avg likes: {seg['avg_likes']}, avg comments: {seg['avg_comments']}\n"
             )
 
