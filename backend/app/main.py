@@ -7,6 +7,7 @@ from app.api.v1.instagram import router as instagram_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.billing import router as billing_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.reports import router as reports_router
 
 app = FastAPI(
     title="BASIRET API",
@@ -29,6 +30,7 @@ app.include_router(instagram_router, prefix="/api/v1/instagram", tags=["instagra
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(billing_router, prefix="/api/v1/billing", tags=["billing"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
+app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 
 
 @app.get("/")

@@ -380,7 +380,15 @@
     "upgradeCta": "Upgrade to Insights",
     "nextBilling": "Next billing date",
     "passwordMismatch": "Passwords do not match",
-    "passwordUpdated": "Password updated successfully"
+    "passwordUpdated": "Password updated successfully",
+    "reportsTab": "Reports",
+    "reportsTitle": "Weekly Report",
+    "reportsDesc": "Generate a branded PDF summary of the last 7 days — KPIs, top actions, top posts, and sentiment breakdown. Pro feature.",
+    "reportsAccountLabel": "Account",
+    "reportsDownload": "Download Report",
+    "reportsGenerating": "Generating...",
+    "reportsNoAccounts": "Connect an Instagram account first to download reports.",
+    "reportsError": "Failed to generate the report. Please try again."
   },
   "insights": {
     "doThisToday": "Do This Today",

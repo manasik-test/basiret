@@ -380,7 +380,15 @@
     "upgradeCta": "ترقية إلى التحليلات",
     "nextBilling": "تاريخ الفاتورة التالية",
     "passwordMismatch": "كلمات المرور غير متطابقة",
-    "passwordUpdated": "تم تحديث كلمة المرور بنجاح"
+    "passwordUpdated": "تم تحديث كلمة المرور بنجاح",
+    "reportsTab": "التقارير",
+    "reportsTitle": "التقرير الأسبوعي",
+    "reportsDesc": "أنشئ ملخص PDF مُعلّم لآخر 7 أيام — مؤشرات الأداء، الإجراءات الأساسية، أفضل المنشورات، وتوزيع المشاعر. ميزة احترافية.",
+    "reportsAccountLabel": "الحساب",
+    "reportsDownload": "تنزيل التقرير",
+    "reportsGenerating": "جارٍ الإنشاء...",
+    "reportsNoAccounts": "اربط حساب Instagram أولاً لتنزيل التقارير.",
+    "reportsError": "تعذّر إنشاء التقرير. يُرجى المحاولة مرة أخرى."
   },
   "insights": {
     "doThisToday": "افعل هذا اليوم",

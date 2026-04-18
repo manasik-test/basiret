@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { User, Building2, Bell, CreditCard, Sparkles } from 'lucide-react'
+import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useAccounts } from '../hooks/useAnalytics'
-import { useSubscription } from '../hooks/useBilling'
+import { useSubscription, useIsFeatureLocked } from '../hooks/useBilling'
 import { createCheckout } from '../api/billing'
+import api from '../api/client'
+import LockedFeature from '../components/LockedFeature'
 import { cn } from '../lib/utils'
 
 /* ── Tab Navigation ─────────────────────────────────────── */
@@ -13,6 +15,7 @@ const tabs = [
   { key: 'profile', icon: User },
   { key: 'organization', icon: Building2 },
   { key: 'notifications', icon: Bell },
+  { key: 'reports', icon: FileText },
   { key: 'billing', icon: CreditCard },
 ] as const
 
@@ -219,6 +222,90 @@ function NotificationsTab() {
   )
 }
 
+/* ── Reports Tab ────────────────────────────────────────── */
+
+function ReportsTab() {
+  const { t } = useTranslation()
+  const accounts = useAccounts()
+  const isLocked = useIsFeatureLocked('content_recommendations')
+  const [selectedId, setSelectedId] = useState<string>('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const accountId = selectedId || accounts.data?.[0]?.id || ''
+  const hasAccounts = (accounts.data?.length ?? 0) > 0
+
+  async function handleDownload() {
+    if (!accountId) return
+    setLoading(true)
+    setError('')
+    try {
+      const blob = await api.get(`/reports/weekly?account_id=${accountId}`, {
+        responseType: 'blob',
+      }) as unknown as Blob
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `basiret-weekly-${new Date().toISOString().slice(0, 10)}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      setError(t('settings.reportsError'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <LockedFeature featureName={t('settings.reportsTitle')} locked={isLocked}>
+      <div className="glass rounded-2xl p-6 space-y-5">
+        <div>
+          <h3 className="text-base font-bold text-foreground">{t('settings.reportsTitle')}</h3>
+          <p className="text-sm text-muted-foreground mt-1">{t('settings.reportsDesc')}</p>
+        </div>
+
+        {!hasAccounts ? (
+          <p className="text-sm text-muted-foreground">{t('settings.reportsNoAccounts')}</p>
+        ) : (
+          <>
+            {(accounts.data?.length ?? 0) > 1 && (
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">
+                  {t('settings.reportsAccountLabel')}
+                </label>
+                <select
+                  value={accountId}
+                  onChange={(e) => setSelectedId(e.target.value)}
+                  className="glass w-full rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {accounts.data?.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.account_name || a.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <button
+              onClick={handleDownload}
+              disabled={loading}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {loading ? t('settings.reportsGenerating') : t('settings.reportsDownload')}
+            </button>
+
+            {error && <p className="text-xs text-red-500">{error}</p>}
+          </>
+        )}
+      </div>
+    </LockedFeature>
+  )
+}
+
 /* ── Billing Tab ────────────────────────────────────────── */
 
 function BillingTab() {
@@ -303,6 +390,7 @@ export default function Settings() {
       {activeTab === 'profile' && <ProfileTab />}
       {activeTab === 'organization' && <OrganizationTab />}
       {activeTab === 'notifications' && <NotificationsTab />}
+      {activeTab === 'reports' && <ReportsTab />}
       {activeTab === 'billing' && <BillingTab />}
     </div>
   )
