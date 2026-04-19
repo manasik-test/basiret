@@ -1,0 +1,117 @@
+# BASIRET — production stack (Hetzner VPS / basiret.co)
+#
+# Differences from docker-compose.yml:
+#   - Frontend is built (Dockerfile.prod), no live-reload, no host volume mounts
+#   - API runs uvicorn without --reload, no host volume mounts
+#   - DB and Redis are not exposed to the host (only internal network)
+#   - New nginx service terminates SSL and proxies /api -> api, /* -> frontend
+#   - ENVIRONMENT=production / NODE_ENV=production are set explicitly
+#
+# Usage on the server:
+#   docker compose -f docker-compose.prod.yml --env-file .env up --build -d
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: basiret_frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    expose:
+      - "3000"
+    depends_on:
+      - api
+    networks:
+      - basiret_network
+
+  api:
+    build: ./backend
+    container_name: basiret_api
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips=*
+    networks:
+      - basiret_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: basiret_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - basiret_network
+
+  celery:
+    build: ./backend
+    container_name: basiret_celery
+    restart: unless-stopped
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: celery -A app.core.celery_app:celery worker --loglevel=info --concurrency=2
+    networks:
+      - basiret_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: basiret_redis
+    restart: unless-stopped
+    networks:
+      - basiret_network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: basiret_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot
+    depends_on:
+      - frontend
+      - api
+    networks:
+      - basiret_network
+
+volumes:
+  postgres_data:
+  huggingface_cache:
+  certbot_webroot:
+
+networks:
+  basiret_network:
+    driver: bridge
