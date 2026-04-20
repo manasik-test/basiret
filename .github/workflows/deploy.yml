@@ -1,4 +1,4 @@
-name: Deploy to Hetzner VPS
+name: Deploy to production
 
 on:
   push:
@@ -14,26 +14,66 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
 
+    env:
+      SERVER_HOST: 178.104.191.148
+      SERVER_USER: root
+      REPO_DIR: /opt/basiret
+      EXPECTED_HOST_FPR: SHA256:7jSQX1P6o7RuRTOtTfLhtkpKucM65eRPC1PSAz+IVjc
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Load SSH key into agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add server to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Run deploy.sh
+      - name: Configure SSH key and verify server host key
         env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          REPO_DIR: ${{ secrets.REPO_DIR }}
-          BRANCH: main
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
         run: |
-          chmod +x ./deploy.sh
-          ./deploy.sh
+          set -euo pipefail
+          if [ -z "${SERVER_SSH_KEY:-}" ]; then
+            echo "::error::SERVER_SSH_KEY secret is not set"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+
+          # Private key for authenticating to the server
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          # known_hosts needs the full public host key, not just a fingerprint.
+          # Fetch the server's host keys, verify ONE matches the expected SHA256
+          # fingerprint, and trust only that key. This rejects MITMs without
+          # requiring us to paste the raw key into the repo.
+          ssh-keyscan "$SERVER_HOST" > /tmp/host_keys 2>/dev/null
+          if [ ! -s /tmp/host_keys ]; then
+            echo "::error::ssh-keyscan returned no keys from $SERVER_HOST"
+            exit 1
+          fi
+
+          matched=""
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            fpr=$(echo "$line" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')
+            if [ "$fpr" = "$EXPECTED_HOST_FPR" ]; then
+              matched="$line"
+              break
+            fi
+          done < /tmp/host_keys
+
+          if [ -z "$matched" ]; then
+            echo "::error::No host key from $SERVER_HOST matched $EXPECTED_HOST_FPR"
+            echo "Server returned:"
+            ssh-keygen -lf /tmp/host_keys
+            exit 1
+          fi
+
+          echo "$matched" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          echo "Verified $SERVER_HOST host key matches $EXPECTED_HOST_FPR"
+
+      - name: Deploy (git pull + docker compose up --build)
+        run: |
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" REPO_DIR="$REPO_DIR" bash <<'REMOTE'
+          set -euo pipefail
+          cd "$REPO_DIR"
+          git pull --ff-only
+          docker compose -f docker-compose.prod.yml up -d --build
+          docker compose -f docker-compose.prod.yml ps
+          REMOTE

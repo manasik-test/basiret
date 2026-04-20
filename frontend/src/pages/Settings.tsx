@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download, Camera, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useAccounts } from '../hooks/useAnalytics'
 import { useSubscription, useIsFeatureLocked } from '../hooks/useBilling'
 import { createCheckout } from '../api/billing'
+import { fetchInstagramAuthUrl, disconnectInstagramAccount } from '../api/instagram'
 import api from '../api/client'
 import LockedFeature from '../components/LockedFeature'
 import { cn } from '../lib/utils'
@@ -137,6 +139,35 @@ function OrganizationTab() {
   const { t } = useTranslation()
   const { user } = useAuth()
   const accounts = useAccounts()
+  const queryClient = useQueryClient()
+  const [connecting, setConnecting] = useState(false)
+  const [connectError, setConnectError] = useState('')
+
+  const disconnect = useMutation({
+    mutationFn: (id: string) => disconnectInstagramAccount(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'accounts'] })
+    },
+  })
+
+  async function handleConnect() {
+    setConnectError('')
+    setConnecting(true)
+    try {
+      const url = await fetchInstagramAuthUrl()
+      window.location.href = url
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : t('settings.connectError'))
+      setConnecting(false)
+    }
+  }
+
+  function handleDisconnect(id: string) {
+    if (!window.confirm(t('settings.disconnectConfirm'))) return
+    disconnect.mutate(id)
+  }
+
+  const hasAccounts = (accounts.data?.length ?? 0) > 0
 
   return (
     <div className="space-y-6">
@@ -150,24 +181,55 @@ function OrganizationTab() {
         />
       </div>
 
-      <div className="glass rounded-2xl p-6">
-        <h3 className="text-base font-bold text-foreground mb-4">{t('settings.connectedAccounts')}</h3>
-        {accounts.data && accounts.data.length > 0 ? (
+      <div className="glass rounded-2xl p-6 space-y-4">
+        <h3 className="text-base font-bold text-foreground">{t('settings.connectedAccounts')}</h3>
+        {hasAccounts ? (
           <div className="space-y-3">
-            {accounts.data.map((acc) => (
-              <div key={acc.id} className="flex items-center gap-3 glass rounded-lg px-4 py-3">
-                <div className="w-5 h-5 text-primary shrink-0 text-xs font-bold flex items-center justify-center">IG</div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {acc.account_name || acc.id}
-                  </p>
-                  <p className="text-xs text-muted-foreground capitalize">{acc.platform}</p>
+            {accounts.data?.map((acc) => {
+              const isPending = disconnect.isPending && disconnect.variables === acc.id
+              return (
+                <div key={acc.id} className="flex items-center gap-3 glass rounded-lg px-4 py-3">
+                  <div className="w-5 h-5 text-primary shrink-0 text-xs font-bold flex items-center justify-center">IG</div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {acc.account_name || acc.id}
+                    </p>
+                    <p className="text-xs text-muted-foreground capitalize">{acc.platform}</p>
+                  </div>
+                  <button
+                    onClick={() => handleDisconnect(acc.id)}
+                    disabled={isPending}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {isPending ? t('settings.disconnecting') : t('settings.disconnect')}
+                  </button>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">{t('settings.noAccounts')}</p>
+        )}
+
+        <button
+          onClick={handleConnect}
+          disabled={connecting}
+          className="flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-2.5 rounded-lg bg-gradient-to-r from-purple-600 via-pink-500 to-orange-400 text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          <Camera className="w-4 h-4" />
+          {connecting
+            ? t('settings.connecting')
+            : hasAccounts
+              ? t('settings.connectAnotherInstagram')
+              : t('settings.connectInstagram')}
+        </button>
+
+        {connectError && <p className="text-xs text-red-500">{connectError}</p>}
+        {disconnect.isError && (
+          <p className="text-xs text-red-500">
+            {disconnect.error instanceof Error ? disconnect.error.message : t('settings.disconnectError')}
+          </p>
         )}
       </div>
     </div>
@@ -361,12 +423,84 @@ function BillingTab() {
 
 /* ── Settings Page ──────────────────────────────────────── */
 
+/* ── OAuth result banner ────────────────────────────────── */
+
+const OAUTH_STATUSES = ['connected', 'denied', 'invalid_state', 'user_not_found', 'exchange_failed'] as const
+type OAuthStatus = typeof OAUTH_STATUSES[number]
+
+function isOAuthStatus(v: string | null): v is OAuthStatus {
+  return v !== null && (OAUTH_STATUSES as readonly string[]).includes(v)
+}
+
+function useInstagramOAuthResult(): {
+  status: OAuthStatus | null
+  dismiss: () => void
+} {
+  const [status, setStatus] = useState<OAuthStatus | null>(null)
+  const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ig = params.get('ig')
+    if (isOAuthStatus(ig)) {
+      setStatus(ig)
+      if (ig === 'connected') {
+        queryClient.invalidateQueries({ queryKey: ['analytics', 'accounts'] })
+      }
+      // Strip ?ig=... so a refresh doesn't re-fire the toast.
+      params.delete('ig')
+      const qs = params.toString()
+      const url = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+      window.history.replaceState({}, '', url)
+    }
+  }, [queryClient])
+
+  return { status, dismiss: () => setStatus(null) }
+}
+
+function OAuthBanner({ status, onDismiss }: { status: OAuthStatus; onDismiss: () => void }) {
+  const { t } = useTranslation()
+  const isOk = status === 'connected'
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-3 rounded-xl px-4 py-3 border',
+        isOk
+          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          : 'bg-red-50 border-red-200 text-red-800',
+      )}
+    >
+      {isOk ? (
+        <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+      ) : (
+        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+      )}
+      <p className="text-sm flex-1">{t(`settings.oauth.${status}`)}</p>
+      <button
+        onClick={onDismiss}
+        className="text-xs opacity-70 hover:opacity-100 underline shrink-0"
+      >
+        {t('settings.oauth.dismiss')}
+      </button>
+    </div>
+  )
+}
+
 export default function Settings() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabKey>('profile')
+  const oauth = useInstagramOAuthResult()
+
+  // If we returned from Meta, jump straight to the Organization tab so the
+  // newly-connected (or failed) account is in front of the user.
+  useEffect(() => {
+    if (oauth.status) setActiveTab('organization')
+  }, [oauth.status])
 
   return (
     <div className="space-y-6">
+      {oauth.status && <OAuthBanner status={oauth.status} onDismiss={oauth.dismiss} />}
+
       {/* Tab Nav */}
       <div className="flex gap-1 glass rounded-xl p-1">
         {tabs.map(({ key, icon: Icon }) => (

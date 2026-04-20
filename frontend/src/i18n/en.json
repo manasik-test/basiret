@@ -367,6 +367,14 @@
     "orgName": "Organization Name",
     "connectedAccounts": "Connected Accounts",
     "noAccounts": "No accounts connected yet",
+    "connectInstagram": "Connect Instagram",
+    "connectAnotherInstagram": "Connect another account",
+    "connecting": "Connecting...",
+    "connectError": "Failed to start Instagram connection. Please try again.",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting...",
+    "disconnectConfirm": "Disconnect this Instagram account? You can reconnect it any time.",
+    "disconnectError": "Failed to disconnect this account. Please try again.",
     "platform": "Platform",
     "accountName": "Account Name",
     "emailAlerts": "Email Alerts",
@@ -388,7 +396,15 @@
     "reportsDownload": "Download Report",
     "reportsGenerating": "Generating...",
     "reportsNoAccounts": "Connect an Instagram account first to download reports.",
-    "reportsError": "Failed to generate the report. Please try again."
+    "reportsError": "Failed to generate the report. Please try again.",
+    "oauth": {
+      "connected": "Instagram account connected successfully.",
+      "denied": "Instagram connection was cancelled.",
+      "invalid_state": "Connection link expired or invalid. Please try again.",
+      "user_not_found": "We couldn't match this connection to your account. Please sign in and retry.",
+      "exchange_failed": "Instagram refused the connection. Please try again or check your account permissions.",
+      "dismiss": "Dismiss"
+    }
   },
   "insights": {
     "doThisToday": "Do This Today",

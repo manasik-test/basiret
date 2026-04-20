@@ -76,6 +76,25 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+# ── OAuth state token (single-purpose, short-lived) ─────────
+
+def create_oauth_state_token(user_id: str, ttl_minutes: int = 10) -> str:
+    """Sign a short-lived JWT used as the OAuth `state` param.
+
+    Carried through Meta's redirect so the public /callback can identify the
+    user without requiring a session token. Single-purpose (`type=oauth_state`)
+    so a leaked state can't be replayed against authenticated endpoints.
+    """
+    expires = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+    payload = {
+        "sub": user_id,
+        "type": "oauth_state",
+        "exp": expires,
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 # ── Refresh-token blacklist (Redis) ────────────────────────
 
 def blacklist_refresh_token(jti: str) -> None:

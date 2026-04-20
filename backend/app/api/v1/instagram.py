@@ -7,20 +7,25 @@ POST /sync       → triggers Celery task to fetch posts from Instagram
 GET  /accounts   → list connected Instagram accounts
 DELETE /accounts/:id → disconnect an Instagram account
 """
+import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.encryption import encrypt_token
+from app.core.security import create_oauth_state_token, decode_token
 from app.models.user import User
 from app.models.social_account import SocialAccount, Platform
 from app.tasks.instagram_sync import sync_instagram_posts
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -31,9 +36,28 @@ LONG_LIVED_URL = "https://graph.instagram.com/access_token"
 ME_URL = "https://graph.instagram.com/me"
 
 
+def _settings_redirect(status: str) -> RedirectResponse:
+    """Send the browser back to the Settings page with a status flag.
+
+    Used by the public OAuth callback to surface success/failure to the SPA
+    without exposing JSON to the user's address bar.
+    """
+    return RedirectResponse(
+        f"{settings.FRONTEND_URL}/settings?ig={status}",
+        status_code=302,
+    )
+
+
 @router.get("/auth-url")
 def get_auth_url(user: User = Depends(get_current_user)):
-    """Return the Instagram OAuth authorization URL."""
+    """Return the Instagram OAuth authorization URL.
+
+    The `state` param is a single-purpose, short-lived JWT that lets the public
+    /callback identify the user without requiring a session token (Meta strips
+    custom headers on its redirect). The token is `type=oauth_state` so even
+    if leaked it can't be used against authenticated endpoints.
+    """
+    state = create_oauth_state_token(str(user.id))
     params = {
         "client_id": settings.META_APP_ID,
         "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
@@ -42,62 +66,94 @@ def get_auth_url(user: User = Depends(get_current_user)):
         # tokens that only have `instagram_business_basic` keep working for post sync.
         "scope": "instagram_business_basic,instagram_business_manage_comments",
         "response_type": "code",
+        "state": state,
     }
     return {"url": f"{AUTH_BASE}?{urlencode(params)}"}
 
 
 @router.get("/callback")
 async def oauth_callback(
-    code: str,
-    user: User = Depends(get_current_user),
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """Exchange authorization code for a long-lived token and store it."""
+    """Public OAuth callback. Identifies the user via the signed `state` JWT,
+    exchanges the code for a long-lived token, then redirects to the SPA.
 
-    # 1. Exchange code → short-lived token
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(TOKEN_URL, data={
-            "client_id": settings.META_APP_ID,
-            "client_secret": settings.META_APP_SECRET,
-            "grant_type": "authorization_code",
-            "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
-            "code": code,
-        })
+    No session auth — Meta calls this URL directly from the user's browser
+    after consent and cannot attach our Bearer header.
+    """
+    # 0. User denied consent on Meta's screen
+    if error or not code:
+        logger.info("Instagram OAuth denied or missing code: error=%s", error)
+        return _settings_redirect("denied")
 
-    if token_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to exchange authorization code")
+    # 1. Verify state JWT → resolve user
+    if not state:
+        logger.warning("Instagram OAuth callback missing state param")
+        return _settings_redirect("invalid_state")
 
-    token_data = token_resp.json()
-    short_token = token_data["access_token"]
-    ig_user_id = str(token_data["user_id"])
+    payload = decode_token(state)
+    if payload is None or payload.get("type") != "oauth_state":
+        logger.warning("Instagram OAuth state token invalid or expired")
+        return _settings_redirect("invalid_state")
 
-    # 2. Exchange short-lived → long-lived token (60 days)
-    async with httpx.AsyncClient() as client:
-        ll_resp = await client.get(LONG_LIVED_URL, params={
-            "grant_type": "ig_exchange_token",
-            "client_secret": settings.META_APP_SECRET,
-            "access_token": short_token,
-        })
+    user = db.query(User).filter(User.id == payload["sub"]).first()
+    if user is None or not user.is_active:
+        logger.warning("Instagram OAuth state references unknown/inactive user: %s", payload.get("sub"))
+        return _settings_redirect("user_not_found")
 
-    if ll_resp.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to obtain long-lived token")
+    # 2. Exchange code → short-lived token
+    try:
+        async with httpx.AsyncClient() as client:
+            token_resp = await client.post(TOKEN_URL, data={
+                "client_id": settings.META_APP_ID,
+                "client_secret": settings.META_APP_SECRET,
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
+                "code": code,
+            })
 
-    ll_data = ll_resp.json()
-    long_token = ll_data["access_token"]
-    expires_in = ll_data.get("expires_in", 5_184_000)  # default 60 days
+        if token_resp.status_code != 200:
+            logger.error("Instagram code exchange failed: %s %s", token_resp.status_code, token_resp.text)
+            return _settings_redirect("exchange_failed")
 
-    # 3. Fetch Instagram user profile
-    async with httpx.AsyncClient() as client:
-        me_resp = await client.get(ME_URL, params={
-            "fields": "id,username",
-            "access_token": long_token,
-        })
+        token_data = token_resp.json()
+        short_token = token_data["access_token"]
+        ig_user_id = str(token_data["user_id"])
 
-    username = None
-    if me_resp.status_code == 200:
-        username = me_resp.json().get("username")
+        # 3. Exchange short-lived → long-lived token (60 days)
+        async with httpx.AsyncClient() as client:
+            ll_resp = await client.get(LONG_LIVED_URL, params={
+                "grant_type": "ig_exchange_token",
+                "client_secret": settings.META_APP_SECRET,
+                "access_token": short_token,
+            })
 
-    # 4. Upsert social_account — scoped to the authenticated user's organization
+        if ll_resp.status_code != 200:
+            logger.error("Instagram long-lived exchange failed: %s %s", ll_resp.status_code, ll_resp.text)
+            return _settings_redirect("exchange_failed")
+
+        ll_data = ll_resp.json()
+        long_token = ll_data["access_token"]
+        expires_in = ll_data.get("expires_in", 5_184_000)  # default 60 days
+
+        # 4. Fetch Instagram user profile
+        async with httpx.AsyncClient() as client:
+            me_resp = await client.get(ME_URL, params={
+                "fields": "id,username",
+                "access_token": long_token,
+            })
+
+        username = None
+        if me_resp.status_code == 200:
+            username = me_resp.json().get("username")
+    except httpx.HTTPError as e:
+        logger.exception("Instagram OAuth network failure: %s", e)
+        return _settings_redirect("exchange_failed")
+
+    # 5. Upsert social_account — scoped to the resolved user's organization
     account = db.query(SocialAccount).filter_by(
         platform=Platform.instagram,
         platform_account_id=ig_user_id,
@@ -125,16 +181,9 @@ async def oauth_callback(
 
     db.commit()
     db.refresh(account)
+    logger.info("Instagram account connected: org=%s account_id=%s username=%s", user.organization_id, account.id, username)
 
-    return {
-        "success": True,
-        "data": {
-            "account_id": str(account.id),
-            "platform": account.platform.value,
-            "username": account.username,
-            "token_expires_at": account.token_expires_at.isoformat(),
-        },
-    }
+    return _settings_redirect("connected")
 
 
 @router.post("/sync")

@@ -367,6 +367,14 @@
     "orgName": "اسم المؤسسة",
     "connectedAccounts": "الحسابات المتصلة",
     "noAccounts": "لا توجد حسابات متصلة بعد",
+    "connectInstagram": "ربط Instagram",
+    "connectAnotherInstagram": "ربط حساب آخر",
+    "connecting": "جارٍ الربط...",
+    "connectError": "تعذّر بدء عملية ربط Instagram. حاول مرة أخرى.",
+    "disconnect": "إلغاء الربط",
+    "disconnecting": "جارٍ إلغاء الربط...",
+    "disconnectConfirm": "إلغاء ربط هذا الحساب؟ يمكنك إعادة ربطه في أي وقت.",
+    "disconnectError": "تعذّر إلغاء ربط هذا الحساب. حاول مرة أخرى.",
     "platform": "المنصة",
     "accountName": "اسم الحساب",
     "emailAlerts": "تنبيهات البريد الإلكتروني",
@@ -388,7 +396,15 @@
     "reportsDownload": "تنزيل التقرير",
     "reportsGenerating": "جارٍ الإنشاء...",
     "reportsNoAccounts": "اربط حساب Instagram أولاً لتنزيل التقارير.",
-    "reportsError": "تعذّر إنشاء التقرير. يُرجى المحاولة مرة أخرى."
+    "reportsError": "تعذّر إنشاء التقرير. يُرجى المحاولة مرة أخرى.",
+    "oauth": {
+      "connected": "تم ربط حساب Instagram بنجاح.",
+      "denied": "تم إلغاء ربط Instagram.",
+      "invalid_state": "انتهت صلاحية رابط الربط أو أنه غير صالح. حاول مرة أخرى.",
+      "user_not_found": "تعذّر مطابقة هذه العملية بحسابك. سجّل الدخول وحاول مرة أخرى.",
+      "exchange_failed": "رفض Instagram عملية الربط. حاول مرة أخرى أو راجع صلاحيات حسابك.",
+      "dismiss": "إغلاق"
+    }
   },
   "insights": {
     "doThisToday": "افعل هذا اليوم",
