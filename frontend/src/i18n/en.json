@@ -323,7 +323,15 @@
     "copyCaption": "Copy caption",
     "copied": "Copied!",
     "openOnInstagram": "Open on Instagram",
-    "ocrBadge": "Image text detected"
+    "ocrBadge": "Image text detected",
+    "languageTitle": "Language mix",
+    "languageSubtitle": "Share of posts per language and which language performs better",
+    "languageArabic": "Arabic",
+    "languageEnglish": "English",
+    "languageUnknown": "Unknown",
+    "languageAvgEng": "Avg engagement: {{value}}",
+    "languageInsight": "Insight",
+    "languageWinner": "{{language}} posts get better engagement ({{value}} avg). Consider leaning into what's working."
   },
   "myAudiencePage": {
     "question": "Who is your audience this week, what do they want, and when should you reach them?",

@@ -323,7 +323,15 @@
     "copyCaption": "نسخ التسمية",
     "copied": "تم النسخ!",
     "openOnInstagram": "فتح على إنستغرام",
-    "ocrBadge": "تم اكتشاف نص في الصورة"
+    "ocrBadge": "تم اكتشاف نص في الصورة",
+    "languageTitle": "مزيج اللغات",
+    "languageSubtitle": "نسبة المنشورات حسب اللغة، وأي لغة تحقق تفاعلاً أفضل",
+    "languageArabic": "العربية",
+    "languageEnglish": "الإنجليزية",
+    "languageUnknown": "غير محددة",
+    "languageAvgEng": "متوسط التفاعل: {{value}}",
+    "languageInsight": "رؤية",
+    "languageWinner": "منشورات {{language}} تحقق تفاعلاً أفضل (متوسط {{value}}). ركّز على ما ينجح."
   },
   "myAudiencePage": {
     "question": "من هو جمهورك هذا الأسبوع، وماذا يريد، ومتى تصل إليه؟",

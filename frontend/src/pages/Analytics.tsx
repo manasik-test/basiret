@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Sparkles, TrendingUp, AlertTriangle, ArrowRight, Image, Video, Layers, Film,
   Wand2, Check, Copy, ExternalLink, Loader2, ScanText, ChevronDown, ChevronUp,
+  Languages,
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { usePostsBreakdown, usePostsInsights, useGenerateCaption, useAccounts } from '../hooks/useAnalytics'
@@ -308,6 +309,115 @@ function ContentTypeChart() {
   )
 }
 
+/* ── Language breakdown card ────────────────────────────────────────────── */
+
+function LanguageBreakdown() {
+  const { t } = useTranslation()
+  const { data } = usePostsBreakdown()
+  const rows = (data?.by_language ?? []).filter((r) => r.language !== 'unknown' || r.count > 0)
+  const total = rows.reduce((s, r) => s + r.count, 0)
+
+  if (!data || total === 0) return null
+
+  const ar = rows.find((r) => r.language === 'ar')
+  const en = rows.find((r) => r.language === 'en')
+  const pctAr = ar ? Math.round((ar.count / total) * 100) : 0
+  const pctEn = en ? Math.round((en.count / total) * 100) : 0
+
+  // Which language wins on avg engagement?
+  const ranked = [...rows]
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.avg_engagement - a.avg_engagement)
+  const winner = ranked[0]
+  const winnerLabel =
+    winner?.language === 'ar'
+      ? t('myPostsPage.languageArabic')
+      : winner?.language === 'en'
+      ? t('myPostsPage.languageEnglish')
+      : t('myPostsPage.languageUnknown')
+
+  return (
+    <div className="glass rounded-2xl p-5 flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+          <Languages className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            {t('myPostsPage.languageTitle')}
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            {t('myPostsPage.languageSubtitle')}
+          </p>
+        </div>
+      </div>
+
+      {/* Stacked bar: AR vs EN share */}
+      <div dir="ltr" className="w-full h-3 rounded-full overflow-hidden bg-muted flex">
+        <div
+          className="bg-primary h-full"
+          style={{ width: `${pctAr}%` }}
+          title={`${t('myPostsPage.languageArabic')}: ${pctAr}%`}
+        />
+        <div
+          className="bg-accent h-full"
+          style={{ width: `${pctEn}%` }}
+          title={`${t('myPostsPage.languageEnglish')}: ${pctEn}%`}
+        />
+      </div>
+
+      {/* Per-language stat rows */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {ar && ar.count > 0 ? (
+          <div className="rounded-xl bg-primary/5 border border-primary/15 p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-primary">
+                {t('myPostsPage.languageArabic')}
+              </span>
+              <span className="text-xs font-bold text-foreground tabular-nums">
+                {pctAr}% · {ar.count}
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {t('myPostsPage.languageAvgEng', { value: ar.avg_engagement })}
+            </p>
+          </div>
+        ) : null}
+        {en && en.count > 0 ? (
+          <div className="rounded-xl bg-accent/20 border border-accent/40 p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-primary">
+                {t('myPostsPage.languageEnglish')}
+              </span>
+              <span className="text-xs font-bold text-foreground tabular-nums">
+                {pctEn}% · {en.count}
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {t('myPostsPage.languageAvgEng', { value: en.avg_engagement })}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Winner callout */}
+      {winner && ranked.length > 1 && winner.avg_engagement > 0 ? (
+        <div className="rounded-xl bg-emerald-50/60 border border-emerald-100 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
+            {t('myPostsPage.languageInsight')}
+          </p>
+          <p dir="auto" className="text-sm text-foreground/85 mt-1 leading-relaxed">
+            {t('myPostsPage.languageWinner', {
+              language: winnerLabel,
+              value: winner.avg_engagement,
+            })}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /* ── Page ──────────────────────────────────────────────────────────────── */
 
 export default function Analytics() {
@@ -333,6 +443,7 @@ export default function Analytics() {
         </h2>
       </div>
       <ContentTypeChart />
+      <LanguageBreakdown />
       <TopPostsTable />
     </div>
   )
