@@ -69,7 +69,7 @@ function Navbar() {
             onClick={toggleLang}
             className="text-[15px] font-medium text-[#484848]/70 hover:text-[#484848] transition-colors"
           >
-            {isAr ? 'English' : 'العربية'}
+            {isAr ? 'العربية' : 'English'}
           </button>
           <Link
             to="/login"
@@ -581,7 +581,7 @@ function Footer() {
             {t('landing.navPricing')}
           </a>
           <button onClick={toggleLang} className="hover:text-foreground transition-colors">
-            {isAr ? 'English' : 'العربية'}
+            {isAr ? 'العربية' : 'English'}
           </button>
         </div>
 

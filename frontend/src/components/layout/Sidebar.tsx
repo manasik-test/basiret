@@ -116,7 +116,7 @@ function MobileTopBar() {
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
             >
               <Globe className="w-4 h-4" />
-              {isAr ? 'English' : 'العربية'}
+              {isAr ? 'العربية' : 'English'}
             </button>
             <button
               onClick={() => { setOpen(false); logout() }}
