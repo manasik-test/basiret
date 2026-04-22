@@ -112,6 +112,7 @@ def _generate_highlights(
     current_counts: dict[str, int],
     wow_change: dict[str, int],
     keywords: list[dict],
+    language: str = "en",
 ) -> str:
     """Ask Gemini for a 2-sentence audience-intelligence summary. Empty string on failure."""
     if not settings.GEMINI_API_KEY or total_week == 0:
@@ -120,6 +121,7 @@ def _generate_highlights(
         import google.generativeai as genai
 
         genai.configure(api_key=settings.GEMINI_API_KEY)
+        lang_label = "Arabic" if language == "ar" else "English"
         model = genai.GenerativeModel(
             "gemini-2.5-flash-lite",
             system_instruction=(
@@ -128,7 +130,9 @@ def _generate_highlights(
                 "EXACTLY TWO sentences summarizing what the audience is saying. "
                 "Be specific — reference the percentages, top keywords, and week-over-week "
                 "trend direction. Use a neutral, professional tone. "
-                "No markdown, no bullets, no emojis, no preamble."
+                "No markdown, no bullets, no emojis, no preamble. "
+                f"Respond ENTIRELY in {lang_label}. This is a hard requirement — "
+                f"do not switch languages even if the input keywords are in a different language."
             ),
             generation_config=genai.GenerationConfig(temperature=0.4),
         )
@@ -278,10 +282,112 @@ def posts_breakdown(
         for row in date_counts
     ]
 
+    # Language breakdown: post language (from NLP analysis of caption + OCR +
+    # audio) joined to engagement. Lets the My Posts page show % of posts per
+    # language AND which language gets better engagement.
+    lang_rows = (
+        db.query(
+            AnalysisResult.language_detected.label("language"),
+            func.count(AnalysisResult.id).label("count"),
+            func.coalesce(func.avg(EngagementMetric.likes), 0).label("avg_likes"),
+            func.coalesce(func.avg(EngagementMetric.comments), 0).label("avg_comments"),
+        )
+        .join(Post, AnalysisResult.post_id == Post.id)
+        .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id.in_(account_ids))
+        .filter(AnalysisResult.post_id.isnot(None))
+        .group_by(AnalysisResult.language_detected)
+        .all()
+    )
+    by_language = [
+        {
+            "language": row.language or "unknown",
+            "count": row.count,
+            "avg_likes": round(float(row.avg_likes), 1),
+            "avg_comments": round(float(row.avg_comments), 1),
+            "avg_engagement": round(float(row.avg_likes) + float(row.avg_comments), 1),
+        }
+        for row in lang_rows
+    ]
+
     return {
         "success": True,
-        "data": {"by_type": by_type, "posting_dates": posting_dates},
+        "data": {
+            "by_type": by_type,
+            "posting_dates": posting_dates,
+            "by_language": by_language,
+        },
     }
+
+
+@router.get("/posts/top")
+def top_posts(
+    limit: int = 10,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return top posts by engagement with thumbnails for the My Posts table.
+
+    Falls back to media_url for image posts (Instagram returns the image URL
+    there); video posts get thumbnail_url from raw_data when present.
+    """
+    account_ids = [
+        a.id for a in db.query(SocialAccount.id).filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active == True,
+        ).all()
+    ]
+
+    if not account_ids:
+        return {"success": True, "data": {"posts": []}}
+
+    rows = (
+        db.query(
+            Post.id,
+            Post.caption,
+            Post.content_type,
+            Post.media_url,
+            Post.posted_at,
+            Post.raw_data,
+            func.coalesce(func.sum(EngagementMetric.likes), 0).label("likes"),
+            func.coalesce(func.sum(EngagementMetric.comments), 0).label("comments"),
+        )
+        .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id.in_(account_ids))
+        .group_by(Post.id)
+        .order_by(
+            (
+                func.coalesce(func.sum(EngagementMetric.likes), 0)
+                + func.coalesce(func.sum(EngagementMetric.comments), 0)
+            ).desc()
+        )
+        .limit(min(max(limit, 1), 50))
+        .all()
+    )
+
+    posts = []
+    for row in rows:
+        raw = row.raw_data or {}
+        ct = row.content_type.value if row.content_type else "image"
+        # For images/carousels media_url is the image itself; videos/reels have
+        # a separate thumbnail_url in the Graph API response.
+        thumbnail = None
+        if ct in ("image", "carousel"):
+            thumbnail = row.media_url or raw.get("thumbnail_url")
+        else:
+            thumbnail = raw.get("thumbnail_url") or row.media_url
+        posts.append({
+            "id": str(row.id),
+            "caption": row.caption or "",
+            "content_type": ct,
+            "thumbnail_url": thumbnail,
+            "permalink": raw.get("permalink"),
+            "likes": int(row.likes or 0),
+            "comments": int(row.comments or 0),
+            "posted_at": row.posted_at.isoformat() if row.posted_at else None,
+        })
+
+    return {"success": True, "data": {"posts": posts}}
 
 
 @router.post("/analyze")
@@ -440,6 +546,7 @@ def comments_analytics(
 @router.get("/sentiment/summary")
 def sentiment_summary(
     account_id: str | None = None,
+    language: str = "en",
     user: User = Depends(RequireFeature("sentiment_analysis")),
     db: Session = Depends(get_db),
 ):
@@ -592,13 +699,57 @@ def sentiment_summary(
         "negative": _sample("negative"),
     }
 
-    # ── Gemini highlights (synchronous, graceful fallback) ────────────
-    highlights = _generate_highlights(
-        total_week=total_week,
-        current_counts=current_counts,
-        wow_change=wow_change,
-        keywords=keywords,
-    )
+    # ── Gemini highlights (synchronous, graceful fallback, 24h cached) ─
+    lang = "ar" if str(language).lower().startswith("ar") else "en"
+    from app.models.ai_page_cache import AiPageCache
+
+    highlights = ""
+    cache_account = account_ids[0] if account_ids else None
+    cache_row = None
+    if cache_account and total_week > 0:
+        cache_row = (
+            db.query(AiPageCache)
+            .filter(
+                AiPageCache.social_account_id == cache_account,
+                AiPageCache.page_name == "sentiment-summary",
+                AiPageCache.language == lang,
+            )
+            .first()
+        )
+        if cache_row:
+            gen = cache_row.generated_at
+            if gen.tzinfo is None:
+                gen = gen.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - gen <= timedelta(hours=24):
+                highlights = (cache_row.content or {}).get("highlights", "")
+
+    if cache_account and total_week > 0 and not highlights:
+        highlights = _generate_highlights(
+            total_week=total_week,
+            current_counts=current_counts,
+            wow_change=wow_change,
+            keywords=keywords,
+            language=lang,
+        )
+        try:
+            now_ts = datetime.now(timezone.utc)
+            if cache_row:
+                cache_row.content = {"highlights": highlights}
+                cache_row.generated_at = now_ts
+            else:
+                db.add(
+                    AiPageCache(
+                        social_account_id=cache_account,
+                        page_name="sentiment-summary",
+                        language=lang,
+                        content={"highlights": highlights},
+                        generated_at=now_ts,
+                    )
+                )
+            db.commit()
+        except Exception as cache_exc:
+            logger.warning("sentiment-summary cache write failed: %s", cache_exc)
+            db.rollback()
 
     return {
         "success": True,

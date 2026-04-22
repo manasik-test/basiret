@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 GRAPH_BASE = "https://graph.instagram.com"
 
 MEDIA_FIELDS = (
-    "id,caption,media_type,media_url,permalink,timestamp,"
+    "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,"
     "like_count,comments_count"
 )
 COMMENT_FIELDS = "id,text,timestamp,username"

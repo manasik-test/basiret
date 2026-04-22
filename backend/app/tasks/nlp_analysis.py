@@ -3,19 +3,23 @@ Celery task: run NLP analysis on posts.
 
 For each post without an analysis_result:
 1. Extract text via OCR (image/carousel posts)
-2. Detect language (en/ar/unknown)
-3. Run sentiment analysis using cardiffnlp/twitter-xlm-roberta-base-sentiment
-4. Store results in analysis_result table
+2. Transcribe audio via Whisper (video/reel posts)
+3. Combine caption + OCR text + audio transcript into one analysis document
+4. Detect language (en/ar/unknown) on the combined document
+5. Run sentiment analysis using cardiffnlp/twitter-xlm-roberta-base-sentiment
+6. Extract 2-3 topics via Gemini
+7. Store results in analysis_result table
 """
-import io
 import logging
-from datetime import datetime, timezone
+import os
+import tempfile
 
 import httpx
 from langdetect import detect, LangDetectException
 from sqlalchemy.orm import Session
 
 from app.core.celery_app import celery
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.post import Post, LanguageCode
 from app.models.comment import Comment
@@ -24,6 +28,7 @@ from app.models.analysis_result import AnalysisResult
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
+WHISPER_MODEL_NAME = "base"
 
 # Labels output by the model (id2label mapping)
 LABEL_MAP = {
@@ -40,6 +45,7 @@ LABEL_MAP = {
 
 _sentiment_pipeline = None
 _ocr_reader = None
+_whisper_model = None
 
 
 def _get_sentiment_pipeline():
@@ -66,6 +72,24 @@ def _get_ocr_reader():
         _ocr_reader = easyocr.Reader(["en", "ar"], gpu=False)
         logger.info("EasyOCR reader loaded (en + ar)")
     return _ocr_reader
+
+
+def _get_whisper_model():
+    """Load Whisper once per worker process. Returns None if whisper import or
+    model load fails — callers must handle None and skip audio transcription
+    gracefully (e.g. workers without ffmpeg on PATH or without the extra deps)."""
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            import whisper  # openai-whisper
+            _whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
+            logger.info("Whisper model loaded: %s", WHISPER_MODEL_NAME)
+        except Exception as exc:
+            logger.warning(
+                "Whisper unavailable — audio transcription will be skipped: %s", exc,
+            )
+            _whisper_model = False  # sentinel so we don't retry on every call
+    return _whisper_model if _whisper_model else None
 
 
 # ── Helper functions ─────────────────────────────────────────────────────
@@ -119,16 +143,112 @@ def _extract_ocr_text(media_url: str) -> str | None:
         return None
 
 
+def _extract_audio_transcript(media_url: str) -> str | None:
+    """Download video from Instagram CDN and run Whisper transcription.
+
+    Returns None on any failure — Instagram video URLs are signed and expire
+    after ~48 hours, so older posts re-analyzed later will silently skip.
+    Whisper internally shells out to ffmpeg to extract audio from the video
+    container, so ffmpeg must be available on PATH (see Dockerfile).
+    """
+    if not media_url:
+        return None
+
+    model = _get_whisper_model()
+    if model is None:
+        return None
+
+    tmp_path = None
+    try:
+        with httpx.Client(timeout=90, follow_redirects=True) as client:
+            resp = client.get(media_url)
+            resp.raise_for_status()
+            video_bytes = resp.content
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".mp4", delete=False,
+        ) as tmp:
+            tmp.write(video_bytes)
+            tmp_path = tmp.name
+
+        result = model.transcribe(tmp_path, fp16=False)
+        text = (result.get("text") or "").strip()
+        return text if text else None
+    except Exception as exc:
+        logger.warning("Whisper transcription failed for %s: %s", media_url, exc)
+        return None
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _build_analysis_text(caption: str, ocr_text: str | None, audio_transcript: str | None) -> str:
+    """Combine caption + OCR text + audio transcript into one document for
+    sentiment analysis. Each segment is labeled so the tokenizer treats them
+    as distinct — important when languages differ (e.g. Arabic caption with
+    English text overlay or English video audio)."""
+    parts = []
+    if caption and caption.strip():
+        parts.append(caption.strip())
+    if ocr_text and ocr_text.strip():
+        parts.append(f"[IMAGE TEXT]: {ocr_text.strip()}")
+    if audio_transcript and audio_transcript.strip():
+        parts.append(f"[AUDIO TRANSCRIPT]: {audio_transcript.strip()}")
+    return "\n\n".join(parts).strip()
+
+
+def _extract_topics_gemini(text: str, language: str) -> list[str]:
+    """Ask Gemini for 2-3 topics the post is about. Returns [] on any failure
+    (no key, network, parse error) — topics are best-effort metadata."""
+    if not text or not text.strip() or not settings.GEMINI_API_KEY:
+        return []
+    try:
+        import google.generativeai as genai
+        import json as _json
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        lang_label = "Arabic" if language == "ar" else "English"
+        model = genai.GenerativeModel(
+            "gemini-2.5-flash-lite",
+            system_instruction=(
+                "You extract topics from social media posts. "
+                "Given a post's text (which may include caption, on-image text, "
+                "and audio transcript), return exactly 2-3 short topic tags that "
+                "describe what the post is ABOUT. "
+                "Topics must be 1-3 words each, lowercased, concrete (e.g. "
+                "'coffee brewing', 'ramadan recipes', 'gym form'), never generic "
+                f"('post', 'content'). Return topics in {lang_label}. "
+                'Respond ONLY as strict JSON: {"topics": ["...", "..."]}'
+            ),
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.3,
+            ),
+        )
+        resp = model.generate_content(text[:2000])
+        parsed = _json.loads(resp.text or "{}")
+        raw = parsed.get("topics") or []
+        topics = [str(t).strip().lower() for t in raw if str(t).strip()]
+        return topics[:3]
+    except Exception as exc:
+        logger.warning("Gemini topic extraction failed: %s", exc)
+        return []
+
+
 def _analyze_single_comment(comment: Comment, db: Session) -> bool:
     """Analyze one comment and insert an analysis_result row."""
     text = (comment.text or "").strip()
     lang = _detect_language(text)
     sentiment, score = _run_sentiment(text)
+    topics = _extract_topics_gemini(text, lang) if text else []
     result = AnalysisResult(
         comment_id=comment.id,
         sentiment=sentiment,
         sentiment_score=score,
-        topics=[],
+        topics=topics,
         ocr_text=None,
         audio_transcript=None,
         language_detected=lang,
@@ -142,35 +262,46 @@ def _analyze_single_post(post: Post, db: Session) -> bool:
     """Analyze one post and insert an analysis_result row. Returns True on success."""
     caption = post.caption or ""
     ocr_text = None
+    audio_transcript = None
 
     # OCR for image and carousel posts
     content_type = str(post.content_type.value) if post.content_type else ""
     if content_type in ("image", "carousel") and post.media_url:
         ocr_text = _extract_ocr_text(post.media_url)
 
-    # Combine caption + OCR text for analysis
-    analysis_text = caption
-    if ocr_text:
-        analysis_text = f"{caption} {ocr_text}".strip()
+    # Whisper transcription for video and reel posts
+    if content_type in ("video", "reel") and post.media_url:
+        audio_transcript = _extract_audio_transcript(post.media_url)
 
-    # Detect language
+    # Build combined analysis document (caption + OCR + audio transcript).
+    # Each source is labeled with a tag so the tokenizer treats them as
+    # distinct segments — important when a caption is in one language and
+    # the image text or audio is in another (e.g. Arabic caption with
+    # English text overlay, or Arabic reel with English audio).
+    analysis_text = _build_analysis_text(caption, ocr_text, audio_transcript)
+
+    # Detect language on the combined document
     lang = _detect_language(analysis_text)
 
-    # Run sentiment
+    # Run sentiment on the combined document — the signal from OCR slogans and
+    # spoken audio often changes sentiment from "neutral" (empty caption) to
+    # the actual tone of the content.
     sentiment, score = _run_sentiment(analysis_text)
+
+    # Extract 2-3 topics via Gemini on the combined document
+    topics = _extract_topics_gemini(analysis_text, lang) if analysis_text else []
 
     # Update post language if currently unknown
     if post.language == LanguageCode.unknown and lang != "unknown":
         post.language = lang
 
-    # Create analysis result
     result = AnalysisResult(
         post_id=post.id,
         sentiment=sentiment,
         sentiment_score=score,
-        topics=[],
+        topics=topics,
         ocr_text=ocr_text,
-        audio_transcript=None,
+        audio_transcript=audio_transcript,
         language_detected=lang,
         model_used=MODEL_NAME,
     )

@@ -183,6 +183,20 @@ CREATE TABLE insight_result (
 );
 
 -- ─────────────────────────────────────────
+-- AI PAGE CACHE (Gemini output cache, 24h TTL enforced in application)
+-- ─────────────────────────────────────────
+CREATE TABLE ai_page_cache (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    page_name VARCHAR(64) NOT NULL,
+    language VARCHAR(8) NOT NULL DEFAULT 'en',
+    content JSONB NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_ai_page_cache_key UNIQUE (social_account_id, page_name, language)
+);
+CREATE INDEX idx_ai_page_cache_lookup ON ai_page_cache(social_account_id, page_name, language);
+
+-- ─────────────────────────────────────────
 -- FEATURE FLAG
 -- ─────────────────────────────────────────
 CREATE TABLE feature_flag (

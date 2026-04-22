@@ -9,6 +9,7 @@ from app.models.engagement_metric import EngagementMetric
 from app.models.audience_segment import AudienceSegment
 from app.models.feature_flag import FeatureFlag
 from app.models.insight_result import InsightResult
+from app.models.ai_page_cache import AiPageCache
 
 __all__ = [
     "Organization",
@@ -22,4 +23,5 @@ __all__ = [
     "AudienceSegment",
     "FeatureFlag",
     "InsightResult",
+    "AiPageCache",
 ]

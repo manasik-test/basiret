@@ -106,17 +106,26 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
     pct_neu = round(sentiment_counts.get("neutral", 0) / total_analyzed * 100) if total_analyzed else 0
     pct_neg = round(sentiment_counts.get("negative", 0) / total_analyzed * 100) if total_analyzed else 0
 
-    # Top 5 posts by engagement
+    # Top 5 posts by engagement (enriched with OCR text + audio transcript)
     top_posts = (
         db.query(
             Post,
             func.coalesce(func.sum(EngagementMetric.likes + EngagementMetric.comments), 0).label("eng"),
             AnalysisResult.sentiment,
+            AnalysisResult.ocr_text,
+            AnalysisResult.audio_transcript,
+            AnalysisResult.topics,
         )
         .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
         .outerjoin(AnalysisResult, AnalysisResult.post_id == Post.id)
         .filter(Post.id.in_(post_ids))
-        .group_by(Post.id, AnalysisResult.sentiment)
+        .group_by(
+            Post.id,
+            AnalysisResult.sentiment,
+            AnalysisResult.ocr_text,
+            AnalysisResult.audio_transcript,
+            AnalysisResult.topics,
+        )
         .order_by(func.coalesce(func.sum(EngagementMetric.likes + EngagementMetric.comments), 0).desc())
         .limit(5)
         .all()
@@ -180,11 +189,62 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
     )
     best_type = best_type_row.content_type.value if best_type_row and best_type_row.content_type else "image"
 
-    # Format top posts table
+    # Format top posts table. Include OCR text and audio transcript when present
+    # so Gemini can reason about on-image copy (slogans, prices, product names
+    # baked into the graphic) AND spoken audio (reel voiceover, video script)
+    # instead of seeing only the caption.
     top_posts_lines = []
-    for post, eng, sent in top_posts:
+    for post, eng, sent, ocr, audio, topics in top_posts:
         ct = post.content_type.value if post.content_type else "unknown"
-        top_posts_lines.append(f"{post.id} | {ct} | {eng} engagements | {sent or 'unanalyzed'}")
+        line = f"{post.id} | {ct} | {eng} engagements | {sent or 'unanalyzed'}"
+        if ocr:
+            snippet = ocr.strip().replace("\n", " ")[:200]
+            if snippet:
+                line += f" | image text: \"{snippet}\""
+        if audio:
+            snippet = audio.strip().replace("\n", " ")[:200]
+            if snippet:
+                line += f" | audio transcript: \"{snippet}\""
+        if topics:
+            line += f" | topics: {', '.join(topics[:3])}"
+        top_posts_lines.append(line)
+
+    # Language breakdown across all posts this week — uses analysis_result
+    # language_detected (derived from caption + OCR + audio) so it reflects
+    # the post's actual content, not just caption-only heuristics.
+    lang_rows = (
+        db.query(AnalysisResult.language_detected, func.count(AnalysisResult.id))
+        .filter(AnalysisResult.post_id.in_(post_ids))
+        .group_by(AnalysisResult.language_detected)
+        .all()
+    )
+    lang_counts = {"en": 0, "ar": 0, "unknown": 0}
+    for lang, n in lang_rows:
+        if lang in lang_counts:
+            lang_counts[lang] = n
+    lang_total = sum(lang_counts.values()) or 1
+    pct_ar = round(lang_counts["ar"] / lang_total * 100)
+    pct_en = round(lang_counts["en"] / lang_total * 100)
+
+    # Topic frequency — count every topic string across this week's posts and
+    # take the top 5. Topics come from Gemini at analysis time; they cluster
+    # organically across posts about similar subject matter.
+    topic_rows = (
+        db.query(AnalysisResult.topics)
+        .filter(AnalysisResult.post_id.in_(post_ids))
+        .filter(AnalysisResult.topics.isnot(None))
+        .all()
+    )
+    topic_counter: dict[str, int] = {}
+    for (row_topics,) in topic_rows:
+        if not row_topics:
+            continue
+        for t in row_topics:
+            if isinstance(t, str) and t.strip():
+                key = t.strip().lower()
+                topic_counter[key] = topic_counter.get(key, 0) + 1
+    top_topics = sorted(topic_counter.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    topics_line = ", ".join(f"{term} (x{count})" for term, count in top_topics) or "(none)"
 
     return {
         "account_name": account.username or "Unknown",
@@ -205,6 +265,9 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
         "top_posts_table": "\n".join(top_posts_lines),
         "best_content_type": best_type,
         "date_range": f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}",
+        "pct_arabic": pct_ar,
+        "pct_english": pct_en,
+        "top_topics": topics_line,
     }
 
 
@@ -224,8 +287,12 @@ METRICS THIS WEEK:
 - Best posting time (by engagement): {data['best_day']}, {data['best_time']}
 - Sentiment breakdown: {data['pct_positive']}% positive, {data['pct_neutral']}% neutral, {data['pct_negative']}% negative
 
-TOP POSTS THIS WEEK:
+TOP POSTS THIS WEEK (each row: id | type | engagements | sentiment | optional image-text OCR | optional audio transcript from Whisper | optional topics):
 {data['top_posts_table']}
+
+CONTENT MIX:
+- Language breakdown: {data['pct_arabic']}% Arabic, {data['pct_english']}% English
+- Top topics this week: {data['top_topics']}
 
 HISTORICAL CONTEXT:
 - Last week avg engagement: {data['prev_avg_engagement']}

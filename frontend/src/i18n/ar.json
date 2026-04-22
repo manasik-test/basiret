@@ -322,7 +322,8 @@
     "generating": "جارٍ الكتابة…",
     "copyCaption": "نسخ التسمية",
     "copied": "تم النسخ!",
-    "openOnInstagram": "فتح على إنستغرام"
+    "openOnInstagram": "فتح على إنستغرام",
+    "ocrBadge": "تم اكتشاف نص في الصورة"
   },
   "myAudiencePage": {
     "question": "من هو جمهورك هذا الأسبوع، وماذا يريد، ومتى تصل إليه؟",

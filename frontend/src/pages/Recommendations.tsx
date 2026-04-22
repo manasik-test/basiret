@@ -4,7 +4,7 @@ import {
   Calendar, Clock, Image, Video, Layers, Film, Wand2, Copy, Check,
   TrendingUp, Sparkles, Loader2,
 } from 'lucide-react'
-import { useContentPlan, useGenerateCaption } from '../hooks/useAnalytics'
+import { useContentPlan, useGenerateCaption, useAccounts } from '../hooks/useAnalytics'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
 import type { ContentPlanDay } from '../api/analytics'
@@ -26,10 +26,11 @@ const typeBg: Record<string, string> = {
 /* ── Per-day plan card ──────────────────────────────────────────────────── */
 
 function DayCard({
-  day, isToday,
+  day, isToday, accountId,
 }: {
   day: ContentPlanDay
   isToday: boolean
+  accountId?: string
 }) {
   const { t, i18n } = useTranslation()
   const generate = useGenerateCaption()
@@ -39,9 +40,14 @@ function DayCard({
   function onGenerate() {
     setGenerated(null)
     setCopied(false)
-    const lang: 'en' | 'ar' = i18n.language === 'ar' ? 'ar' : 'en'
+    const lang: 'en' | 'ar' = i18n.language?.startsWith('ar') ? 'ar' : 'en'
     generate.mutate(
-      { content_type: day.content_type, topic: day.topic, language: lang },
+      {
+        content_type: day.content_type,
+        topic: day.topic,
+        language: lang,
+        account_id: accountId,
+      },
       { onSuccess: (res) => setGenerated(res.caption || '') },
     )
   }
@@ -148,6 +154,8 @@ function DayCard({
 function ContentPlanContent() {
   const { t } = useTranslation()
   const { data, isLoading } = useContentPlan()
+  const { data: accounts } = useAccounts()
+  const accountId = accounts?.[0]?.id
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   return (
@@ -184,7 +192,12 @@ function ContentPlanContent() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {data.days.map((day) => (
-            <DayCard key={day.day_index} day={day} isToday={day.date === todayISO} />
+            <DayCard
+              key={day.day_index}
+              day={day}
+              isToday={day.date === todayISO}
+              accountId={accountId}
+            />
           ))}
         </div>
       )}

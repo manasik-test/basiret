@@ -855,11 +855,104 @@ PATCH /admin/users/:id, /admin/flags/:id
 - **Deploy workflow writes key to `~/.ssh/deploy_key` manually** instead of using `webfactory/ssh-agent` — one less third-party action dependency, behavior is fully auditable in the YAML.
 - **Overwrote old deploy.yml, left `deploy.sh` alone** — the script is now orphaned (the old workflow was its only caller). Safe to delete in a follow-up cleanup; left it in place to avoid scope creep in this commit.
 
+### First deploy attempt — run [24668973992](https://github.com/manasik-test/basiret/actions/runs/24668973992)
+- Triggered automatically when commit `6778dc1` was pushed to `main`.
+- **Workflow itself works:** `SERVER_SSH_KEY` secret was set, `ssh-keyscan` returned a key whose fingerprint matched `SHA256:7jSQX1P6o7RuRTOtTfLhtkpKucM65eRPC1PSAz+IVjc`, the SSH connection authenticated as root on first try. Total time to reach the server: ~3s.
+- **Failed on `git pull --ff-only` on the server, exit 1**, with two errors interleaved:
+  - "Your local changes to the following files would be overwritten by merge: `frontend/vite.config.ts`"
+  - "The following untracked working tree files would be overwritten by merge: `docker-compose.prod.yml`"
+- **Root cause:** the server's `/opt/basiret` checkout is sitting at commit `61a1178` (one commit *before* `bbbb165 Add production deploy config for Hetzner VPS`). During the manual VPS provisioning per [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md), `docker-compose.prod.yml` was hand-created on the server and `frontend/vite.config.ts` was edited in place to add `basiret.co` to `allowedHosts`. Commit `bbbb165` later added the same files to the repo, so now `git pull` correctly refuses to clobber the un-committed server copies.
+- **Fix path (one-time server reconciliation, not a workflow change):**
+  ```bash
+  ssh root@178.104.191.148
+  cd /opt/basiret
+  git fetch origin
+  git diff HEAD..origin/main -- docker-compose.prod.yml frontend/vite.config.ts
+  # If the in-repo versions supersede the server's hand-created ones:
+  cp docker-compose.prod.yml /root/docker-compose.prod.yml.server-backup
+  rm docker-compose.prod.yml
+  git checkout -- frontend/vite.config.ts
+  git pull --ff-only          # should now succeed
+  ```
+  Then re-run via the Actions tab `Run workflow` button (no new commit needed).
+- **Lesson for future SERVER_SETUP.md edits:** any file documented as "create on the server by hand" is a future merge-conflict landmine. Either (a) commit it to the repo from day one and have the setup script `cp` from the checkout, or (b) put it outside the repo working tree (e.g. `/etc/basiret/docker-compose.override.yml`) and reference it via `docker compose -f`.
+
 ### Known issues / TODOs
-- **First deploy of this workflow on the live VPS has not yet been proven.** Preconditions: (1) `SERVER_SSH_KEY` secret set in repo Actions settings, (2) matching public key in `/root/.ssh/authorized_keys` on `178.104.191.148`, (3) repo already cloned at `/opt/basiret` with a git remote `root` can pull from. Any of these missing → workflow fails; check the `Configure SSH key and verify server host key` step first.
 - **Meta App Review** for `instagram_business_manage_comments` scope still pending (carried from 2026-04-19). Test-account-only until approved, even with the callback now working.
 - **Orphaned [deploy.sh](deploy.sh)** at repo root — old workflow's wrapper, no longer referenced. Delete in a cleanup pass.
 - **State JWT reuse not prevented** — nothing stops someone who captured a valid `state` from the URL bar from replaying it within the 10-minute TTL to connect an Instagram account. Realistic mitigation if this matters: store a nonce in Redis keyed by state-jti and delete-on-use. Low priority for MVP; 10-min exposure + signed-by-our-SECRET_KEY is acceptable.
-- **`git pull --ff-only` will fail** if the server's working tree has local commits (someone SSH'd in and fiddled). Intentional — noisy failure is better than silently discarding work. Fix path: SSH in, `git status`, resolve manually.
 - **No rollback in the deploy step** — if `docker compose up --build` fails on the server, the prior image is already stopped and the new build is half-applied. For graduation-defense day, consider a blue/green or a pre-pull sanity check in a follow-up.
 - **Regenerate Segments race condition** still carried over from multiple prior sessions — must be fixed before exposing to more users.
+
+---
+
+## Session Log — 2026-04-22
+
+### What was built — OCR made genuinely useful across the AI stack
+
+**Caption + OCR text now fed into the sentiment pipeline as one document** ([backend/app/tasks/nlp_analysis.py](backend/app/tasks/nlp_analysis.py)):
+- Previously `caption` and `ocr_text` were both stored but the sentiment/language classifier only saw a space-joined blob (`f"{caption} {ocr_text}"`) which made langdetect misfire when caption and image-text were in different languages (Arabic caption + English text overlay, or vice versa).
+- New separator: `"{caption}\n\n[IMAGE TEXT]: {ocr_text}"`. Double newline + sentinel tag keeps the XLM-RoBERTa tokenizer treating them as distinct segments, so langdetect picks the dominant language of the overall document correctly and sentiment stays stable.
+
+**OCR text now reaches Gemini in the weekly insights prompt** ([backend/app/tasks/insights.py](backend/app/tasks/insights.py)):
+- Top-5 posts query in `_gather_metrics()` expanded to select `AnalysisResult.ocr_text` (joined via the existing `AnalysisResult` outerjoin; added to `GROUP BY` so it's valid per post).
+- `top_posts_lines` now includes `| image text: "<200-char snippet>"` on rows where OCR produced text. Newlines in the OCR text collapsed to spaces before truncation so each post stays on one line.
+- Prompt header updated: `TOP POSTS THIS WEEK (each row: id | type | engagements | sentiment | optional image-text extracted via OCR from the post's image/carousel)` so Gemini knows the new column is optional and OCR-derived.
+
+**"Image text detected" badge on the My Posts best-post card** ([backend/app/api/v1/ai_pages.py](backend/app/api/v1/ai_pages.py), [frontend/src/pages/Analytics.tsx](frontend/src/pages/Analytics.tsx)):
+- `GET /ai-pages/posts-insights` now joins `AnalysisResult` on the ranking query and returns `ocr_text` on `best_post` (null when empty). Also feeds `- image text (OCR): '''{best_ocr[:300]}'''` into the "why it worked" Gemini prompt so the explanation can reference on-image copy (slogans, prices, product names baked into the graphic).
+- `BestPost` TypeScript interface gained `ocr_text: string | null`.
+- New expandable badge in `AIHero`: `ScanText` icon + "Image text detected" pill using `myPostsPage.ocrBadge` i18n key (EN + AR), collapsible via chevron, expanded panel renders the full OCR text in a bordered box with `whitespace-pre-wrap` + `dir="auto"` for correct RTL on Arabic text overlays.
+
+### What was built — UI-language-aware Gemini + server-side + client-side caches
+
+**Every Gemini-powered page endpoint now accepts `?language=en|ar`** ([backend/app/api/v1/ai_pages.py](backend/app/api/v1/ai_pages.py), [backend/app/api/v1/analytics.py](backend/app/api/v1/analytics.py)):
+- New `LanguageParam = Literal["en", "ar"]` type + `_language_rule(language)` helper producing the hard directive: *"Respond ENTIRELY in {Arabic|English}. Every string value in the JSON response MUST be in {lang}, including titles, summaries, reasons, and any labels you generate. This is a hard requirement — do not switch languages even if the input data is in a different language."* Same pattern the caption generator already used, lifted to a shared helper.
+- Appended to the system instruction of: `/ai-pages/posts-insights`, `/ai-pages/audience-insights`, `/ai-pages/content-plan`, `/ai-pages/sentiment-responses`, and `/analytics/sentiment/summary` (the 5 Gemini-backed page endpoints).
+- `_generate_highlights()` in `analytics.py` now takes `language` and builds the Arabic/English directive inline (it was a standalone function, not a sibling of the ai_pages helpers, so the rule is duplicated rather than factored out).
+
+**New `ai_page_cache` table with 24-hour TTL** ([backend/app/models/ai_page_cache.py](backend/app/models/ai_page_cache.py), [backend/alembic/versions/d4b7c2a5e180_add_ai_page_cache.py](backend/alembic/versions/d4b7c2a5e180_add_ai_page_cache.py), [db/init.sql](db/init.sql)):
+- Columns: `id`, `social_account_id` (FK → social_account, CASCADE), `page_name VARCHAR(64)`, `language VARCHAR(8)`, `content JSONB NOT NULL`, `generated_at TIMESTAMPTZ`.
+- `UNIQUE(social_account_id, page_name, language)` + supporting index `idx_ai_page_cache_lookup` on the same tuple so lookups are a single b-tree probe.
+- Alembic migration [d4b7c2a5e180](backend/alembic/versions/d4b7c2a5e180_add_ai_page_cache.py) bumps head from `c1f3d2e8a9b1`. Also mirrored in `db/init.sql` so fresh containers get the table without running migrations.
+- Cache helpers in `ai_pages.py`: `_cache_get`, `_cache_put`, `_cache_get_or_compute(db, account_id, page, lang, compute)`. `_cache_get` returns `None` on miss OR when `generated_at` is >24h old; `_cache_put` upserts and swallows `IntegrityError` / generic exceptions so cache failures never bubble to users.
+- Each endpoint caches **only the Gemini output** (e.g. `why_it_worked`, `low_performers_pattern`, `what_to_change` for posts-insights; `topics_by_idx` for content-plan; `templates_by_id` for sentiment-responses). Cheap DB aggregations (counts, best-time slots, post lists, sentiment bars) still run on every request so freshly-synced data shows up immediately — only the slow Gemini call is cached.
+- For endpoints that aggregate across multiple accounts, the cache key uses `account_ids[0]` (the first active account). This matches the precedent set by `useInsights` / the Home dashboard and keeps cache keys stable per-org as long as the primary account doesn't change.
+
+**Frontend hooks pass UI language to the server + key queries by language** ([frontend/src/hooks/useAnalytics.ts](frontend/src/hooks/useAnalytics.ts), [frontend/src/api/analytics.ts](frontend/src/api/analytics.ts)):
+- New `useUiLanguage()` hook resolves `i18n.language` (which can be `en` / `en-US` / `ar` / `ar-SA`) to the two values the backend accepts (`en` | `ar`).
+- `usePostsInsights`, `useAudienceInsights`, `useContentPlan`, `useSentimentResponses`, `useSentimentSummary` all now inject `lang` into their `queryKey` and pass it to the fetch function. Toggling EN↔AR in the UI triggers a fresh React Query fetch; the backend then serves cached Gemini output for that language from `ai_page_cache` if it's <24h old, else hits Gemini.
+- `fetchPostsInsights` / `fetchAudienceInsights` / `fetchContentPlan` / `fetchSentimentResponses` / `fetchSentimentSummary` all gained a `language: 'en' | 'ar'` parameter appended as `?language=` in the URL.
+
+**Generated captions cached in `sessionStorage`** ([frontend/src/api/analytics.ts](frontend/src/api/analytics.ts)):
+- New `captionCacheKey(req)` helper: `basiret:caption:{account_id}:{YYYY-MM-DD}:{content_type}:{topic}:{post_id}:{language}`. Day component is `new Date().toISOString().slice(0, 10)` (UTC date, stable within the session).
+- `generateCaption()` now checks `sessionStorage` first — on hit, returns `{ caption }` synchronously without any network call. On miss, POSTs to `/ai-pages/generate-caption`, then writes the result back to sessionStorage on success.
+- Storage failures (private mode, strict SameSite, quota) are caught and fall through to the network silently — the feature still works, just without the cache optimization.
+- `GenerateCaptionRequest` gained an `account_id?: string` field that's client-only — stripped before being POSTed to the backend (which scopes by the user's org automatically). Both callers ([Analytics.tsx](frontend/src/pages/Analytics.tsx) best-post + [Recommendations.tsx](frontend/src/pages/Recommendations.tsx) `DayCard`) now pass `accounts?.[0]?.id` from `useAccounts()`.
+
+**New i18n key** `myPostsPage.ocrBadge` in [en.json](frontend/src/i18n/en.json) ("Image text detected") + [ar.json](frontend/src/i18n/ar.json) ("تم اكتشاف نص في الصورة").
+
+### Verified end-to-end
+- Alembic upgrade applied cleanly on the running DB (`c1f3d2e8a9b1` → `d4b7c2a5e180`).
+- Full backend test suite: **81/81 passed in ~15s**.
+- TypeScript clean (`npx tsc --noEmit` in `frontend/`, zero errors).
+
+### Key decisions
+- **OCR separator format `"\n\n[IMAGE TEXT]: ..."` instead of a plain space** — keeps langdetect stable on mixed-language posts. The sentinel tag is redundant for the model (XLM-RoBERTa doesn't interpret it semantically) but it makes stored logs readable when debugging misclassifications.
+- **OCR snippet truncated to 200 chars in the Gemini insights prompt** to avoid blowing out the context window when a billboard / infographic post has dense OCR text. 200 is enough to capture a headline, slogan, or price; longer strings tend to be noise.
+- **Cache only the Gemini output, not the whole endpoint response** — lets freshly-synced posts/comments appear immediately while still making the slow part (the Gemini round-trip) instant on repeat visits. Keeping the response shape identical meant no frontend changes were needed to consume cached data.
+- **Cache TTL = 24h, enforced in application code** rather than at the DB layer (no pg_cron, no triggers). A simple `datetime.now(tz) - generated_at > timedelta(hours=24)` check on read. Stale rows aren't proactively deleted — they're just overwritten on the next write. Acceptable at graduation scale; could add a nightly Celery prune task later if row count grows.
+- **Cache key scoped to `social_account_id`** per the user's spec, even for endpoints that aggregate across all org accounts. Resolved by picking `account_ids[0]`. This is consistent with how `insight_result` is keyed and how the Home dashboard picks "the first active account" — if a multi-account org ever becomes common, both systems need the same treatment (e.g. an "org primary account" concept).
+- **`_cache_put` swallows exceptions** (`IntegrityError` from races + generic `Exception` from connection blips) — cache writes are best-effort. A failed write falls through to returning the just-computed result, so the user always gets a correct response; they just don't get the speed-up next time until the write succeeds.
+- **Language rule lifted into `_language_rule(language)` helper** in `ai_pages.py`, duplicated inline in `_generate_highlights` in `analytics.py`. Not factored into a shared module because `analytics.py` doesn't import from `ai_pages.py` (and vice versa) and the duplication is ~3 lines. Worth deduping if a third Gemini call site ever appears outside `ai_pages`.
+- **`queryKey` includes `lang`** so React Query treats EN and AR as separate cache entries. Without this, a user switching languages would see the stale cached response from the other language until the query's `staleTime` expired.
+- **Caption sessionStorage key includes `content_type`, `topic`, `post_id`, `language`** — more specific than the user's literal "account_id + day" spec, but necessary because a single day can host multiple generate-caption requests against different posts or different content plan slots. Without these fields the cache would collide across cards on the same page.
+- **Client-only `account_id` field on `GenerateCaptionRequest`** — the backend doesn't need it (scopes by JWT) but the frontend needs it to build the cache key. Stripped before POST via `const { account_id: _, ...body } = req; void _;` so the server schema stays unchanged.
+- **`sessionStorage` (not `localStorage`)** — captions are tied to "this browsing session", which matches how the user asked about returning after a navigate-away. localStorage would persist across browser restarts, which is more caching than we need and makes the "generated today" semantics drift.
+- **UTC date component in the sessionStorage key** (`toISOString().slice(0, 10)`) — consistent across users regardless of their local timezone. A user in UTC+3 might see a key change at 03:00 local time, but they're unlikely to be generating captions at that hour; acceptable tradeoff for key simplicity.
+
+### Known issues / TODOs
+- **Caption cache doesn't invalidate when the user edits the topic** — if a content-plan day's AI-generated topic changes after the user already generated a caption for that day, the cache key changes correctly (topic is in the key), so the old caption stays in sessionStorage but a new one will be requested. Eventual consistency; no bug, but worth knowing.
+- **`ai_page_cache` stores Gemini output in a language even if Gemini returned an off-language response** — the language rule is a soft prompt constraint, not a hard guarantee. If Gemini ever produces English output for an `?language=ar` request, we'll cache that broken output for 24h. Low-probability on Gemini 2.5 Flash Lite with a strong system instruction; monitor in production.
+- **No admin UI to bust the cache** — if a demo-day situation calls for a fresh Gemini run, the only way today is `DELETE FROM ai_page_cache WHERE social_account_id = '...';` in psql or letting the 24h TTL expire. Add a `POST /admin/ai-cache/clear` or a force-refresh button if this becomes a pain.
+- **Carried over from earlier sessions:** Regenerate Segments race condition, Meta App Review for `instagram_business_manage_comments`, orphaned `deploy.sh`, no rollback in deploy step, State JWT reuse not prevented.

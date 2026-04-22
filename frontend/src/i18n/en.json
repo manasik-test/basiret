@@ -322,7 +322,8 @@
     "generating": "Writing…",
     "copyCaption": "Copy caption",
     "copied": "Copied!",
-    "openOnInstagram": "Open on Instagram"
+    "openOnInstagram": "Open on Instagram",
+    "ocrBadge": "Image text detected"
   },
   "myAudiencePage": {
     "question": "Who is your audience this week, what do they want, and when should you reach them?",

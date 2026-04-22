@@ -124,11 +124,36 @@ export interface PostsBreakdownData {
     date: string
     count: number
   }>
+  by_language: Array<{
+    language: 'en' | 'ar' | 'unknown'
+    count: number
+    avg_likes: number
+    avg_comments: number
+    avg_engagement: number
+  }>
 }
 
 export async function fetchPostsBreakdown(): Promise<PostsBreakdownData> {
   const res = await api.get<unknown, ApiResponse<PostsBreakdownData>>('/analytics/posts/breakdown')
   return res.data
+}
+
+export interface TopPost {
+  id: string
+  caption: string
+  content_type: string
+  thumbnail_url: string | null
+  permalink: string | null
+  likes: number
+  comments: number
+  posted_at: string | null
+}
+
+export async function fetchTopPosts(limit = 10): Promise<TopPost[]> {
+  const res = await api.get<unknown, ApiResponse<{ posts: TopPost[] }>>(
+    `/analytics/posts/top?limit=${limit}`,
+  )
+  return res.data.posts
 }
 
 export async function fetchSentimentTimeline(): Promise<SentimentTimelineData> {
@@ -237,9 +262,16 @@ export interface SentimentSummaryData {
   samples: Record<SentimentKey, SampleComment | null>
 }
 
-export async function fetchSentimentSummary(accountId?: string): Promise<SentimentSummaryData> {
-  const qs = accountId ? `?account_id=${accountId}` : ''
-  const res = await api.get<unknown, ApiResponse<SentimentSummaryData>>(`/analytics/sentiment/summary${qs}`)
+export async function fetchSentimentSummary(
+  accountId?: string,
+  language: 'en' | 'ar' = 'en',
+): Promise<SentimentSummaryData> {
+  const params = new URLSearchParams()
+  if (accountId) params.set('account_id', accountId)
+  params.set('language', language)
+  const res = await api.get<unknown, ApiResponse<SentimentSummaryData>>(
+    `/analytics/sentiment/summary?${params.toString()}`,
+  )
   return res.data
 }
 
@@ -253,6 +285,7 @@ export interface BestPost {
   comments: number
   posted_at: string | null
   permalink: string | null
+  ocr_text: string | null
 }
 
 export interface PostsInsightsData {
@@ -262,8 +295,10 @@ export interface PostsInsightsData {
   what_to_change: string
 }
 
-export async function fetchPostsInsights(): Promise<PostsInsightsData> {
-  const res = await api.get<unknown, ApiResponse<PostsInsightsData>>('/ai-pages/posts-insights')
+export async function fetchPostsInsights(language: 'en' | 'ar' = 'en'): Promise<PostsInsightsData> {
+  const res = await api.get<unknown, ApiResponse<PostsInsightsData>>(
+    `/ai-pages/posts-insights?language=${language}`,
+  )
   return res.data
 }
 
@@ -273,13 +308,58 @@ export interface GenerateCaptionRequest {
   language: 'en' | 'ar'
   reference_caption?: string
   post_id?: string
+  // Client-only: used to key the sessionStorage cache so multiple connected
+  // accounts don't share captions. Not sent to the backend (backend scopes
+  // by user's org automatically).
+  account_id?: string
+}
+
+// Build the sessionStorage key for a caption request. Captions are cached
+// for the calendar day — `day` is YYYY-MM-DD in the user's local timezone.
+// Missing optional fields become empty strings so collisions are impossible
+// across (content_type, topic, post_id, language) tuples.
+function captionCacheKey(req: GenerateCaptionRequest): string | null {
+  if (typeof window === 'undefined' || !req.account_id) return null
+  const day = new Date().toISOString().slice(0, 10)
+  return [
+    'basiret',
+    'caption',
+    req.account_id,
+    day,
+    req.content_type ?? '',
+    req.topic ?? '',
+    req.post_id ?? '',
+    req.language,
+  ].join(':')
 }
 
 export async function generateCaption(req: GenerateCaptionRequest): Promise<{ caption: string }> {
+  const key = captionCacheKey(req)
+  if (key) {
+    try {
+      const cached = window.sessionStorage.getItem(key)
+      if (cached) return { caption: cached }
+    } catch {
+      // sessionStorage may be blocked (private mode, strict SameSite). Fall
+      // through to the network — the feature still works, just without the
+      // cache optimization.
+    }
+  }
+
+  // Strip the client-only field before sending to the backend.
+  const { account_id: _, ...body } = req
+  void _
   const res = await api.post<unknown, ApiResponse<{ caption: string }>>(
     '/ai-pages/generate-caption',
-    req,
+    body,
   )
+  if (key && res.data?.caption) {
+    try {
+      window.sessionStorage.setItem(key, res.data.caption)
+    } catch {
+      // See note above — ignore storage failures.
+    }
+  }
   return res.data
 }
 
@@ -294,8 +374,10 @@ export interface AudienceInsightsData {
   best_time: { day: string; time: string; reason: string }
 }
 
-export async function fetchAudienceInsights(): Promise<AudienceInsightsData> {
-  const res = await api.get<unknown, ApiResponse<AudienceInsightsData>>('/ai-pages/audience-insights')
+export async function fetchAudienceInsights(language: 'en' | 'ar' = 'en'): Promise<AudienceInsightsData> {
+  const res = await api.get<unknown, ApiResponse<AudienceInsightsData>>(
+    `/ai-pages/audience-insights?language=${language}`,
+  )
   return res.data
 }
 
@@ -313,8 +395,10 @@ export interface ContentPlanData {
   days: ContentPlanDay[]
 }
 
-export async function fetchContentPlan(): Promise<ContentPlanData> {
-  const res = await api.get<unknown, ApiResponse<ContentPlanData>>('/ai-pages/content-plan')
+export async function fetchContentPlan(language: 'en' | 'ar' = 'en'): Promise<ContentPlanData> {
+  const res = await api.get<unknown, ApiResponse<ContentPlanData>>(
+    `/ai-pages/content-plan?language=${language}`,
+  )
   return res.data
 }
 
@@ -327,7 +411,9 @@ export interface SentimentResponsesData {
   templates: SentimentResponseTemplate[]
 }
 
-export async function fetchSentimentResponses(): Promise<SentimentResponsesData> {
-  const res = await api.get<unknown, ApiResponse<SentimentResponsesData>>('/ai-pages/sentiment-responses')
+export async function fetchSentimentResponses(language: 'en' | 'ar' = 'en'): Promise<SentimentResponsesData> {
+  const res = await api.get<unknown, ApiResponse<SentimentResponsesData>>(
+    `/ai-pages/sentiment-responses?language=${language}`,
+  )
   return res.data
 }

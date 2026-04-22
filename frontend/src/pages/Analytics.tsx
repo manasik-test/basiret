@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Sparkles, TrendingUp, AlertTriangle, ArrowRight, Image, Video, Layers, Film,
-  Wand2, Check, Copy, ExternalLink, Loader2,
+  Wand2, Check, Copy, ExternalLink, Loader2, ScanText, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { usePostsBreakdown, usePostsInsights, useGenerateCaption } from '../hooks/useAnalytics'
+import { usePostsBreakdown, usePostsInsights, useGenerateCaption, useAccounts } from '../hooks/useAnalytics'
 import TopPostsTable from '../components/dashboard/TopPostsTable'
 
 const typeLabels: Record<string, string> = {
@@ -41,9 +41,12 @@ function PageHeader() {
 function AIHero() {
   const { t, i18n } = useTranslation()
   const { data, isLoading } = usePostsInsights()
+  const { data: accounts } = useAccounts()
   const generate = useGenerateCaption()
   const [generated, setGenerated] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [ocrOpen, setOcrOpen] = useState(false)
+  const accountId = accounts?.[0]?.id
 
   if (isLoading) {
     return (
@@ -62,9 +65,9 @@ function AIHero() {
     if (!best) return
     setGenerated(null)
     setCopied(false)
-    const lang: 'en' | 'ar' = i18n.language === 'ar' ? 'ar' : 'en'
+    const lang: 'en' | 'ar' = i18n.language?.startsWith('ar') ? 'ar' : 'en'
     generate.mutate(
-      { post_id: best.id, content_type: best.content_type, language: lang },
+      { post_id: best.id, content_type: best.content_type, language: lang, account_id: accountId },
       { onSuccess: (res) => setGenerated(res.caption || '') },
     )
   }
@@ -111,6 +114,31 @@ function AIHero() {
                 <p dir="auto" className="text-sm text-foreground/85 mt-2 line-clamp-2 leading-relaxed">
                   {best.caption}
                 </p>
+              ) : null}
+              {best.ocr_text ? (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setOcrOpen((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 text-primary text-[11px] font-semibold hover:bg-primary/15 transition-colors"
+                  >
+                    <ScanText className="w-3.5 h-3.5" />
+                    {t('myPostsPage.ocrBadge')}
+                    {ocrOpen ? (
+                      <ChevronUp className="w-3 h-3" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3" />
+                    )}
+                  </button>
+                  {ocrOpen ? (
+                    <p
+                      dir="auto"
+                      className="mt-2 text-xs text-foreground/75 leading-relaxed bg-white/50 border border-primary/10 rounded-lg p-2 whitespace-pre-wrap"
+                    >
+                      {best.ocr_text}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
 

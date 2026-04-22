@@ -2,10 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for EasyOCR (OpenCV), general image processing, and Stripe CLI
+# System deps for EasyOCR (OpenCV), Whisper (ffmpeg), and Stripe CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    ffmpeg \
     curl \
     gpg \
     && curl -s https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor -o /usr/share/keyrings/stripe.gpg \
