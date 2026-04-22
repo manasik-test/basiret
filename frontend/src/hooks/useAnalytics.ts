@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
@@ -14,6 +15,46 @@ import {
 function useUiLanguage(): 'en' | 'ar' {
   const { i18n } = useTranslation()
   return i18n.language?.startsWith('ar') ? 'ar' : 'en'
+}
+
+// Mount once at the app root. On every language switch (Sidebar/TopBar/Landing
+// toggle), wipes the sessionStorage caption cache and invalidates every
+// React Query entry that could return Gemini-produced text. Covers both
+// language-keyed hooks (ai-pages/*, sentiment-summary — defensive only, since
+// their queryKeys already differ per lang) and hooks whose queryKeys lack
+// `lang` but whose backend data is still localized (insights, segments'
+// persona_description). Without this, a user switching EN→AR sees the cached
+// English Gemini text from those latter hooks until their staleTime elapses.
+export function useLanguageCacheInvalidation() {
+  const { i18n } = useTranslation()
+  const queryClient = useQueryClient()
+  const prevLang = useRef(i18n.language)
+
+  useEffect(() => {
+    const onLanguageChange = (lng: string) => {
+      if (lng === prevLang.current) return
+      prevLang.current = lng
+
+      try {
+        const toRemove: string[] = []
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const k = window.sessionStorage.key(i)
+          if (k?.startsWith('basiret:caption:')) toRemove.push(k)
+        }
+        toRemove.forEach((k) => window.sessionStorage.removeItem(k))
+      } catch {
+        // sessionStorage may be blocked (private mode). Nothing to invalidate.
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['ai-pages'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'insights'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'sentiment-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'segments'] })
+    }
+
+    i18n.on('languageChanged', onLanguageChange)
+    return () => { i18n.off('languageChanged', onLanguageChange) }
+  }, [i18n, queryClient])
 }
 
 export function useOverview() {

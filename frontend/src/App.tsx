@@ -14,8 +14,10 @@ import Login from './pages/Login'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
 import ComingSoon from './pages/ComingSoon'
+import { useLanguageCacheInvalidation } from './hooks/useAnalytics'
 
 export default function App() {
+  useLanguageCacheInvalidation()
   return (
     <BrowserRouter>
       <AuthProvider>
