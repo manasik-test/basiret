@@ -187,16 +187,21 @@ export interface InsightData {
   insights: InsightAction[]
   best_post_id: string | null
   next_best_time: string
+  language: 'en' | 'ar'
   generated_at: string
 }
 
-export async function fetchInsights(): Promise<InsightData | null> {
-  const res = await api.get<unknown, ApiResponse<InsightData | null>>('/analytics/insights')
+export async function fetchInsights(lang: 'en' | 'ar' = 'en'): Promise<InsightData | null> {
+  const res = await api.get<unknown, ApiResponse<InsightData | null>>(
+    `/analytics/insights?lang=${lang}`,
+  )
   return res.data
 }
 
-export async function generateInsights(): Promise<{ task_id: string }> {
-  const res = await api.post<unknown, ApiResponse<{ task_id: string; status: string }>>('/analytics/insights/generate')
+export async function generateInsights(lang: 'en' | 'ar' = 'en'): Promise<{ task_id: string }> {
+  const res = await api.post<unknown, ApiResponse<{ task_id: string; status: string }>>(
+    `/analytics/insights/generate?lang=${lang}`,
+  )
   return res.data
 }
 

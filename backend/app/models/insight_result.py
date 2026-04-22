@@ -17,6 +17,7 @@ class InsightResult(Base):
     insights = Column(JSONB)
     best_post_id = Column(UUID(as_uuid=True), ForeignKey("post.id", ondelete="SET NULL"), nullable=True)
     next_best_time = Column(String(100))
+    language = Column(String(10), nullable=False, default="en", server_default="en")
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
 
     social_account = relationship("SocialAccount")

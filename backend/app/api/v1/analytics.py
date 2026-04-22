@@ -17,6 +17,7 @@ POST /insights/generate     — trigger Gemini insight generation, returns task_
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
@@ -902,10 +903,13 @@ def regenerate_segments(
 
 @router.get("/insights")
 def get_insights(
+    lang: Literal["en", "ar"] = "en",
     user: User = Depends(RequireFeature("content_recommendations")),
     db: Session = Depends(get_db),
 ):
-    """Return the latest AI-generated insight for the user's first active account."""
+    """Return the latest AI-generated insight for the user's first active
+    account in the requested language. One row exists per (account, language)
+    — EN and AR are independent buckets."""
     account = db.query(SocialAccount).filter(
         SocialAccount.organization_id == user.organization_id,
         SocialAccount.is_active == True,
@@ -916,7 +920,10 @@ def get_insights(
 
     insight = (
         db.query(InsightResult)
-        .filter(InsightResult.social_account_id == account.id)
+        .filter(
+            InsightResult.social_account_id == account.id,
+            InsightResult.language == lang,
+        )
         .order_by(InsightResult.generated_at.desc())
         .first()
     )
@@ -936,6 +943,7 @@ def get_insights(
             "insights": insight.insights,
             "best_post_id": str(insight.best_post_id) if insight.best_post_id else None,
             "next_best_time": insight.next_best_time,
+            "language": insight.language,
             "generated_at": str(insight.generated_at),
         },
     }
@@ -943,10 +951,13 @@ def get_insights(
 
 @router.post("/insights/generate")
 def trigger_insights(
+    lang: Literal["en", "ar"] = "en",
     user: User = Depends(RequireFeature("content_recommendations")),
     db: Session = Depends(get_db),
 ):
-    """Queue AI insight generation for the user's first active account."""
+    """Queue AI insight generation for the user's first active account, in the
+    requested language. Overwrites that language's row; the other language's
+    row is untouched."""
     account = db.query(SocialAccount).filter(
         SocialAccount.organization_id == user.organization_id,
         SocialAccount.is_active == True,
@@ -955,7 +966,8 @@ def trigger_insights(
     if not account:
         raise HTTPException(status_code=404, detail="No active social account found")
 
-    task = generate_weekly_insights.delay(str(account.id))
+    long_form = "Arabic" if lang == "ar" else "English"
+    task = generate_weekly_insights.delay(str(account.id), long_form)
     return {
         "success": True,
         "data": {"task_id": task.id, "status": "queued"},

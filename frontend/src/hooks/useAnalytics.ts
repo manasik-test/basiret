@@ -131,20 +131,22 @@ export function useRegenerateSegments() {
 }
 
 export function useInsights() {
+  const lang = useUiLanguage()
   return useQuery({
-    queryKey: ['analytics', 'insights'],
-    queryFn: fetchInsights,
+    queryKey: ['analytics', 'insights', lang],
+    queryFn: () => fetchInsights(lang),
     staleTime: 60_000,
   })
 }
 
 export function useGenerateInsights() {
   const queryClient = useQueryClient()
+  const lang = useUiLanguage()
 
   return useMutation({
-    mutationFn: generateInsights,
+    mutationFn: () => generateInsights(lang),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['analytics', 'insights'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'insights', lang] })
     },
   })
 }

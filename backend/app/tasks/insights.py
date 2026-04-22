@@ -315,17 +315,33 @@ def _call_gemini(user_message: str) -> dict:
     return json.loads(response.text)
 
 
+def _normalize_language(language: str) -> str:
+    """Map long-form ('English'/'Arabic') or short-form ('en'/'en-US'/'ar') to
+    the two-letter code stored in `insight_result.language`."""
+    l = (language or "").lower()
+    if l.startswith("ar") or "arabic" in l:
+        return "ar"
+    return "en"
+
+
 @celery.task(name="generate_weekly_insights", bind=True, max_retries=2)
 def generate_weekly_insights(self, social_account_id: str, language: str = "English"):
-    """Generate AI-powered weekly insights for a social account."""
+    """Generate AI-powered weekly insights for a social account.
+
+    Rows are keyed by (social_account_id, language) — one per language per
+    account. A fresh generation for the same language overwrites the prior
+    row's content via append + score_change comparison against the previous
+    row in that same language bucket, so EN and AR trendlines stay independent.
+    """
     db = SessionLocal()
+    lang_code = _normalize_language(language)
     try:
         now = datetime.now(timezone.utc)
         week_end = now
         week_start = now - timedelta(days=7)
 
-        logger.info("Generating insights for account %s (%s to %s)",
-                     social_account_id, week_start, week_end)
+        logger.info("Generating insights for account %s (%s, %s to %s)",
+                     social_account_id, lang_code, week_start, week_end)
 
         data = _gather_metrics(db, social_account_id, week_start, week_end)
         if not data:
@@ -354,10 +370,14 @@ def generate_weekly_insights(self, social_account_id: str, language: str = "Engl
             if exists:
                 best_post_id = raw_id
 
-        # Check previous insight for score_change fallback
+        # Compare score against the previous insight in the SAME language bucket
+        # so EN and AR trendlines don't cross-contaminate.
         prev_insight = (
             db.query(InsightResult)
-            .filter(InsightResult.social_account_id == social_account_id)
+            .filter(
+                InsightResult.social_account_id == social_account_id,
+                InsightResult.language == lang_code,
+            )
             .order_by(InsightResult.generated_at.desc())
             .first()
         )
@@ -374,6 +394,7 @@ def generate_weekly_insights(self, social_account_id: str, language: str = "Engl
             insights=result.get("insights", []),
             best_post_id=best_post_id,
             next_best_time=result.get("next_best_time", ""),
+            language=lang_code,
             generated_at=now,
         )
         db.add(insight)

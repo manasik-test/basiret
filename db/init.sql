@@ -163,22 +163,7 @@ CREATE TABLE insight_result (
     insights JSONB,
     best_post_id UUID REFERENCES post(id) ON DELETE SET NULL,
     next_best_time VARCHAR(100),
-    generated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ─────────────────────────────────────────
--- INSIGHT RESULT
--- ─────────────────────────────────────────
-CREATE TABLE insight_result (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
-    week_start TIMESTAMPTZ NOT NULL,
-    summary VARCHAR(500),
-    score FLOAT,
-    score_change FLOAT,
-    insights JSONB,
-    best_post_id UUID REFERENCES post(id) ON DELETE SET NULL,
-    next_best_time VARCHAR(100),
+    language VARCHAR(10) NOT NULL DEFAULT 'en',
     generated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -239,3 +224,4 @@ CREATE INDEX idx_engagement_post ON engagement_metric(post_id);
 CREATE INDEX idx_user_org ON "user"(organization_id);
 CREATE INDEX idx_social_account_org ON social_account(organization_id);
 CREATE INDEX idx_insight_account ON insight_result(social_account_id);
+CREATE INDEX idx_insight_account_lang ON insight_result(social_account_id, language);
