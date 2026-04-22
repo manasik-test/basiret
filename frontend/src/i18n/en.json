@@ -258,6 +258,7 @@
     "title": "Audience Segmentation",
     "regenerate": "Regenerate Segments",
     "regenerating": "Regenerating...",
+    "regenerateCooldown": "Wait {{seconds}}s",
     "segmentSize": "posts",
     "contentType": "Content Type",
     "postingTime": "Posting Time",

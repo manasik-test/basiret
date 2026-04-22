@@ -258,6 +258,7 @@
     "title": "تجزئة الجمهور",
     "regenerate": "إعادة إنشاء الشرائح",
     "regenerating": "جاري الإنشاء...",
+    "regenerateCooldown": "انتظر {{seconds}} ثانية",
     "segmentSize": "منشور",
     "contentType": "نوع المحتوى",
     "postingTime": "وقت النشر",

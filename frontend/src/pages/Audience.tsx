@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   RefreshCw, Image, Video, Layers, Sun, Sunrise, Sunset,
@@ -241,10 +242,33 @@ function SegmentCard({
   )
 }
 
+// Cooldown guards against the segment-regeneration race condition: each
+// regenerate kicks off a Celery task that deletes + reinserts segment rows
+// without a lock, so rapid clicks interleave and produce duplicates. 30s is
+// well past the typical task duration (<1s) plus a comfortable margin.
+const REGEN_COOLDOWN_SECONDS = 30
+
 function AudienceContent() {
   const { t } = useTranslation()
   const segments = useSegments()
   const regenerate = useRegenerateSegments()
+  const [cooldownLeft, setCooldownLeft] = useState(0)
+
+  useEffect(() => {
+    if (cooldownLeft <= 0) return
+    const id = window.setInterval(() => {
+      setCooldownLeft((v) => (v > 0 ? v - 1 : 0))
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [cooldownLeft])
+
+  function handleRegenerate() {
+    if (regenerate.isPending || cooldownLeft > 0) return
+    setCooldownLeft(REGEN_COOLDOWN_SECONDS)
+    regenerate.mutate()
+  }
+
+  const buttonDisabled = regenerate.isPending || cooldownLeft > 0
 
   return (
     <div className="space-y-6">
@@ -271,12 +295,17 @@ function AudienceContent() {
           </span>
         </div>
         <button
-          onClick={() => regenerate.mutate()}
-          disabled={regenerate.isPending}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          onClick={handleRegenerate}
+          disabled={buttonDisabled}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={cooldownLeft > 0 ? t('audience.regenerateCooldown', { seconds: cooldownLeft }) : undefined}
         >
           <RefreshCw className={`w-3.5 h-3.5 ${regenerate.isPending ? 'animate-spin' : ''}`} />
-          {regenerate.isPending ? t('audience.regenerating') : t('audience.regenerate')}
+          {regenerate.isPending
+            ? t('audience.regenerating')
+            : cooldownLeft > 0
+            ? t('audience.regenerateCooldown', { seconds: cooldownLeft })
+            : t('audience.regenerate')}
         </button>
       </div>
 

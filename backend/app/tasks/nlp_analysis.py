@@ -75,18 +75,23 @@ def _get_ocr_reader():
 
 
 def _get_whisper_model():
-    """Load Whisper once per worker process. Returns None if whisper import or
-    model load fails — callers must handle None and skip audio transcription
-    gracefully (e.g. workers without ffmpeg on PATH or without the extra deps)."""
+    """Load faster-whisper once per worker process. Returns None if the import
+    or model load fails — callers must handle None and skip audio transcription
+    gracefully. `int8` keeps the model small and CPU-fast; `base` is the same
+    tier used elsewhere in the pipeline."""
     global _whisper_model
     if _whisper_model is None:
         try:
-            import whisper  # openai-whisper
-            _whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
-            logger.info("Whisper model loaded: %s", WHISPER_MODEL_NAME)
+            from faster_whisper import WhisperModel
+            _whisper_model = WhisperModel(
+                WHISPER_MODEL_NAME,
+                device="cpu",
+                compute_type="int8",
+            )
+            logger.info("faster-whisper model loaded: %s", WHISPER_MODEL_NAME)
         except Exception as exc:
             logger.warning(
-                "Whisper unavailable — audio transcription will be skipped: %s", exc,
+                "faster-whisper unavailable — audio transcription will be skipped: %s", exc,
             )
             _whisper_model = False  # sentinel so we don't retry on every call
     return _whisper_model if _whisper_model else None
@@ -171,8 +176,11 @@ def _extract_audio_transcript(media_url: str) -> str | None:
             tmp.write(video_bytes)
             tmp_path = tmp.name
 
-        result = model.transcribe(tmp_path, fp16=False)
-        text = (result.get("text") or "").strip()
+        # faster-whisper returns (segments_generator, info). The generator is
+        # lazy — iterating it is what actually runs the model. Concatenating
+        # each segment's `.text` gives the full transcript.
+        segments, _info = model.transcribe(tmp_path, beam_size=5)
+        text = " ".join((seg.text or "").strip() for seg in segments).strip()
         return text if text else None
     except Exception as exc:
         logger.warning("Whisper transcription failed for %s: %s", media_url, exc)
