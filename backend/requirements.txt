@@ -18,7 +18,6 @@ transformers==4.41.2
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.3.1+cpu
 easyocr==1.7.1
-faster-whisper==1.0.1
 langdetect==1.0.9
 sentencepiece==0.2.0
 protobuf==4.25.3

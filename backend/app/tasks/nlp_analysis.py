@@ -3,16 +3,14 @@ Celery task: run NLP analysis on posts.
 
 For each post without an analysis_result:
 1. Extract text via OCR (image/carousel posts)
-2. Transcribe audio via Whisper (video/reel posts)
-3. Combine caption + OCR text + audio transcript into one analysis document
-4. Detect language (en/ar/unknown) on the combined document
-5. Run sentiment analysis using cardiffnlp/twitter-xlm-roberta-base-sentiment
-6. Extract 2-3 topics via Gemini
-7. Store results in analysis_result table
+2. Combine caption + OCR text into one analysis document
+   (audio transcription is stubbed — see _extract_audio_transcript TODO)
+3. Detect language (en/ar/unknown) on the combined document
+4. Run sentiment analysis using cardiffnlp/twitter-xlm-roberta-base-sentiment
+5. Extract 2-3 topics via Gemini
+6. Store results in analysis_result table
 """
 import logging
-import os
-import tempfile
 
 import httpx
 from langdetect import detect, LangDetectException
@@ -28,7 +26,6 @@ from app.models.analysis_result import AnalysisResult
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
-WHISPER_MODEL_NAME = "base"
 
 # Labels output by the model (id2label mapping)
 LABEL_MAP = {
@@ -45,7 +42,6 @@ LABEL_MAP = {
 
 _sentiment_pipeline = None
 _ocr_reader = None
-_whisper_model = None
 
 
 def _get_sentiment_pipeline():
@@ -72,29 +68,6 @@ def _get_ocr_reader():
         _ocr_reader = easyocr.Reader(["en", "ar"], gpu=False)
         logger.info("EasyOCR reader loaded (en + ar)")
     return _ocr_reader
-
-
-def _get_whisper_model():
-    """Load faster-whisper once per worker process. Returns None if the import
-    or model load fails — callers must handle None and skip audio transcription
-    gracefully. `int8` keeps the model small and CPU-fast; `base` is the same
-    tier used elsewhere in the pipeline."""
-    global _whisper_model
-    if _whisper_model is None:
-        try:
-            from faster_whisper import WhisperModel
-            _whisper_model = WhisperModel(
-                WHISPER_MODEL_NAME,
-                device="cpu",
-                compute_type="int8",
-            )
-            logger.info("faster-whisper model loaded: %s", WHISPER_MODEL_NAME)
-        except Exception as exc:
-            logger.warning(
-                "faster-whisper unavailable — audio transcription will be skipped: %s", exc,
-            )
-            _whisper_model = False  # sentinel so we don't retry on every call
-    return _whisper_model if _whisper_model else None
 
 
 # ── Helper functions ─────────────────────────────────────────────────────
@@ -149,48 +122,18 @@ def _extract_ocr_text(media_url: str) -> str | None:
 
 
 def _extract_audio_transcript(media_url: str) -> str | None:
-    """Download video from Instagram CDN and run Whisper transcription.
+    """Audio transcription for video/reel posts.
 
-    Returns None on any failure — Instagram video URLs are signed and expire
-    after ~48 hours, so older posts re-analyzed later will silently skip.
-    Whisper internally shells out to ffmpeg to extract audio from the video
-    container, so ffmpeg must be available on PATH (see Dockerfile).
+    TODO: re-enable Whisper-based transcription once a dependency path that
+    doesn't conflict with transformers>=4.41 is available (openai-whisper
+    needed pkg_resources + triton; faster-whisper pulled in `av`/PyAV which
+    needs libav*-dev headers AND pins tokenizers<0.16 which collides with
+    transformers' tokenizers>=0.19). Until then the caller receives None and
+    _analyze_single_post stores audio_transcript=NULL — the rest of the
+    pipeline (OCR + sentiment + topics) is unaffected.
     """
-    if not media_url:
-        return None
-
-    model = _get_whisper_model()
-    if model is None:
-        return None
-
-    tmp_path = None
-    try:
-        with httpx.Client(timeout=90, follow_redirects=True) as client:
-            resp = client.get(media_url)
-            resp.raise_for_status()
-            video_bytes = resp.content
-
-        with tempfile.NamedTemporaryFile(
-            suffix=".mp4", delete=False,
-        ) as tmp:
-            tmp.write(video_bytes)
-            tmp_path = tmp.name
-
-        # faster-whisper returns (segments_generator, info). The generator is
-        # lazy — iterating it is what actually runs the model. Concatenating
-        # each segment's `.text` gives the full transcript.
-        segments, _info = model.transcribe(tmp_path, beam_size=5)
-        text = " ".join((seg.text or "").strip() for seg in segments).strip()
-        return text if text else None
-    except Exception as exc:
-        logger.warning("Whisper transcription failed for %s: %s", media_url, exc)
-        return None
-    finally:
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+    del media_url  # parameter kept so the signature stays stable for callers
+    return None
 
 
 def _build_analysis_text(caption: str, ocr_text: str | None, audio_transcript: str | None) -> str:
