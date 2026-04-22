@@ -1,11 +1,12 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Smile, Meh, Frown,
   TrendingUp, TrendingDown, Minus,
   Sparkles, AlertTriangle, ExternalLink,
-  MessageSquare, Quote,
+  MessageSquare, Quote, Copy, Check, MessageCircle,
 } from 'lucide-react'
-import { useSentimentSummary } from '../hooks/useAnalytics'
+import { useSentimentSummary, useSentimentResponses } from '../hooks/useAnalytics'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
 import type {
@@ -47,6 +48,141 @@ function pct(part: number, total: number): number {
   return Math.round((part / total) * 100)
 }
 
+/* ── AI hero ────────────────────────────────────────────────────────────── */
+
+function AISummary({ text, totalWeek }: { text: string; totalWeek: number }) {
+  const { t } = useTranslation()
+  const isEmpty = !text || text.length === 0
+  return (
+    <div className="glass rounded-2xl p-5 flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+          <Sparkles className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            {t('sentimentPage.aiSummaryTitle')}
+          </h2>
+          <p className="text-[11px] text-muted-foreground">
+            {t('sentimentPage.aiSummarySubtitle')}
+          </p>
+        </div>
+      </div>
+      <p dir="auto" className="text-sm text-foreground/85 leading-relaxed">
+        {isEmpty
+          ? totalWeek === 0
+            ? t('sentimentPage.highlightsEmptyNoData')
+            : t('sentimentPage.highlightsEmptyFallback')
+          : text}
+      </p>
+    </div>
+  )
+}
+
+/* ── Needs your attention with response templates ───────────────────────── */
+
+function ResponseTemplate({ template }: { template: string }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  if (!template) return null
+  function copy() {
+    navigator.clipboard.writeText(template)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <div className="rounded-lg bg-primary/5 border border-primary/15 p-3 flex flex-col gap-2 mt-2">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+        <MessageCircle className="w-3.5 h-3.5" />
+        {t('sentimentPage.suggestedReply')}
+      </div>
+      <p dir="auto" className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+        {template}
+      </p>
+      <button
+        onClick={copy}
+        className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+      >
+        {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+        {copied ? t('sentimentPage.replyCopied') : t('sentimentPage.copyReply')}
+      </button>
+    </div>
+  )
+}
+
+function NeedsAttention({
+  posts,
+  templatesByPostId,
+  templatesLoading,
+}: {
+  posts: NeedsAttentionPost[]
+  templatesByPostId: Record<string, string>
+  templatesLoading: boolean
+}) {
+  const { t } = useTranslation()
+  if (posts.length === 0) {
+    return (
+      <div className="glass rounded-2xl p-6 text-center text-sm text-muted-foreground">
+        {t('sentimentPage.attentionEmpty')}
+      </div>
+    )
+  }
+  return (
+    <ul className="space-y-3">
+      {posts.map((p, i) => {
+        const tmpl = templatesByPostId[p.post_id] || ''
+        const isTopAttention = i < 3 // backend only generates templates for top 3
+        return (
+          <li
+            key={p.post_id}
+            className="glass rounded-2xl p-4 flex flex-col gap-3 border border-rose-200/50"
+          >
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p dir="auto" className="text-sm text-foreground/90 line-clamp-2">
+                  {p.caption || t('sentimentPage.noCaption')}
+                </p>
+                <div className="flex items-center gap-2 mt-1 text-xs text-rose-700 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    <Frown className="w-3 h-3" />
+                    {t('sentimentPage.negativeComments', { count: p.negative_count })}
+                  </span>
+                </div>
+              </div>
+              {p.permalink ? (
+                <a
+                  href={p.permalink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors"
+                >
+                  {t('sentimentPage.viewPost')}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              ) : null}
+            </div>
+
+            {isTopAttention ? (
+              tmpl ? (
+                <ResponseTemplate template={tmpl} />
+              ) : templatesLoading ? (
+                <p className="text-xs text-muted-foreground italic">
+                  {t('sentimentPage.replyLoading')}
+                </p>
+              ) : null
+            ) : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/* ── Score cards (supporting evidence below) ────────────────────────────── */
+
 function WoWDelta({ change, kind }: { change: number; kind: SentimentKey }) {
   const { t } = useTranslation()
   if (change === 0) {
@@ -56,9 +192,6 @@ function WoWDelta({ change, kind }: { change: number; kind: SentimentKey }) {
       </span>
     )
   }
-  // For positive sentiment: up is good (green), down is bad (red)
-  // For negative sentiment: up is bad (red), down is good (green)
-  // For neutral: stay colour-neutral, just show direction
   const isUp = change > 0
   const isGood =
     kind === 'positive' ? isUp :
@@ -147,78 +280,6 @@ function KeywordsPanel({ keywords }: { keywords: Keyword[] }) {
   )
 }
 
-function HighlightsPanel({ text, totalWeek }: { text: string; totalWeek: number }) {
-  const { t } = useTranslation()
-  const isEmpty = !text || text.length === 0
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3 h-full">
-      <div className="flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-          <Sparkles className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold text-foreground">{t('sentimentPage.highlightsTitle')}</h2>
-          <p className="text-[11px] text-muted-foreground">{t('sentimentPage.highlightsSubtitle')}</p>
-        </div>
-      </div>
-      <p dir="auto" className="text-sm text-foreground/85 leading-relaxed">
-        {isEmpty
-          ? (totalWeek === 0
-              ? t('sentimentPage.highlightsEmptyNoData')
-              : t('sentimentPage.highlightsEmptyFallback'))
-          : text}
-      </p>
-    </div>
-  )
-}
-
-function NeedsAttention({ posts }: { posts: NeedsAttentionPost[] }) {
-  const { t } = useTranslation()
-  if (posts.length === 0) {
-    return (
-      <div className="glass rounded-2xl p-6 text-center text-sm text-muted-foreground">
-        {t('sentimentPage.attentionEmpty')}
-      </div>
-    )
-  }
-  return (
-    <ul className="space-y-3">
-      {posts.map((p) => (
-        <li
-          key={p.post_id}
-          className="glass rounded-2xl p-4 flex flex-col md:flex-row md:items-center gap-3 border border-rose-200/50"
-        >
-          <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-5 h-5 text-rose-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p dir="auto" className="text-sm text-foreground/90 line-clamp-2">
-              {p.caption || t('sentimentPage.noCaption')}
-            </p>
-            <div className="flex items-center gap-2 mt-1 text-xs text-rose-700 font-medium">
-              <span className="inline-flex items-center gap-1">
-                <Frown className="w-3 h-3" />
-                {t('sentimentPage.negativeComments', { count: p.negative_count })}
-              </span>
-            </div>
-          </div>
-          {p.permalink ? (
-            <a
-              href={p.permalink}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors"
-            >
-              {t('sentimentPage.viewPost')}
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 function SampleCommentCard({
   kind, sample,
 }: {
@@ -270,6 +331,7 @@ function SampleCommentCard({
 function SentimentContent() {
   const { t } = useTranslation()
   const { data, isLoading } = useSentimentSummary()
+  const responses = useSentimentResponses()
 
   if (isLoading) {
     return (
@@ -293,17 +355,57 @@ function SentimentContent() {
 
   const totalWeek = summary.total_week
 
+  const templatesByPostId: Record<string, string> = {}
+  for (const tmpl of responses.data?.templates || []) {
+    templatesByPostId[tmpl.post_id] = tmpl.response_template
+  }
+
   return (
     <div className="space-y-6">
-      {/* Week label + total */}
+      {/* Question subtitle */}
       <div>
-        <p className="text-sm text-muted-foreground">{t('sentimentPage.subtitle')}</p>
+        <p className="text-sm text-muted-foreground" dir="auto">
+          {t('sentimentPage.question')}
+        </p>
         <p className="text-xs text-muted-foreground/80 mt-1">
           {t('sentimentPage.thisWeekCount', { count: totalWeek })}
         </p>
       </div>
 
-      {/* 1. Score cards w/ WoW */}
+      {/* AI hero label */}
+      <div className="flex items-center gap-2 mb-1">
+        <Sparkles className="w-4 h-4 text-cta" />
+        <h2 className="text-sm font-semibold text-foreground/70 uppercase tracking-wider">
+          {t('sentimentPage.aiHeroLabel')}
+        </h2>
+      </div>
+
+      {/* AI summary at the top */}
+      <AISummary text={summary.highlights} totalWeek={totalWeek} />
+
+      {/* Needs your attention with reply templates */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle className="w-4 h-4 text-rose-600" />
+          <h2 className="text-base font-semibold text-foreground">{t('sentimentPage.attentionTitleNew')}</h2>
+          <span className="text-[11px] text-muted-foreground">{t('sentimentPage.attentionSubtitleNew')}</span>
+        </div>
+        <NeedsAttention
+          posts={summary.needs_attention}
+          templatesByPostId={templatesByPostId}
+          templatesLoading={responses.isLoading}
+        />
+      </div>
+
+      {/* Supporting evidence section */}
+      <div className="flex items-center gap-2 mt-2">
+        <MessageSquare className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold text-foreground/70 uppercase tracking-wider">
+          {t('sentimentPage.evidenceLabel')}
+        </h2>
+      </div>
+
+      {/* Score cards moved below */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {(['positive', 'neutral', 'negative'] as const).map((kind) => (
           <ScoreCard
@@ -316,34 +418,21 @@ function SentimentContent() {
         ))}
       </div>
 
-      {/* 2. Highlights + 3. What people are saying — two-column */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <HighlightsPanel text={summary.highlights} totalWeek={totalWeek} />
-        <div className="glass rounded-2xl p-5 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-accent/20 flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-foreground">{t('sentimentPage.keywordsTitle')}</h2>
-              <p className="text-[11px] text-muted-foreground">{t('sentimentPage.keywordsSubtitle')}</p>
-            </div>
+      {/* Keywords */}
+      <div className="glass rounded-2xl p-5 flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-accent/20 flex items-center justify-center">
+            <MessageSquare className="w-5 h-5 text-primary" />
           </div>
-          <KeywordsPanel keywords={summary.keywords} />
+          <div>
+            <h2 className="text-base font-semibold text-foreground">{t('sentimentPage.keywordsTitle')}</h2>
+            <p className="text-[11px] text-muted-foreground">{t('sentimentPage.keywordsSubtitle')}</p>
+          </div>
         </div>
+        <KeywordsPanel keywords={summary.keywords} />
       </div>
 
-      {/* 4. Needs attention */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <AlertTriangle className="w-4 h-4 text-rose-600" />
-          <h2 className="text-base font-semibold text-foreground">{t('sentimentPage.attentionTitle')}</h2>
-          <span className="text-[11px] text-muted-foreground">{t('sentimentPage.attentionSubtitle')}</span>
-        </div>
-        <NeedsAttention posts={summary.needs_attention} />
-      </div>
-
-      {/* 5. Samples */}
+      {/* Comment samples */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <Quote className="w-4 h-4 text-primary" />

@@ -1,5 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown, fetchAccounts, fetchSegments, regenerateSegments, fetchInsights, generateInsights, fetchCommentsAnalytics, fetchSentimentSummary } from '../api/analytics'
+import {
+  fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown,
+  fetchAccounts, fetchSegments, regenerateSegments, fetchInsights, generateInsights,
+  fetchCommentsAnalytics, fetchSentimentSummary,
+  fetchPostsInsights, generateCaption, fetchAudienceInsights, fetchContentPlan, fetchSentimentResponses,
+  type GenerateCaptionRequest,
+} from '../api/analytics'
 
 export function useOverview() {
   return useQuery({
@@ -97,6 +103,46 @@ export function useSentimentSummary(accountId?: string) {
   return useQuery({
     queryKey: ['analytics', 'sentiment-summary', accountId ?? 'all'],
     queryFn: () => fetchSentimentSummary(accountId),
+    staleTime: 5 * 60_000,
+  })
+}
+
+// AI page-level hooks (longer staleTime since each call hits Gemini)
+
+export function usePostsInsights() {
+  return useQuery({
+    queryKey: ['ai-pages', 'posts-insights'],
+    queryFn: fetchPostsInsights,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useGenerateCaption() {
+  return useMutation({
+    mutationFn: (req: GenerateCaptionRequest) => generateCaption(req),
+  })
+}
+
+export function useAudienceInsights() {
+  return useQuery({
+    queryKey: ['ai-pages', 'audience-insights'],
+    queryFn: fetchAudienceInsights,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useContentPlan() {
+  return useQuery({
+    queryKey: ['ai-pages', 'content-plan'],
+    queryFn: fetchContentPlan,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useSentimentResponses() {
+  return useQuery({
+    queryKey: ['ai-pages', 'sentiment-responses'],
+    queryFn: fetchSentimentResponses,
     staleTime: 5 * 60_000,
   })
 }

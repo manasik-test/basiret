@@ -242,3 +242,92 @@ export async function fetchSentimentSummary(accountId?: string): Promise<Sentime
   const res = await api.get<unknown, ApiResponse<SentimentSummaryData>>(`/analytics/sentiment/summary${qs}`)
   return res.data
 }
+
+// ── AI page-level endpoints (Gemini-powered) ──────────────────────────────
+
+export interface BestPost {
+  id: string
+  caption: string
+  content_type: string
+  likes: number
+  comments: number
+  posted_at: string | null
+  permalink: string | null
+}
+
+export interface PostsInsightsData {
+  best_post: BestPost | null
+  why_it_worked: string
+  low_performers_pattern: string
+  what_to_change: string
+}
+
+export async function fetchPostsInsights(): Promise<PostsInsightsData> {
+  const res = await api.get<unknown, ApiResponse<PostsInsightsData>>('/ai-pages/posts-insights')
+  return res.data
+}
+
+export interface GenerateCaptionRequest {
+  content_type?: string
+  topic?: string
+  language: 'en' | 'ar'
+  reference_caption?: string
+  post_id?: string
+}
+
+export async function generateCaption(req: GenerateCaptionRequest): Promise<{ caption: string }> {
+  const res = await api.post<unknown, ApiResponse<{ caption: string }>>(
+    '/ai-pages/generate-caption',
+    req,
+  )
+  return res.data
+}
+
+export interface AudienceWant {
+  topic: string
+  reason: string
+}
+
+export interface AudienceInsightsData {
+  behavior_summary: string
+  what_they_want: AudienceWant[]
+  best_time: { day: string; time: string; reason: string }
+}
+
+export async function fetchAudienceInsights(): Promise<AudienceInsightsData> {
+  const res = await api.get<unknown, ApiResponse<AudienceInsightsData>>('/ai-pages/audience-insights')
+  return res.data
+}
+
+export interface ContentPlanDay {
+  day_index: number
+  day_label: string
+  date: string
+  content_type: string
+  best_time: string
+  estimated_reach: number
+  topic: string
+}
+
+export interface ContentPlanData {
+  days: ContentPlanDay[]
+}
+
+export async function fetchContentPlan(): Promise<ContentPlanData> {
+  const res = await api.get<unknown, ApiResponse<ContentPlanData>>('/ai-pages/content-plan')
+  return res.data
+}
+
+export interface SentimentResponseTemplate {
+  post_id: string
+  response_template: string
+}
+
+export interface SentimentResponsesData {
+  templates: SentimentResponseTemplate[]
+}
+
+export async function fetchSentimentResponses(): Promise<SentimentResponsesData> {
+  const res = await api.get<unknown, ApiResponse<SentimentResponsesData>>('/ai-pages/sentiment-responses')
+  return res.data
+}
