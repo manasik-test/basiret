@@ -1146,3 +1146,96 @@ Gemini free-tier quota exhaustion during demo-account setup (prior session) prom
 - **No caching of any answers.** Spec explicitly says don't cache (each question is unique), so this is by design — but it does mean the rate-limit cap (20/day per account) is the only governor.
 - **Route-redirect race on slow networks.** When a user types `/ask-basiret` on a slow connection, they briefly see the white screen before the redirect resolves and the panel slides in. Fine on a normal connection; could add a loading state to `AskBasiretRedirect` if it becomes noticeable.
 - **Carried over from earlier sessions:** `feature_flag` Alembic migration gap, Meta App Review for `instagram_business_manage_comments`, orphaned `deploy.sh`, no rollback in deploy step, State JWT reuse not prevented, OPENAI_API_KEY rotation needed before publishing repo.
+
+---
+
+## Session Log — 2026-04-23 (Graceful AI errors + per-account rate limiting)
+
+### What was built — picks up where 2026-04-22 (AI quota audit) left off
+
+The 2026-04-22 entry shipped the `AIProvider` abstraction but kept the historical "swallow everything → return ''/{}" failure mode and only routed captions. This session adds the missing pieces: typed exceptions with clean provider-mapped semantics, an explicit response envelope for the UI to render degraded states, a DB-backed usage log, a per-account rate-limit gate, and an admin visibility endpoint. Six existing call sites that were still bypassing the provider were also pulled through.
+
+**Audit table produced first** — every call site catalogued (file:line, provider, exception caught today, user-facing failure mode). The dominant pre-fix pattern was "silent empty string/dict → empty cache row → frozen failure for 24h" with `tasks/insights.py:_call_gemini` as the one outlier that crashed and retried.
+
+**Exception hierarchy in [backend/app/core/ai_provider.py](backend/app/core/ai_provider.py):**
+- `AIProviderError` (base, carries `user_message` + `retry_after_hours` class attrs)
+- `AIQuotaExceededError` (429 / `ResourceExhausted` / `RateLimitError`; `retry_after_hours=24`)
+- `AIProviderUnavailableError` (5xx, network timeout, connection error, missing API key)
+- `AIInvalidResponseError` (response received but empty / non-JSON / missing `choices[0]`)
+- `GeminiProvider._map_exception` matches `google.api_core` exception class names without hard-importing the module (avoids coupling to a transitive dep). `OpenAIProvider._map_exception` does the same for `openai.RateLimitError` / `APITimeoutError` / `APIConnectionError` / `APIStatusError` / `InternalServerError`.
+- All raw `google.api_core.*` and `openai.*` exceptions are now caught inside `ai_provider.py` — none leak to callers. Empty/non-dict provider responses also raise `AIInvalidResponseError` instead of being silently kept.
+- Bare arrays returned by `generate_json` are wrapped to `{"items": [...]}` so the dict contract holds.
+
+**Response envelope helper** — new [backend/app/core/ai_degradation.py](backend/app/core/ai_degradation.py):
+- `build_fresh_meta()` → `{"status": "fresh"}`
+- `build_stale_meta(age_hours)` → `{"status": "stale", "cached_age_hours": N}` (used by SWR)
+- `build_degraded_with_cache_meta(age_hours, exc)` → `{"status": "degraded", "cached": True, "cached_age_hours": N, "message": exc.user_message, "retry_after_hours": exc.retry_after_hours}`
+- `degraded_no_cache_response(exc)` → `JSONResponse(status_code=503, content={"success": False, "data": None, "meta": {...}})`
+- Endpoints now consistently return `{success, data, meta}`. Existing frontend calls that read `data.*` keep working — `meta` is additive.
+
+**SWR cache wrapper unified into `_resolve_ai_payload`** ([backend/app/api/v1/ai_pages.py](backend/app/api/v1/ai_pages.py)):
+- Returns `(content, meta)` tuple. Replaces the prior `_cache_get_or_compute` (which returned only content).
+- Decision tree: ≤24h → fresh; 24-72h → stale + spawn background refresh; >72h or missing → compute inline; on `AIProviderError` during inline compute → fall back to ANY cached row regardless of age, mark `degraded`; if no cache row at all → re-raise so the endpoint returns a 503.
+- `_background_refresh` now distinguishes `AIProviderError` (logged as `info`, expected) from other exceptions (logged as `warning`). The background thread NEVER overwrites a stale cache row with empty content on AI failure — the row stays in place until the next user-triggered refresh succeeds.
+
+**All five page-level endpoints rewritten** to use the shared resolver + handler:
+- `/posts-insights` — has data-driven `best_post`, AI gives `why_it_worked` etc. AI failure with cache → 200 degraded with cached prose; without cache → 503.
+- `/generate-caption` — entire payload is AI; no useful fallback. AI failure → 503 degraded (regardless of cache, since cache miss path means no caption to serve at all).
+- `/audience-insights`, `/content-plan`, `/sentiment-responses` — same data-vs-AI split as posts-insights, same degradation behavior.
+- `analytics.py:_generate_highlights` (sentiment summary) — refactored to use `get_provider("insights")` and now raises on failure; the endpoint catches and degrades the highlights field in place (the rest of the summary — counts, keywords, samples — is data-only and still serves fine).
+
+**All Celery AI call sites pulled through `get_provider`:**
+- `tasks/insights.py:_call_gemini` — was inline `genai.GenerativeModel(...)`, now `get_provider("insights").generate_json(...)`. The task wrapper has a NEW try-except: `AIQuotaExceededError` returns terminal status without retrying (retry would just spend more quota); `AIProviderUnavailableError` / `AIInvalidResponseError` retry with the existing 120s countdown.
+- `tasks/segmentation.py:_generate_persona_descriptions` — refactored to use `get_provider("personas")`. AI failure logs at `warning` level and returns empty strings; the K-means clusters still get persisted, just without prose. The user's advisory-lock + `Ignore` exception machinery (added in 7de69be for the regenerate race condition) is preserved unchanged.
+- `tasks/nlp_analysis.py:_extract_topics_gemini` — uses `source="background"` so per-post topic extraction doesn't compete with user-facing rate-limit budget. AI failures collapse to `[]` (topics are best-effort metadata).
+
+**Per-account rate limiting** — new model + migration:
+- New table `ai_usage_log` with columns `id`, `social_account_id` (nullable, FK CASCADE), `provider`, `task`, `source` ("user" | "background"), `tokens_used`, `called_at`. Two indexes: `(social_account_id, called_at)` for the rate-limit query, `(provider, called_at)` for cross-account analysis. Mirrored in [db/init.sql](db/init.sql) so fresh containers get the table without alembic.
+- Alembic migration [f1a2b3c4d5e6_add_ai_usage_log.py](backend/alembic/versions/f1a2b3c4d5e6_add_ai_usage_log.py) bumps head from `e5c8a1d9b234`.
+- Settings: `AI_GEMINI_DAILY_LIMIT_PER_ACCOUNT=50`, `AI_OPENAI_DAILY_LIMIT_PER_ACCOUNT=100`, both in [config.py](backend/app/core/config.py). Set to 0 to disable. (The user later layered `AI_ASK_DAILY_LIMIT_PER_ACCOUNT=20` for the chat endpoint — different keyspace, not enforced here.)
+- `_check_rate_limit()` runs before each user-source call: counts past-24h rows for `(account_id, provider)`, raises `AIQuotaExceededError` when count ≥ limit. Bypasses for `source="background"` and for `account_id=None` (system / test calls). Background calls ARE still logged so admin visibility stays accurate.
+- `_log_usage()` runs AFTER each successful call; opens a fresh `SessionLocal()` so it doesn't pollute the request session. Best-effort — a logging failure is swallowed and never breaks the AI result.
+- Tokens-used capture: Gemini `response.usage_metadata.total_token_count` and OpenAI `response.usage.total_tokens`. NULL when the SDK doesn't expose it.
+
+**Admin visibility — `GET /api/v1/admin/ai-usage`** ([backend/app/api/v1/admin.py](backend/app/api/v1/admin.py)):
+- system_admin only. Aggregates `ai_usage_log` rows in the past 7 days grouped by `(social_account_id, provider)`, joins `social_account` + `organization` to enrich with `username` + `org_name`, sorts by total calls desc.
+- Response shape: `{"accounts": [{"account_id", "username", "org_name", "gemini_calls_7d", "openai_calls_7d"}]}`.
+
+**Test coverage — new file [backend/tests/test_ai_resilience.py](backend/tests/test_ai_resilience.py), 9 tests:**
+- `test_posts_insights_quota_with_no_cache_returns_503` — first call after outage with no cache → 503 with structured body.
+- `test_posts_insights_quota_with_stale_cache_returns_200_degraded` — pre-seeded 100h-old cache row + AI failure → 200 with cached content and `meta.cached_age_hours ≥ 99`.
+- `test_caption_quota_returns_503_no_cache` — caption endpoint has no fallback, quota → 503.
+- `test_invalid_response_treated_as_degraded` — `AIInvalidResponseError` propagates as degraded.
+- `test_fresh_response_marks_meta_status_fresh` — happy path includes `meta.status="fresh"`.
+- `test_admin_ai_usage_endpoint` — seeds 3 gemini + 7 openai rows + 1 outside-7d row, asserts the cutoff works and org name joins through.
+- `test_admin_ai_usage_requires_system_admin` — non-admin → 403.
+- `test_rate_limit_gate_raises_quota_when_exceeded` — seeds exactly LIMIT rows, asserts the next call raises `AIQuotaExceededError` BEFORE any upstream HTTP call.
+- `test_background_source_bypasses_rate_limit` — limit fully consumed, but `source="background"` gets past the gate and reaches `_invoke` (mocked).
+- Also updated [tests/test_ai_pages.py](backend/tests/test_ai_pages.py) `_FakeProvider.generate_text/json` to accept `**_kwargs` so the new `account_id`/`task`/`source` kwargs don't break the existing mocks.
+
+### Verified end-to-end
+- Migration applied cleanly: `alembic upgrade head` ran `e5c8a1d9b234 → f1a2b3c4d5e6`.
+- Backend test suite: **90/90 passed in ~18s** (was 81/81 — +9 new resilience tests). Existing tests untouched in their assertions.
+- Untracked screenshots and dev artifacts left in place (intentional — local-only).
+
+### Key decisions
+- **Response envelope: `{success, data, meta}` with `meta.status` of fresh/stale/degraded** rather than the literal JSON body shape the user spec'd. Reason: the codebase's existing envelope is `{success, data}` everywhere, and changing the top-level shape per-endpoint would break every existing frontend caller. Nesting the spec'd fields inside `meta` preserves the envelope, makes degradation additive, and lets the UI render a "last updated X ago" indicator from `meta.cached_age_hours` without extra plumbing. Spec semantics fully preserved.
+- **HTTP 503 only when there's nothing to serve.** Stale cache → 200 with degraded meta. This matches the spec ("If a stale cache entry exists … serve it with cached: true rather than returning an error") and lets the UI prefer "show stale data + warning banner" over "show error page."
+- **Provider methods raise on empty response, not just on exception.** A Gemini call that returns an empty string is just as broken as one that 5xx's — the prior swallow-and-cache behavior would lock that empty response in for 24h. Treating empty as `AIInvalidResponseError` lets the SWR resolver fall back to any older cache instead.
+- **Rate-limit gate inside `ai_provider.py`, not at the endpoint.** Endpoints would have to know which provider their `task` resolved to (which is the whole point of the abstraction hiding). Gating in the provider also catches the Celery and SWR paths, which never go through endpoints.
+- **`source="background"` bypass + still logged.** The 2026-04-22 SWR layer is the main "background" producer; its whole point is to keep cache warm without blocking the user. Counting those calls against the user's daily cap would defeat the optimization. But omitting them from the log entirely would make the admin visibility dashboard misleading — a heavy SWR account would look idle. Log-but-don't-gate is the right tradeoff.
+- **Insights task: distinct retry policy by exception type.** Quota errors are sticky on the timescale of minutes/hours — retrying just spends more quota. Network errors are usually transient — retry helps. Treating them the same (the prior behavior) was wrong both ways. Quota → terminal `{status: "error", retry_after_hours: 24}`; transient → existing 120s countdown.
+- **Persona generation degrades to empty strings, not errors.** The K-means cluster job's primary deliverable is the cluster rows themselves — the prose description is enrichment. Failing the whole task because Gemini was unreachable would block segments visibility for hours of user time. Empty descriptions still render acceptably (the cluster label fallback in `Audience.tsx` was already designed for this).
+- **Topic extraction uses `source="background"`** — runs from a Celery batch consumer, not a user click. The Celery task itself is queued by user action, but the per-post AI calls happen far enough down the call stack that gating them as "user" would mean a bulk-analyze of 50 unanalyzed posts could blow through the per-account daily cap in one batch. Topic enrichment is best-effort; bypass + log matches its actual nature.
+- **Tokens-used captured as `nullable Integer`** instead of computed from request/response strings. Some SDK code paths don't expose the field (older models, certain error envelopes). Storing NULL is cleaner than guessing.
+- **Admin endpoint sorts by total calls desc** so the noisiest accounts surface first. Dashboard pagination not added — at graduation scale (single-digit prod accounts) the unpaginated list fits in one screen.
+- **Migration head is `f1a2b3c4d5e6`, mirrored in `init.sql`.** Same dual-source pattern as `ai_page_cache` and `comment` — both files describe the table, alembic applies migrations to existing DBs and init.sql provisions new ones. Carried-over `feature_flag` migration gap (different table, different problem) NOT addressed in this commit.
+
+### Known issues / TODOs
+- **Background refresh thread still has no direct test coverage.** Carried over from 2026-04-22. The new `_resolve_ai_payload` makes it slightly easier to test (decision tree is more explicit) but no test was added — the resilience suite covers the user-facing happy + degraded paths, not the daemon thread.
+- **Rate-limit query on every user call.** Each AI request now does an extra `SELECT count(*) FROM ai_usage_log WHERE ...` before the upstream call. The `(social_account_id, called_at)` index makes this ~1ms on prod scale, but if usage volume grows by 100×, consider caching the count in Redis with a 60s TTL.
+- **`tokens_used` is captured but never aggregated yet.** The admin endpoint exposes call counts but not token totals — easy follow-up if cost tracking matters before the defense.
+- **Per-call cost not stored.** Provider pricing is implicit (Gemini free tier vs OpenAI gpt-4o-mini ~$0.0001). If we ever bill enterprise customers per their AI usage, store provider+model+tokens explicitly per row and join against a price table.
+- **`AIProviderError` exception classes have NO retry-after headers parsed from the upstream response.** Gemini 429 responses include a `retry-after` hint that we currently ignore (we hard-code 24h). Reasonable default; future polish would parse and surface the actual hint.
+- **`/admin/ai-usage` doesn't paginate.** Fine for current scale.
+- **Carried over from earlier sessions:** `feature_flag` Alembic migration gap, Meta App Review for `instagram_business_manage_comments`, orphaned `deploy.sh`, no rollback in deploy step, State JWT reuse not prevented, OPENAI_API_KEY rotation needed before publishing repo.
