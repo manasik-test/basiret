@@ -1239,3 +1239,44 @@ The 2026-04-22 entry shipped the `AIProvider` abstraction but kept the historica
 - **`AIProviderError` exception classes have NO retry-after headers parsed from the upstream response.** Gemini 429 responses include a `retry-after` hint that we currently ignore (we hard-code 24h). Reasonable default; future polish would parse and surface the actual hint.
 - **`/admin/ai-usage` doesn't paginate.** Fine for current scale.
 - **Carried over from earlier sessions:** `feature_flag` Alembic migration gap, Meta App Review for `instagram_business_manage_comments`, orphaned `deploy.sh`, no rollback in deploy step, State JWT reuse not prevented, OPENAI_API_KEY rotation needed before publishing repo.
+
+---
+
+## Session Log — 2026-04-23 (Segmentation race condition — PostgreSQL advisory lock)
+
+### What was built
+
+**Fix for the long-standing `segment_audience` duplicate-rows race** ([backend/app/tasks/segmentation.py](backend/app/tasks/segmentation.py)):
+- New `_advisory_lock_key(social_account_id: str) -> int` module-level helper. Uses `hashlib.blake2b(..., digest_size=8)` to hash the UUID string down to a stable signed 64-bit int suitable for `pg_try_advisory_xact_lock` (which takes a bigint). blake2b chosen for determinism across processes — `hash()` is non-deterministic due to `PYTHONHASHSEED`, MD5 was unnecessary crypto strength for a hash-to-int.
+- First statement inside `segment_audience`'s try block now runs `SELECT pg_try_advisory_xact_lock(:k)` with the account's lock key. The `_xact_` variant ties the lock's lifetime to the current Postgres transaction — no manual `pg_advisory_unlock` needed; `db.commit()` inside `_save_segments` (or `db.rollback()` on the error path) releases it automatically.
+- When the lock is already held by another worker's transaction, `pg_try_advisory_xact_lock` returns `false` → task logs an info line + raises `celery.exceptions.Ignore`. The duplicate task silently exits without retrying, without scheduling work, and without producing a failure state.
+- New `except Ignore: raise` clause inserted **before** the generic `except Exception`. Critical: without this, Ignore (which inherits from `Exception` via `CeleryError`) would be caught by the retry handler and re-scheduled 120s later, producing the exact duplicate-work behavior the lock was meant to prevent.
+
+**New concurrency test** ([backend/tests/test_segmentation.py](backend/tests/test_segmentation.py) — `test_concurrent_segmentation_skipped_when_lock_held`):
+- Opens a second `SessionLocal()` and holds `pg_try_advisory_xact_lock(_advisory_lock_key(account_id))` from that session, simulating "task A is running."
+- Invokes `segment_audience.apply(args=[account_id])` for the same account → "task B."
+- Asserts (1) `_build_feature_matrix` is never called (via `@patch` + `.assert_not_called()`), (2) the EagerResult is not `.failed()`, and (3) no `AudienceSegment` rows were written for the test account (belt-and-braces via a third session to read the row count cleanly).
+- `finally: blocker.rollback()` releases the advisory lock so the test is self-cleaning.
+
+**CLAUDE.md known-issues pruning:** the 2026-04-18 "Regenerate Segments race condition" entry (line 557) marked with strikethrough + `Fixed on 2026-04-23` explaining the advisory-lock approach and that frontend `isPending` disable is now UX-only. The four "Carried over from earlier sessions" mentions of the race (previously in 2026-04-19 PDF, 2026-04-19 comments, 2026-04-20 OAuth, 2026-04-22 demo-setup, 2026-04-22 AI-quota session logs) all had the race-condition bullet removed — keeping only the other carry-overs that are still open.
+
+### Verified end-to-end
+- `docker compose exec api pytest tests/test_segmentation.py -v` → **14/14 passed in ~0.9s** (was 13, +1 for the new concurrency test).
+- `docker compose exec api pytest tests/ -q` → **91/91 passed in 20.88s** (was 90 before).
+- Manual lock key stability check: `_advisory_lock_key("00000000-0000-0000-0000-000000000000")` returns the same signed int across Python processes (blake2b is deterministic).
+
+### Key decisions
+- **`pg_try_advisory_xact_lock` (non-blocking) over `pg_advisory_lock` (blocking).** Blocking would queue duplicate tasks and eventually run them all — exactly what the debouncing should prevent. Non-blocking lets duplicates short-circuit to Ignore and never run, which is the desired regenerate-idempotency semantic.
+- **Transaction-scoped (`_xact_`) over session-scoped.** Session-scoped locks require manual release (`pg_advisory_unlock`) and leak if the task crashes before the cleanup line. Transaction-scoped releases on commit OR rollback, which is exactly the task's lifetime boundary — impossible to leak.
+- **`Ignore` over returning a "skipped" dict.** A return value would show up in the AsyncResult as `SUCCESS` with a weird shape, confusing any caller that checks `result.get()`. Ignore is Celery's dedicated "this task has no result, don't record it" signal — exactly right for duplicate-suppression.
+- **`except Ignore: raise` placed before generic `except Exception`.** Must come first — `Ignore` derives from `CeleryError` derives from `Exception`, so the generic handler would otherwise catch it and schedule a retry. The fix would have been silently broken without this.
+- **blake2b-8-bytes for the lock key, not the UUID's raw bytes.** UUID bytes are 16; the Postgres bigint is 8. Hash is needed either way. blake2b was picked over MD5 (no crypto value, so no point in using a cryptographic hash — blake2b is just a fast keyed hash) and over Python's `hash()` (non-deterministic across processes due to PYTHONHASHSEED randomization).
+- **Collision risk acknowledged but acceptable.** 64-bit space with ~dozens of concurrent accounts means birthday-collision probability is ~0. Two different `social_account_id` UUIDs hashing to the same lock key would cause one regenerate to block the other — annoying but not data-corrupting, and recoverable by the Ignored task simply not running (the other task still completes cleanly).
+- **Comment block above the lock explains *why*, not *what*.** "Serialize concurrent regenerations" + "released automatically when this task's DB transaction ends" — the non-obvious parts. `pg_try_advisory_xact_lock` semantics are Googleable; the reason we need them here is not.
+- **Test uses 3 separate DB sessions** (blocker holding the lock, the task's own `SessionLocal`, and a verify session for the row count). Needed because advisory locks are per-connection, and row-count assertions need visibility into committed state that the blocker's open transaction doesn't have.
+
+### Known issues / TODOs
+- **Test covers lock-held case, not true concurrency.** Simulating "two Celery workers running `segment_audience` at the exact same instant" would require spawning two processes, which is flaky in a test suite. The current test verifies the guard fires correctly when the lock is unavailable — the Postgres-level lock guarantee handles the actual-concurrency case by construction.
+- **Lock key collisions not logged.** If two different UUIDs ever hash to the same bigint, the duplicate-detection would fire spuriously — a "successful" regenerate would silently Ignore even though no other task is running. At graduation scale this is astronomically unlikely (<10 accounts in prod, 2⁻⁶³ collision probability per pair), but if the user base ever grows by 1000×, consider logging the `(account_id, lock_key)` pair so collisions become visible in the logs.
+- **Frontend still has the 30-second regenerate cooldown** (added in commit `8876e5a` — "Swap openai-whisper for faster-whisper + 30s debounce on regen"). With the server-side lock, the 30s is redundant as a correctness safety net but kept as UX — prevents users from spamming the button visually. No change made to the frontend.
+- **Carried over from earlier sessions:** `feature_flag` Alembic migration gap, Meta App Review for `instagram_business_manage_comments`, orphaned `deploy.sh`, no rollback in deploy step, State JWT reuse not prevented, OPENAI_API_KEY rotation needed before publishing repo.
