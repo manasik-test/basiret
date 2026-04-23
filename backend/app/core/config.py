@@ -21,6 +21,26 @@ class Settings(BaseSettings):
     # Gemini AI
     GEMINI_API_KEY: str = ""
 
+    # OpenAI (used for caption generation — separate quota from Gemini)
+    OPENAI_API_KEY: str = ""
+    OPENAI_CAPTION_MODEL: str = "gpt-4o-mini"
+
+    # AI routing flags
+    # Comment topic extraction via Gemini — OFF by default because it fires
+    # one API call per comment and quickly exhausts the free-tier quota.
+    EXTRACT_COMMENT_TOPICS: bool = False
+    # Post topic extraction: "gemini" (remote), "local" (KeyBERT/yake), or "off".
+    POST_TOPIC_EXTRACTOR: str = "gemini"
+
+    # AI per-account rate limits (rolling 24-hour window). Background SWR
+    # refreshes bypass the limit but are still logged. Set to 0 to disable.
+    AI_GEMINI_DAILY_LIMIT_PER_ACCOUNT: int = 50
+    AI_OPENAI_DAILY_LIMIT_PER_ACCOUNT: int = 100
+    # Ask-Basiret chat: per-account 24h ceiling, counted against ai_usage_log
+    # rows with task="ask". Tighter than the provider-level Gemini cap because
+    # users can fire many small follow-up questions in quick succession.
+    AI_ASK_DAILY_LIMIT_PER_ACCOUNT: int = 20
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

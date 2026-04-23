@@ -1,18 +1,26 @@
 """
-Celery task: AI-powered weekly insights generation using Google Gemini 1.5 Flash.
+Celery task: AI-powered weekly insights generation using Google Gemini.
 
 Gathers account metrics for the past 7 days, calls Gemini with a structured
 prompt, and stores the returned JSON in the insight_result table.
+
+AI failures are handled per-type:
+  - AIQuotaExceededError    → return error status, do NOT retry (won't help)
+  - AIProviderUnavailableError → retry with backoff
+  - AIInvalidResponseError  → retry once (transient bad response)
 """
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-import google.generativeai as genai
-from sqlalchemy import func, and_, cast, Date
+from sqlalchemy import func
 
+from app.core.ai_provider import (
+    AIInvalidResponseError,
+    AIProviderUnavailableError,
+    AIQuotaExceededError,
+    get_provider,
+)
 from app.core.celery_app import celery
-from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.post import Post
 from app.models.engagement_metric import EngagementMetric
@@ -300,19 +308,16 @@ HISTORICAL CONTEXT:
 - Account goal: growth"""
 
 
-def _call_gemini(user_message: str) -> dict:
-    """Call Gemini 1.5 Flash and parse the JSON response."""
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    model = genai.GenerativeModel(
-        "gemini-2.5-flash-lite",
-        system_instruction=SYSTEM_PROMPT,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            temperature=0.4,
-        ),
+def _call_gemini(user_message: str, *, account_id: str | None = None) -> dict:
+    """Call the configured insights provider (Gemini) and return parsed JSON.
+
+    Raises `AIProviderError` (or one of its subclasses) on any failure — the
+    Celery task wrapper decides whether to retry or surface as terminal.
+    """
+    return get_provider("insights").generate_json(
+        SYSTEM_PROMPT, user_message, temperature=0.4,
+        account_id=account_id, task="insights", source="user",
     )
-    response = model.generate_content(user_message)
-    return json.loads(response.text)
 
 
 def _normalize_language(language: str) -> str:
@@ -360,7 +365,26 @@ def generate_weekly_insights(self, social_account_id: str, language: str = "Engl
                 return {"status": "error", "detail": "No posts found for analysis"}
 
         user_message = _build_user_message(data, language)
-        result = _call_gemini(user_message)
+        try:
+            result = _call_gemini(user_message, account_id=social_account_id)
+        except AIQuotaExceededError as exc:
+            # Quota retries don't help — they just spend more quota. Surface
+            # as a terminal error and let the next scheduled run pick it up.
+            logger.warning(
+                "Insights quota exceeded for account %s: %s",
+                social_account_id, exc,
+            )
+            return {
+                "status": "error",
+                "detail": "AI quota exceeded; try again later.",
+                "retry_after_hours": exc.retry_after_hours,
+            }
+        except (AIProviderUnavailableError, AIInvalidResponseError) as exc:
+            logger.error(
+                "Insights AI failure for %s, retrying: %s",
+                social_account_id, exc,
+            )
+            raise self.retry(exc=exc, countdown=120)
 
         # Resolve best_post_id to a real UUID (Gemini returns the string we gave it)
         best_post_id = None

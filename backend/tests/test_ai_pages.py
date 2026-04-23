@@ -30,14 +30,24 @@ from tests.conftest import (
 
 @contextmanager
 def mock_gemini(json_response=None, text_response=""):
-    """Force the Gemini code paths to run, returning canned responses.
+    """Force the AI code paths to run, returning canned responses.
 
-    Patches `_gemini_available` to True so endpoints don't short-circuit, and
-    patches `_gemini_json` / `_gemini_text` so no real API call is made.
+    Patches `_gemini_available` (bypass API-key short-circuit), the legacy
+    `_gemini_json` / `_gemini_text` helpers AND the provider factory so the
+    caption endpoint (now routed through `get_provider('captions')`) returns
+    the same canned text regardless of which concrete provider is selected.
     """
+    class _FakeProvider:
+        name = "fake"
+        def generate_text(self, system, user, temperature=0.5, **_kwargs):
+            return text_response
+        def generate_json(self, system, user, temperature=0.5, **_kwargs):
+            return json_response or {}
+
     with patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
-         patch("app.api.v1.ai_pages._gemini_json", return_value=json_response), \
-         patch("app.api.v1.ai_pages._gemini_text", return_value=text_response):
+         patch("app.api.v1.ai_pages._gemini_json", return_value=json_response or {}), \
+         patch("app.api.v1.ai_pages._gemini_text", return_value=text_response), \
+         patch("app.api.v1.ai_pages.get_provider", return_value=_FakeProvider()):
         yield
 
 

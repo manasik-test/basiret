@@ -6,16 +6,22 @@ PATCH /users/:id    — update user (role, is_active)
 GET   /orgs         — list all organizations
 GET   /flags        — list all feature flags
 PATCH /flags/:id    — toggle a feature flag
+GET   /ai-usage     — per-account AI call counts (last 7 days)
 GET   /health       — system health check
 """
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import require_system_admin
+from app.models.ai_usage_log import AiUsageLog
 from app.models.user import User, UserRole
 from app.models.organization import Organization
+from app.models.social_account import SocialAccount
 from app.models.subscription import Subscription
 from app.models.feature_flag import FeatureFlag
 
@@ -164,3 +170,75 @@ def update_flag(
             "is_enabled": flag.is_enabled,
         },
     }
+
+
+@router.get("/ai-usage")
+def list_ai_usage(
+    admin: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """Per-account AI provider usage for the past 7 days.
+
+    Aggregates `ai_usage_log` rows by `social_account_id` and `provider`.
+    Counts include both user and background source rows so the total reflects
+    real cost incurred — admins can compare against the per-day rate limits
+    in `settings.AI_*_DAILY_LIMIT_PER_ACCOUNT` to spot heavy users.
+
+    Accounts that exist but have no AI calls in the window are omitted.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+
+    rows = (
+        db.query(
+            AiUsageLog.social_account_id,
+            AiUsageLog.provider,
+            func.count(AiUsageLog.id).label("calls"),
+        )
+        .filter(AiUsageLog.called_at >= since)
+        .group_by(AiUsageLog.social_account_id, AiUsageLog.provider)
+        .all()
+    )
+
+    by_account: dict[str | None, dict] = {}
+    for account_id, provider, calls in rows:
+        key = str(account_id) if account_id else None
+        bucket = by_account.setdefault(
+            key, {"gemini_calls_7d": 0, "openai_calls_7d": 0},
+        )
+        if provider == "gemini":
+            bucket["gemini_calls_7d"] = int(calls)
+        elif provider == "openai":
+            bucket["openai_calls_7d"] = int(calls)
+
+    # Hydrate account_id → username + org name in one query.
+    account_ids = [aid for aid in by_account if aid]
+    account_meta: dict[str, dict] = {}
+    if account_ids:
+        joined = (
+            db.query(SocialAccount.id, SocialAccount.username, Organization.name)
+            .join(Organization, Organization.id == SocialAccount.organization_id)
+            .filter(SocialAccount.id.in_(account_ids))
+            .all()
+        )
+        for sid, username, org_name in joined:
+            account_meta[str(sid)] = {
+                "username": username,
+                "org_name": org_name,
+            }
+
+    accounts = []
+    for key, totals in by_account.items():
+        meta = account_meta.get(key, {}) if key else {}
+        accounts.append({
+            "account_id": key,
+            "username": meta.get("username"),
+            "org_name": meta.get("org_name"),
+            **totals,
+        })
+
+    accounts.sort(
+        key=lambda a: a["gemini_calls_7d"] + a["openai_calls_7d"],
+        reverse=True,
+    )
+
+    return {"success": True, "data": {"accounts": accounts}}

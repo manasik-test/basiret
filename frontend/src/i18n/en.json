@@ -21,6 +21,33 @@
     "myGoalsQ": "What growth goals are you chasing, and how close are you to hitting them?",
     "askBasiretQ": "Ask Basiret anything about your audience, your content, or your next move."
   },
+  "askBasiret": {
+    "title": "Ask Basiret",
+    "subtitle": "Grounded in your own data",
+    "open": "Open chat",
+    "close": "Close chat",
+    "send": "Send",
+    "clear": "Clear conversation",
+    "inputPlaceholder": "Ask anything about your account...",
+    "emptyTitle": "Ask Basiret anything",
+    "emptySubtitle": "Pick a starter or type your own question.",
+    "errorGeneric": "Something went wrong. Please try again.",
+    "degraded": "Service degraded",
+    "starters": {
+      "bestContent": "What type of content performs best for me?",
+      "bestTime": "When should I post to get the most engagement?",
+      "sentiment": "How is my audience sentiment trending?",
+      "thisWeek": "What should I focus on this week?"
+    },
+    "followups": {
+      "bestHashtags": "Which hashtags work best with this?",
+      "topPostsType": "Show me my top posts of this type",
+      "bestDay": "What's my best day of the week?",
+      "timingChange": "Has my posting time changed recently?",
+      "negativePosts": "Which posts got the most negative comments?",
+      "responsiveTopics": "What topics do my followers respond to?"
+    }
+  },
   "home": {
     "greetingMorning": "Good morning, {{name}}",
     "greetingAfternoon": "Good afternoon, {{name}}",

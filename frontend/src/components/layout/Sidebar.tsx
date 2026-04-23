@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { useAuth } from '../../contexts/AuthContext'
+import { useAskBasiret } from '../../contexts/AskBasiretContext'
 import { createCheckout } from '../../api/billing'
 import {
   Home,
@@ -22,6 +23,8 @@ import {
   Globe,
 } from 'lucide-react'
 
+// `askBasiret` opens the chat panel instead of navigating, so it lives outside
+// the link-based navItems list and is rendered separately as a button.
 const navItems = [
   { key: 'home', icon: Home, href: '/dashboard', primary: true },
   { key: 'myPosts', icon: FileText, href: '/my-posts', primary: true },
@@ -31,7 +34,6 @@ const navItems = [
   { key: 'sentiment', icon: Smile, href: '/sentiment', primary: false },
   { key: 'trends', icon: TrendingUp, href: '/trends', primary: false },
   { key: 'myGoals', icon: Target, href: '/my-goals', primary: false },
-  { key: 'askBasiret', icon: MessageCircleQuestion, href: '/ask-basiret', primary: false },
   { key: 'settings', icon: Settings, href: '/settings', primary: true },
 ] as const
 
@@ -135,6 +137,7 @@ function MobileTopBar() {
 export default function Sidebar() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
+  const { open: openAsk, isOpen: askIsOpen } = useAskBasiret()
   const location = useLocation()
   const currentPath = location.pathname
 
@@ -154,20 +157,38 @@ export default function Sidebar() {
         <nav className="flex-1 px-3 space-y-1 mt-2">
           {navItems.map(({ key, icon: Icon, href }) => {
             const active = currentPath === href
+            // Insert the Ask Basiret panel-trigger button right after `myGoals`
+            // so the visual order matches the legacy nav layout.
+            const isAfterMyGoals = key === 'settings'
             return (
-              <Link
-                key={key}
-                to={href}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-md'
-                    : 'text-foreground/70 hover:bg-muted hover:text-foreground',
+              <Fragment key={key}>
+                {isAfterMyGoals && (
+                  <button
+                    onClick={openAsk}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                      askIsOpen
+                        ? 'bg-primary text-primary-foreground shadow-md'
+                        : 'text-foreground/70 hover:bg-muted hover:text-foreground',
+                    )}
+                  >
+                    <MessageCircleQuestion className="w-5 h-5 shrink-0" />
+                    <span>{t('nav.askBasiret')}</span>
+                  </button>
                 )}
-              >
-                <Icon className="w-5 h-5 shrink-0" />
-                <span>{t(`nav.${key}`)}</span>
-              </Link>
+                <Link
+                  to={href}
+                  className={cn(
+                    'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                    active
+                      ? 'bg-primary text-primary-foreground shadow-md'
+                      : 'text-foreground/70 hover:bg-muted hover:text-foreground',
+                  )}
+                >
+                  <Icon className="w-5 h-5 shrink-0" />
+                  <span>{t(`nav.${key}`)}</span>
+                </Link>
+              </Fragment>
             )
           })}
 

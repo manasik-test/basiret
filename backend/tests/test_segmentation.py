@@ -4,15 +4,22 @@ Tests for Sprint 4 — K-means audience segmentation.
 Unit tests for feature engineering, clustering, and label generation.
 Integration tests for API endpoints.
 """
+import uuid
+
 import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
+from app.core.database import SessionLocal
 from app.main import app
+from app.models.audience_segment import AudienceSegment
 from app.tasks.segmentation import (
+    _advisory_lock_key,
     _run_kmeans,
     _generate_cluster_label,
+    segment_audience,
     FEATURE_NAMES,
     MIN_POSTS,
 )
@@ -148,3 +155,53 @@ def test_regenerate_queues_task(mock_task, client):
     )
     # Without auth token, middleware rejects before reaching task logic
     assert resp.status_code == 403
+
+
+# ── Concurrency: advisory lock serializes duplicate tasks ───────
+
+
+@patch("app.tasks.segmentation._build_feature_matrix")
+def test_concurrent_segmentation_skipped_when_lock_held(mock_build):
+    """Duplicate segment_audience invocations for the same account are silently ignored.
+
+    Simulates the race condition (double-click / retry / two tabs) by holding the
+    PostgreSQL advisory lock from a separate session, then invoking the task.
+    Expectations: the task short-circuits before _build_feature_matrix (so no
+    delete-then-insert runs), no exception escapes to the caller, and no
+    AudienceSegment rows are created for the test account.
+    """
+    account_id = str(uuid.uuid4())
+    lock_key = _advisory_lock_key(account_id)
+
+    # Open a separate session to act as "task A" and hold the transaction-scoped
+    # advisory lock. Because it's *_xact_*, the lock is released only when this
+    # session's transaction ends (rollback in finally).
+    blocker = SessionLocal()
+    try:
+        got = blocker.execute(
+            text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": lock_key}
+        ).scalar()
+        assert got is True, "blocker failed to acquire advisory lock"
+
+        # "Task B" runs while the lock is held — should Ignore before doing work.
+        result = segment_audience.apply(args=[account_id])
+
+        # Never reached the clustering path (so never touched audience_segment).
+        mock_build.assert_not_called()
+        # Ignore does not surface as a failure on EagerResult — nothing to re-raise.
+        assert not result.failed()
+
+        # Belt-and-braces: no duplicate rows created for this account.
+        verify = SessionLocal()
+        try:
+            rows = (
+                verify.query(AudienceSegment)
+                .filter(AudienceSegment.social_account_id == account_id)
+                .count()
+            )
+            assert rows == 0
+        finally:
+            verify.close()
+    finally:
+        blocker.rollback()
+        blocker.close()

@@ -90,6 +90,7 @@ api.interceptors.response.use(
     }
 
     const detail = err.response?.data?.detail
+    const meta = err.response?.data?.meta
     let message: string
     if (Array.isArray(detail)) {
       // FastAPI/Pydantic validation errors: [{loc, msg, type}, ...]
@@ -99,6 +100,9 @@ api.interceptors.response.use(
     } else if (detail && typeof detail === 'object' && 'message' in detail) {
       // Structured error: {message: "...", locked: true, ...}
       message = String(detail.message)
+    } else if (meta && typeof meta === 'object' && 'message' in meta) {
+      // AI-degradation envelope: {success:false, data:null, meta:{status, message, ...}}
+      message = String(meta.message)
     } else {
       message = err.response?.data?.error || err.message || 'Request failed'
     }

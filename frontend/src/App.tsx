@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Swords, TrendingUp, Target, MessageCircleQuestion } from 'lucide-react'
+import { Swords, TrendingUp, Target } from 'lucide-react'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
@@ -14,6 +14,7 @@ import Login from './pages/Login'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
 import ComingSoon from './pages/ComingSoon'
+import AskBasiretRedirect from './pages/AskBasiretRedirect'
 import { useLanguageCacheInvalidation } from './hooks/useAnalytics'
 
 export default function App() {
@@ -110,13 +111,12 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          {/* Direct link → home with the chat panel auto-opened */}
           <Route
             path="/ask-basiret"
             element={
               <ProtectedRoute>
-                <AppLayout>
-                  <ComingSoon titleKey="nav.askBasiret" questionKey="comingSoon.askBasiretQ" icon={MessageCircleQuestion} />
-                </AppLayout>
+                <AskBasiretRedirect />
               </ProtectedRoute>
             }
           />

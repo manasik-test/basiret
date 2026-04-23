@@ -13,24 +13,35 @@ Endpoints:
     GET  /ai-pages/content-plan          — 7-day content calendar with AI-suggested topics
     GET  /ai-pages/sentiment-responses   — suggested reply templates for the top "needs attention" posts
 
-Gemini failures degrade gracefully — endpoints return empty strings / empty
-arrays rather than 500s, so the UI can fall back to data-only states.
+AI failures degrade gracefully — endpoints return cached-stale data with a
+`meta.status="degraded"` marker (or HTTP 503 with structured body when no
+cache exists), never a 500.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.ai_degradation import (
+    build_degraded_with_cache_meta,
+    build_fresh_meta,
+    build_stale_meta,
+    degraded_no_cache_response,
+)
+from app.core.ai_provider import AIProviderError, get_provider
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import RequireFeature, get_current_user
@@ -48,10 +59,6 @@ router = APIRouter()
 
 
 # ── Language plumbing ─────────────────────────────────────────────────────
-# Every Gemini-backed endpoint accepts ?language=en|ar and passes it into the
-# system prompt as a hard requirement. The caption generator already does
-# this (see CaptionRequest.language); these helpers replicate that contract
-# for page-level endpoints.
 
 LanguageParam = Literal["en", "ar"]
 
@@ -73,13 +80,11 @@ def _language_rule(language: str) -> str:
 
 
 # ── AI page cache (24h TTL) ───────────────────────────────────────────────
-# Gemini calls are slow (~2-5s) and costly. The cache stores only the
-# Gemini-derived fields keyed by (social_account_id, page_name, language);
-# the cheap DB aggregations still run on every request so counts, post
-# lists, best-time slots reflect the latest synced data. Cache is refreshed
-# automatically once older than CACHE_TTL_HOURS.
 
 CACHE_TTL_HOURS = 24
+CACHE_SOFT_TTL_HOURS = 24
+CACHE_HARD_TTL_HOURS = 72
+CACHE_CAPTION_TTL_HOURS = 24 * 7
 
 
 def _cache_get(
@@ -87,10 +92,22 @@ def _cache_get(
     social_account_id: str | None,
     page_name: str,
     language: str,
+    ttl_hours: int = CACHE_TTL_HOURS,
 ) -> dict | None:
-    """Return cached Gemini output if fresher than CACHE_TTL_HOURS, else None."""
-    if not social_account_id:
+    content, _age = _cache_get_with_age(db, social_account_id, page_name, language)
+    if content is None or _age is None or _age > ttl_hours:
         return None
+    return content
+
+
+def _cache_get_with_age(
+    db: Session,
+    social_account_id: str | None,
+    page_name: str,
+    language: str,
+) -> tuple[dict | None, float | None]:
+    if not social_account_id:
+        return None, None
     row = (
         db.query(AiPageCache)
         .filter(
@@ -101,14 +118,12 @@ def _cache_get(
         .first()
     )
     if not row:
-        return None
-    now = datetime.now(timezone.utc)
+        return None, None
     generated = row.generated_at
     if generated.tzinfo is None:
         generated = generated.replace(tzinfo=timezone.utc)
-    if now - generated > timedelta(hours=CACHE_TTL_HOURS):
-        return None
-    return row.content
+    age_hours = (datetime.now(timezone.utc) - generated).total_seconds() / 3600.0
+    return row.content, age_hours
 
 
 def _cache_put(
@@ -118,8 +133,6 @@ def _cache_put(
     language: str,
     content: dict,
 ) -> None:
-    """Upsert Gemini output for (account, page, language). Best-effort — a
-    failed cache write never breaks the response."""
     if not social_account_id:
         return
     try:
@@ -154,71 +167,94 @@ def _cache_put(
         db.rollback()
 
 
-def _cache_get_or_compute(
+def _background_refresh(
+    social_account_id: str,
+    page_name: str,
+    language: str,
+    compute: Callable[[], dict],
+) -> None:
+    """Run `compute` in a daemon thread and write the result to cache using a
+    fresh DB session. AI failures are swallowed — a stale cache row stays in
+    place rather than being overwritten with empty content."""
+    from app.core.database import SessionLocal
+
+    def _runner() -> None:
+        try:
+            fresh = compute() or {}
+            if not fresh:
+                return
+            fresh_db = SessionLocal()
+            try:
+                _cache_put(fresh_db, social_account_id, page_name, language, fresh)
+            finally:
+                fresh_db.close()
+        except AIProviderError as exc:
+            logger.info(
+                "SWR refresh skipped (AI %s) for page=%s account=%s",
+                exc.__class__.__name__, page_name, social_account_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "SWR refresh failed for page=%s account=%s lang=%s: %s",
+                page_name, social_account_id, language, exc,
+            )
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+
+def _resolve_ai_payload(
     db: Session,
     social_account_id: str | None,
     page_name: str,
     language: str,
     compute: Callable[[], dict],
-) -> dict:
-    """Return cached Gemini output if fresh; otherwise run `compute` (which
-    should be the actual Gemini call) and cache its result before returning."""
-    cached = _cache_get(db, social_account_id, page_name, language)
-    if cached is not None:
-        return cached
-    result = compute() or {}
+) -> tuple[dict, dict]:
+    """Stale-while-revalidate cache wrapper that also handles AI failures.
+
+    Returns `(content, meta)`:
+      - age ≤ 24h (fresh): return cached, meta=fresh.
+      - 24h < age ≤ 72h: return cached, meta=stale, kick off background refresh.
+      - age > 72h OR missing: try to compute; on success cache + return fresh.
+        On AIProviderError, fall back to ANY cached row (regardless of age) and
+        mark the response degraded. If no cache row exists at all, re-raise so
+        the endpoint can return a 503.
+
+    Background refreshes (the SWR thread) call the underlying `compute`
+    directly with `source="background"` so they're rate-limit-exempt; this
+    helper only orchestrates the user-facing path.
+    """
+    content, age_hours = _cache_get_with_age(db, social_account_id, page_name, language)
+    if content is not None and age_hours is not None:
+        if age_hours <= CACHE_SOFT_TTL_HOURS:
+            return content, build_fresh_meta()
+        if age_hours <= CACHE_HARD_TTL_HOURS and social_account_id:
+            _background_refresh(social_account_id, page_name, language, compute)
+            return content, build_stale_meta(age_hours)
+
+    try:
+        result = compute() or {}
+    except AIProviderError as exc:
+        if content is not None and age_hours is not None:
+            return content, build_degraded_with_cache_meta(age_hours, exc)
+        raise
+
     _cache_put(db, social_account_id, page_name, language, result)
-    return result
+    return result, build_fresh_meta()
 
 
-# ── Gemini client helpers ─────────────────────────────────────────────────
+# ── Provider helpers ──────────────────────────────────────────────────────
+
+
+def _ai_available() -> bool:
+    """True when at least one AI provider is configured. Used to short-circuit
+    endpoints with no provider rather than dispatch a guaranteed-fail call."""
+    return bool(settings.GEMINI_API_KEY) or bool(settings.OPENAI_API_KEY)
 
 
 def _gemini_available() -> bool:
+    """Kept for tests that monkey-patch this symbol — true when Gemini is
+    configured for the page-level routes (which all use Gemini)."""
     return bool(settings.GEMINI_API_KEY)
-
-
-def _gemini_text(system_instruction: str, user_message: str, temperature: float = 0.5) -> str:
-    """Run a Gemini call returning plain text. Empty string on failure."""
-    if not _gemini_available():
-        return ""
-    try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-2.5-flash-lite",
-            system_instruction=system_instruction,
-            generation_config=genai.GenerationConfig(temperature=temperature),
-        )
-        resp = model.generate_content(user_message)
-        return (resp.text or "").strip()
-    except Exception as exc:
-        logger.warning("Gemini text call failed: %s", exc)
-        return ""
-
-
-def _gemini_json(system_instruction: str, user_message: str, temperature: float = 0.4) -> dict | None:
-    """Run a Gemini call returning structured JSON. None on failure."""
-    if not _gemini_available():
-        return None
-    try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-2.5-flash-lite",
-            system_instruction=system_instruction,
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=temperature,
-            ),
-        )
-        resp = model.generate_content(user_message)
-        return json.loads(resp.text)
-    except Exception as exc:
-        logger.warning("Gemini JSON call failed: %s", exc)
-        return None
 
 
 def _org_account_ids(db: Session, user: User) -> list:
@@ -234,19 +270,13 @@ def _org_account_ids(db: Session, user: User) -> list:
 
 
 # ── Caption-style helpers ─────────────────────────────────────────────────
-# Match on-brand hashtags and emoji usage in the account's existing captions so
-# generated captions look like they came from the same creator.
 
 _HASHTAG_RE = re.compile(r"#([^\s#.,!?…،؛؟]{2,50})", flags=re.UNICODE)
-
-# Emoji + pictograph ranges — same set used in the PDF report's _strip_emoji so
-# behavior stays consistent across features. Stripping is conditional on the
-# account's own caption history (see _emoji_usage_rate).
 _EMOJI_RE = re.compile(
     "["
-    "\U0001F300-\U0001F5FF"  # symbols & pictographs
-    "\U0001F600-\U0001F64F"  # emoticons
-    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
     "\U0001F700-\U0001F77F"
     "\U0001F780-\U0001F7FF"
     "\U0001F800-\U0001F8FF"
@@ -271,9 +301,6 @@ def _strip_emoji(text: str) -> str:
 
 
 def _extract_top_hashtags(captions: list[str], n: int = 5) -> list[str]:
-    """Return the n most-used hashtags across the caption list, lowercased.
-    Hashtags are compared case-insensitively so '#Summer' and '#summer' fold
-    together; Arabic hashtags pass through unchanged (no case)."""
     counter: Counter[str] = Counter()
     for cap in captions:
         if not cap:
@@ -284,13 +311,46 @@ def _extract_top_hashtags(captions: list[str], n: int = 5) -> list[str]:
 
 
 def _emoji_usage_rate(captions: list[str]) -> float:
-    """Fraction of non-empty captions that contain at least one emoji. Returns
-    0.0 on empty input so the 'strip by default' branch runs for new accounts."""
     non_empty = [c for c in captions if c and c.strip()]
     if not non_empty:
         return 0.0
     with_emoji = sum(1 for c in non_empty if _EMOJI_RE.search(c))
     return with_emoji / len(non_empty)
+
+
+# ── Mockable shims for tests ──────────────────────────────────────────────
+# Tests monkey-patch `_gemini_text` / `_gemini_json` to inject canned responses
+# without touching the network. We keep them as thin wrappers around
+# `get_provider("pages")` so the hot path still flows through one place.
+
+
+def _gemini_text(
+    system_instruction: str,
+    user_message: str,
+    temperature: float = 0.5,
+    *,
+    account_id: str | None = None,
+) -> str:
+    """Plain-text Gemini call. Raises `AIProviderError` on failure (no silent
+    empty string) so the endpoint can decide to serve stale cache."""
+    return get_provider("pages").generate_text(
+        system_instruction, user_message, temperature,
+        account_id=account_id, task="pages", source="user",
+    )
+
+
+def _gemini_json(
+    system_instruction: str,
+    user_message: str,
+    temperature: float = 0.4,
+    *,
+    account_id: str | None = None,
+) -> dict:
+    """Structured-JSON Gemini call. Raises `AIProviderError` on failure."""
+    return get_provider("pages").generate_json(
+        system_instruction, user_message, temperature,
+        account_id=account_id, task="pages", source="user",
+    )
 
 
 # ── My Posts: best post + low-performer pattern ───────────────────────────
@@ -302,13 +362,8 @@ def posts_insights(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return the top post enriched with a Gemini "why it worked" + a Gemini
-    "what to change" pattern across the bottom-third performers.
-
-    Free for all plan tiers — this is the My Posts page's headline action card.
-    Response text is produced in the requested `language` (en|ar) and cached
-    per (account, page, language) for 24h so repeat visits are instant.
-    """
+    """Top post enriched with a Gemini "why it worked" + a Gemini pattern
+    across the bottom-third performers. Free for all plan tiers."""
     account_ids = _org_account_ids(db, user)
     empty = {
         "best_post": None,
@@ -317,7 +372,7 @@ def posts_insights(
         "what_to_change": "",
     }
     if not account_ids:
-        return {"success": True, "data": empty}
+        return {"success": True, "data": empty, "meta": build_fresh_meta()}
 
     rows = (
         db.query(
@@ -337,7 +392,7 @@ def posts_insights(
         .all()
     )
     if not rows:
-        return {"success": True, "data": empty}
+        return {"success": True, "data": empty, "meta": build_fresh_meta()}
 
     ranked = sorted(rows, key=lambda r: (r.likes or 0) + (r.comments or 0), reverse=True)
     best = ranked[0]
@@ -356,7 +411,6 @@ def posts_insights(
         "ocr_text": best_ocr or None,
     }
 
-    # Build a low-performer summary line for Gemini
     bottom_lines = []
     for r in bottom[:5]:
         ct = r.content_type.value if r.content_type else "unknown"
@@ -373,7 +427,7 @@ def posts_insights(
     }
 
     if not _gemini_available():
-        return {"success": True, "data": payload}
+        return {"success": True, "data": payload, "meta": build_fresh_meta()}
 
     best_ocr_line = (
         f"- image text (OCR): '''{best_ocr[:300]}'''\n"
@@ -404,22 +458,28 @@ def posts_insights(
         + _language_rule(language)
     )
 
+    primary_account_id = str(account_ids[0])
+
     def _compute() -> dict:
-        result = _gemini_json(sys, user_msg) or {}
+        result = _gemini_json(sys, user_msg, account_id=primary_account_id) or {}
         return {
             "why_it_worked": (result.get("why_it_worked") or "").strip(),
             "low_performers_pattern": (result.get("low_performers_pattern") or "").strip(),
             "what_to_change": (result.get("what_to_change") or "").strip(),
         }
 
-    cached = _cache_get_or_compute(
-        db, account_ids[0], "posts-insights", language, _compute
-    )
+    try:
+        cached, meta = _resolve_ai_payload(
+            db, primary_account_id, "posts-insights", language, _compute,
+        )
+    except AIProviderError as exc:
+        return degraded_no_cache_response(exc)
+
     payload["why_it_worked"] = cached.get("why_it_worked", "")
     payload["low_performers_pattern"] = cached.get("low_performers_pattern", "")
     payload["what_to_change"] = cached.get("what_to_change", "")
 
-    return {"success": True, "data": payload}
+    return {"success": True, "data": payload, "meta": meta}
 
 
 # ── Caption generation (used by My Posts + Content Plan) ──────────────────
@@ -439,23 +499,20 @@ def generate_caption(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Generate a single ready-to-copy caption via Gemini in EN or AR.
-
-    The caption is shaped to the account's own voice:
-      - language matches the caller's UI language (body.language, wins over the
-        reference caption's language)
-      - top-5 most-used hashtags from the account's existing posts are offered
-        to Gemini so generated captions reuse on-brand tags
-      - emojis are stripped from the output by default; kept only if >50% of
-        the account's existing captions contain emojis
-    """
-    if not _gemini_available():
-        return {"success": True, "data": {"caption": ""}}
+    """Generate a single ready-to-copy caption via OpenAI (preferred) or Gemini
+    in EN or AR. AI failures return a degraded response with stale cache when
+    available, else a 503."""
+    provider = get_provider("captions")
+    if not _ai_available():
+        return {
+            "success": True,
+            "data": {"caption": ""},
+            "meta": build_fresh_meta(),
+        }
 
     account_ids = _org_account_ids(db, user)
+    primary_account_id = str(account_ids[0]) if account_ids else None
 
-    # If post_id passed, hydrate the reference_caption from the DB so the caller
-    # doesn't need to know the original text.
     reference = body.reference_caption or ""
     if body.post_id and not reference and account_ids:
         post = (
@@ -466,7 +523,30 @@ def generate_caption(
         if post:
             reference = post.caption or ""
 
-    # Pull this account's caption history to derive style hints (hashtags + emoji rate).
+    cache_payload = json.dumps(
+        {
+            "content_type": body.content_type,
+            "topic": (body.topic or "").strip(),
+            "post_id": body.post_id or "",
+            "reference": reference[:300],
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    cache_hash = hashlib.sha256(cache_payload.encode("utf-8")).hexdigest()[:40]
+    cache_page_name = f"caption:{cache_hash}"
+
+    cached = _cache_get(
+        db, primary_account_id, cache_page_name, body.language,
+        ttl_hours=CACHE_CAPTION_TTL_HOURS,
+    )
+    if cached and cached.get("caption"):
+        return {
+            "success": True,
+            "data": {"caption": cached["caption"]},
+            "meta": build_fresh_meta(),
+        }
+
     account_captions: list[str] = []
     if account_ids:
         account_captions = [
@@ -525,10 +605,24 @@ def generate_caption(
         )
     user_msg = "\n".join(parts)
 
-    text = _gemini_text(sys, user_msg, temperature=0.85)
+    try:
+        text = provider.generate_text(
+            sys, user_msg, temperature=0.85,
+            account_id=primary_account_id, task="captions", source="user",
+        )
+    except AIProviderError as exc:
+        # Captions have no useful data-only fallback — entire response is AI.
+        return degraded_no_cache_response(exc)
+
     if text and not allow_emojis:
         text = _strip_emoji(text)
-    return {"success": True, "data": {"caption": text}}
+    if text:
+        _cache_put(db, primary_account_id, cache_page_name, body.language, {"caption": text})
+    return {
+        "success": True,
+        "data": {"caption": text},
+        "meta": build_fresh_meta(),
+    }
 
 
 # ── My Audience: behavior summary + what they want + best time ────────────
@@ -541,9 +635,7 @@ def audience_insights(
     db: Session = Depends(get_db),
 ):
     """Audience-page hero: AI summary of weekly behavior, 3 desired topics,
-    and a specific best-time-to-reach with reasoning. Response text is
-    produced in the requested `language` (en|ar) and cached per
-    (account, page, language) for 24h."""
+    and a specific best-time-to-reach with reasoning."""
     account_ids = _org_account_ids(db, user)
     empty = {
         "behavior_summary": "",
@@ -551,7 +643,7 @@ def audience_insights(
         "best_time": {"day": "", "time": "", "reason": ""},
     }
     if not account_ids:
-        return {"success": True, "data": empty}
+        return {"success": True, "data": empty, "meta": build_fresh_meta()}
 
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
@@ -560,7 +652,6 @@ def audience_insights(
         db.query(Post.id).filter(Post.social_account_id.in_(account_ids)).subquery()
     )
 
-    # Weekly comment volume + sentiment split
     sent_rows = (
         db.query(AnalysisResult.sentiment, func.count(AnalysisResult.id))
         .join(Comment, AnalysisResult.comment_id == Comment.id)
@@ -575,7 +666,6 @@ def audience_insights(
             sentiment_week[label] = n
     total_week_comments = sum(sentiment_week.values())
 
-    # Best day + hour by avg engagement (all-time)
     best_slot = (
         db.query(
             func.extract("dow", Post.posted_at).label("dow"),
@@ -595,7 +685,6 @@ def audience_insights(
     best_time = f"{int(best_slot.hour):02d}:00" if best_slot else ""
     best_avg = round(float(best_slot.avg_eng), 1) if best_slot else 0
 
-    # Top content type
     top_type_row = (
         db.query(
             Post.content_type,
@@ -613,7 +702,6 @@ def audience_insights(
         else "image"
     )
 
-    # Sample comment text for topic mining (top 30 most recent positive comments)
     pos_comments = (
         db.query(Comment.text)
         .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
@@ -626,7 +714,6 @@ def audience_insights(
     )
     pos_sample = " | ".join(c.text[:80] for c in pos_comments if c.text)[:1500]
 
-    # Segments summary (helps Gemini characterize the audience)
     seg_rows = (
         db.query(AudienceSegment)
         .filter(AudienceSegment.social_account_id.in_(account_ids))
@@ -655,7 +742,7 @@ def audience_insights(
     }
 
     if not _gemini_available():
-        return {"success": True, "data": payload}
+        return {"success": True, "data": payload, "meta": build_fresh_meta()}
 
     sys = (
         "You are an audience-strategy advisor for an Instagram creator. "
@@ -686,8 +773,10 @@ def audience_insights(
         '}'
     )
 
+    primary_account_id = str(account_ids[0])
+
     def _compute() -> dict:
-        result = _gemini_json(sys, user_msg) or {}
+        result = _gemini_json(sys, user_msg, account_id=primary_account_id) or {}
         what = result.get("what_they_want") or []
         return {
             "behavior_summary": (result.get("behavior_summary") or "").strip(),
@@ -702,14 +791,18 @@ def audience_insights(
             "best_time_reason": (result.get("best_time_reason") or "").strip(),
         }
 
-    cached = _cache_get_or_compute(
-        db, account_ids[0], "audience-insights", language, _compute
-    )
+    try:
+        cached, meta = _resolve_ai_payload(
+            db, primary_account_id, "audience-insights", language, _compute,
+        )
+    except AIProviderError as exc:
+        return degraded_no_cache_response(exc)
+
     payload["behavior_summary"] = cached.get("behavior_summary", "")
     payload["what_they_want"] = cached.get("what_they_want", [])
     payload["best_time"]["reason"] = cached.get("best_time_reason", "")
 
-    return {"success": True, "data": payload}
+    return {"success": True, "data": payload, "meta": meta}
 
 
 # ── Content Plan: 7-day calendar with AI topic per day ────────────────────
@@ -721,22 +814,15 @@ def content_plan(
     user: User = Depends(RequireFeature("content_recommendations")),
     db: Session = Depends(get_db),
 ):
-    """Return a 7-day content calendar starting today. Topics are produced in
-    the requested `language` (en|ar) and cached per (account, page, language)
-    for 24h.
-
-    Slot logic:
-      - Day index = position in plan
-      - Content type rotates across the user's TOP 3 historical types
-      - Best time is the historical best hour for that content type (fallback 18:00)
-      - Estimated reach = avg likes+comments for that content type * 1.0 (proxy)
-      - Topic = Gemini, given the user's recent best captions as inspiration
-    """
+    """7-day content calendar starting today with Gemini-suggested topics."""
     account_ids = _org_account_ids(db, user)
     if not account_ids:
-        return {"success": True, "data": {"days": []}}
+        return {
+            "success": True,
+            "data": {"days": []},
+            "meta": build_fresh_meta(),
+        }
 
-    # Per-content-type stats
     type_stats = (
         db.query(
             Post.content_type,
@@ -767,7 +853,6 @@ def content_plan(
         type_rotation = ["image", "video", "carousel"]
         type_meta = {ct: {"avg_eng": 0, "n": 0} for ct in type_rotation}
 
-    # Best hour per content type
     best_hour_by_type: dict[str, int] = {}
     hour_rows = (
         db.query(
@@ -791,7 +876,6 @@ def content_plan(
         pairs.sort(key=lambda p: p[1], reverse=True)
         best_hour_by_type[ct] = pairs[0][0] if pairs else 18
 
-    # Top captions for inspiration
     top_caps_rows = (
         db.query(
             Post.caption,
@@ -811,7 +895,6 @@ def content_plan(
         for r in top_caps_rows
     ]
 
-    # Build the 7-day plan skeleton (data-driven slots, topics filled by Gemini)
     today = datetime.now(timezone.utc).date()
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     days = []
@@ -831,51 +914,61 @@ def content_plan(
             }
         )
 
-    if _gemini_available():
-        sys = (
-            "You are a content-planning advisor for an Instagram creator. "
-            "Given the creator's top-performing captions and a 7-day plan skeleton "
-            "(date + content type per day), return strict JSON adding ONE specific "
-            "topic per day that is fresh, on-brand, and varied across the week. "
-            "Topics must be 4-10 words, written as headlines (no markdown, no quotes). "
-            "Do NOT repeat the same topic across days. "
-            + _language_rule(language)
-        )
-        skeleton_lines = [
-            f"Day {d['day_index']} ({d['day_label']}, {d['date']}, type={d['content_type']})"
-            for d in days
-        ]
-        user_msg = (
-            "Top-performing captions from this account (for inspiration only):\n"
-            + ("\n".join(top_caps_lines) or "(none yet)")
-            + "\n\nWeek plan skeleton:\n"
-            + "\n".join(skeleton_lines)
-            + "\n\nReturn JSON:\n"
-            '{ "topics": [\n'
-            '  { "day_index": 0, "topic": "..." },\n'
-            "  ...7 entries\n"
-            "]}"
-        )
+    if not _gemini_available():
+        return {"success": True, "data": {"days": days}, "meta": build_fresh_meta()}
 
-        def _compute() -> dict:
-            result = _gemini_json(sys, user_msg, temperature=0.7) or {}
-            topics_by_idx = {
-                str(int(t["day_index"])): (t.get("topic") or "").strip()
-                for t in (result.get("topics") or [])
-                if isinstance(t, dict) and "day_index" in t
-            }
-            return {"topics_by_idx": topics_by_idx}
+    sys = (
+        "You are a content-planning advisor for an Instagram creator. "
+        "Given the creator's top-performing captions and a 7-day plan skeleton "
+        "(date + content type per day), return strict JSON adding ONE specific "
+        "topic per day that is fresh, on-brand, and varied across the week. "
+        "Topics must be 4-10 words, written as headlines (no markdown, no quotes). "
+        "Do NOT repeat the same topic across days. "
+        + _language_rule(language)
+    )
+    skeleton_lines = [
+        f"Day {d['day_index']} ({d['day_label']}, {d['date']}, type={d['content_type']})"
+        for d in days
+    ]
+    user_msg = (
+        "Top-performing captions from this account (for inspiration only):\n"
+        + ("\n".join(top_caps_lines) or "(none yet)")
+        + "\n\nWeek plan skeleton:\n"
+        + "\n".join(skeleton_lines)
+        + "\n\nReturn JSON:\n"
+        '{ "topics": [\n'
+        '  { "day_index": 0, "topic": "..." },\n'
+        "  ...7 entries\n"
+        "]}"
+    )
 
-        cached = _cache_get_or_compute(
-            db, account_ids[0], "content-plan", language, _compute
+    primary_account_id = str(account_ids[0])
+
+    def _compute() -> dict:
+        result = _gemini_json(
+            sys, user_msg, temperature=0.7, account_id=primary_account_id,
+        ) or {}
+        topics_by_idx = {
+            str(int(t["day_index"])): (t.get("topic") or "").strip()
+            for t in (result.get("topics") or [])
+            if isinstance(t, dict) and "day_index" in t
+        }
+        return {"topics_by_idx": topics_by_idx}
+
+    try:
+        cached, meta = _resolve_ai_payload(
+            db, primary_account_id, "content-plan", language, _compute,
         )
-        topics_by_idx = cached.get("topics_by_idx", {}) or {}
-        for d in days:
-            key = str(d["day_index"])
-            if key in topics_by_idx:
-                d["topic"] = topics_by_idx[key]
+    except AIProviderError as exc:
+        return degraded_no_cache_response(exc)
 
-    return {"success": True, "data": {"days": days}}
+    topics_by_idx = cached.get("topics_by_idx", {}) or {}
+    for d in days:
+        key = str(d["day_index"])
+        if key in topics_by_idx:
+            d["topic"] = topics_by_idx[key]
+
+    return {"success": True, "data": {"days": days}, "meta": meta}
 
 
 # ── Sentiment: suggested response templates for needs-attention posts ────
@@ -887,19 +980,15 @@ def sentiment_responses(
     user: User = Depends(RequireFeature("sentiment_analysis")),
     db: Session = Depends(get_db),
 ):
-    """For each post with >2 negative comments, return a suggested empathetic
-    public reply template the creator can paste into Instagram. Top 3 only.
-
-    Templates are produced in the requested `language` (en|ar) and cached per
-    (account, page, language) for 24h. The UI language takes precedence over
-    the comment language — Arabic-language UI always gets Arabic templates.
-
-    This is the "Needs your attention + suggested response template" surface
-    on the Sentiment page — not just flagging the problem, giving the response.
-    """
+    """Suggested empathetic public reply templates for the top 3 posts with
+    >2 negative comments. Templates produced in the requested `language`."""
     account_ids = _org_account_ids(db, user)
     if not account_ids:
-        return {"success": True, "data": {"templates": []}}
+        return {
+            "success": True,
+            "data": {"templates": []},
+            "meta": build_fresh_meta(),
+        }
 
     attention = (
         db.query(
@@ -918,9 +1007,12 @@ def sentiment_responses(
         .all()
     )
     if not attention:
-        return {"success": True, "data": {"templates": []}}
+        return {
+            "success": True,
+            "data": {"templates": []},
+            "meta": build_fresh_meta(),
+        }
 
-    # Pull representative negative comments for each post (Gemini gets the sample)
     payload_rows = []
     for row in attention:
         neg_samples = (
@@ -949,6 +1041,7 @@ def sentiment_responses(
                     {"post_id": r["post_id"], "response_template": ""} for r in payload_rows
                 ]
             },
+            "meta": build_fresh_meta(),
         }
 
     sys = (
@@ -971,21 +1064,25 @@ def sentiment_responses(
         )
     )
 
-    # Cache key depends on the set of negative-comment post_ids — if the
-    # set changes (new flagged posts), the cached templates are still
-    # valid for the posts they cover, and uncovered posts just fall back
-    # to "" (empty template). Safe enough for 24h.
+    primary_account_id = str(account_ids[0])
+
     def _compute() -> dict:
-        result = _gemini_json(sys, user_msg, temperature=0.6) or {}
+        result = _gemini_json(
+            sys, user_msg, temperature=0.6, account_id=primary_account_id,
+        ) or {}
         templates_by_id: dict[str, str] = {}
         for t in result.get("templates") or []:
             if isinstance(t, dict) and t.get("post_id"):
                 templates_by_id[str(t["post_id"])] = (t.get("response_template") or "").strip()
         return {"templates_by_id": templates_by_id}
 
-    cached = _cache_get_or_compute(
-        db, account_ids[0], "sentiment-responses", language, _compute
-    )
+    try:
+        cached, meta = _resolve_ai_payload(
+            db, primary_account_id, "sentiment-responses", language, _compute,
+        )
+    except AIProviderError as exc:
+        return degraded_no_cache_response(exc)
+
     templates_by_id = cached.get("templates_by_id", {}) or {}
 
     return {
@@ -999,4 +1096,452 @@ def sentiment_responses(
                 for r in payload_rows
             ]
         },
+        "meta": meta,
+    }
+
+
+# ── Ask Basiret: conversational Q&A grounded in the account's data ────────
+
+
+def build_ask_context(db: Session, account_id: str) -> dict:
+    """Assemble a structured snapshot of one account's Instagram performance.
+
+    The same dict is injected into every Ask Basiret prompt — Gemini decides
+    which fields are relevant to the user's question. Kept as a free-standing
+    function (not inlined in the endpoint) so it can be unit-tested without
+    spinning up FastAPI's TestClient.
+
+    Returns an empty-ish skeleton when the account has no analyzed posts so
+    the caller can short-circuit to a friendly "sync first" message instead
+    of paying for a Gemini call against empty context.
+    """
+    now = datetime.now(timezone.utc)
+    window_30d = now - timedelta(days=30)
+    window_7d = now - timedelta(days=7)
+    window_14d = now - timedelta(days=14)
+
+    account = db.query(SocialAccount).filter(SocialAccount.id == account_id).first()
+    username = account.username if account else None
+
+    posts_q = db.query(Post).filter(Post.social_account_id == account_id)
+    total_posts = posts_q.count()
+
+    analyzed_count = (
+        db.query(func.count(AnalysisResult.id))
+        .join(Post, AnalysisResult.post_id == Post.id)
+        .filter(Post.social_account_id == account_id)
+        .scalar() or 0
+    )
+
+    date_range = (
+        db.query(
+            func.min(Post.posted_at).label("first"),
+            func.max(Post.posted_at).label("last"),
+        )
+        .filter(Post.social_account_id == account_id)
+        .first()
+    )
+    first_post = date_range.first.isoformat() if date_range and date_range.first else None
+    last_post = date_range.last.isoformat() if date_range and date_range.last else None
+
+    # Comment-level sentiment over last 30 days (the differentiator surface)
+    sent_rows = (
+        db.query(AnalysisResult.sentiment, func.count(AnalysisResult.id))
+        .join(Comment, AnalysisResult.comment_id == Comment.id)
+        .join(Post, Comment.post_id == Post.id)
+        .filter(Post.social_account_id == account_id)
+        .filter(Comment.created_at >= window_30d)
+        .group_by(AnalysisResult.sentiment)
+        .all()
+    )
+    sentiment_30d = {"positive": 0, "neutral": 0, "negative": 0}
+    for label, n in sent_rows:
+        if label in sentiment_30d:
+            sentiment_30d[label] = int(n)
+    total_sent = sum(sentiment_30d.values())
+
+    def _pct(n: int) -> int:
+        return round(100 * n / total_sent) if total_sent else 0
+
+    sentiment_pct_30d = {
+        "positive_pct": _pct(sentiment_30d["positive"]),
+        "neutral_pct": _pct(sentiment_30d["neutral"]),
+        "negative_pct": _pct(sentiment_30d["negative"]),
+        "total_comments": total_sent,
+    }
+
+    # Top content type by avg engagement
+    type_row = (
+        db.query(
+            Post.content_type,
+            func.avg(EngagementMetric.likes + EngagementMetric.comments).label("avg_eng"),
+            func.count(Post.id).label("n"),
+        )
+        .join(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id == account_id)
+        .group_by(Post.content_type)
+        .order_by(func.avg(EngagementMetric.likes + EngagementMetric.comments).desc())
+        .first()
+    )
+    top_content_type = (
+        {
+            "type": type_row.content_type.value if type_row.content_type else "unknown",
+            "avg_engagement": round(float(type_row.avg_eng or 0), 1),
+            "post_count": int(type_row.n or 0),
+        }
+        if type_row
+        else None
+    )
+
+    # Best posting time (dow + hour)
+    best_slot = (
+        db.query(
+            func.extract("dow", Post.posted_at).label("dow"),
+            func.extract("hour", Post.posted_at).label("hour"),
+            func.avg(EngagementMetric.likes + EngagementMetric.comments).label("avg_eng"),
+        )
+        .join(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id == account_id)
+        .group_by("dow", "hour")
+        .having(func.count(Post.id) >= 1)
+        .order_by(func.avg(EngagementMetric.likes + EngagementMetric.comments).desc())
+        .first()
+    )
+    days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    best_posting_time = (
+        {
+            "day_of_week": days[int(best_slot.dow)],
+            "hour": int(best_slot.hour),
+            "avg_engagement": round(float(best_slot.avg_eng or 0), 1),
+        }
+        if best_slot
+        else None
+    )
+
+    # 7-day vs previous-7-day average engagement per post
+    def _avg_eng_in_window(start: datetime, end: datetime) -> float:
+        row = (
+            db.query(func.avg(EngagementMetric.likes + EngagementMetric.comments))
+            .join(Post, EngagementMetric.post_id == Post.id)
+            .filter(Post.social_account_id == account_id)
+            .filter(Post.posted_at >= start)
+            .filter(Post.posted_at < end)
+            .scalar()
+        )
+        return round(float(row or 0), 1)
+
+    current_avg = _avg_eng_in_window(window_7d, now)
+    prev_avg = _avg_eng_in_window(window_14d, window_7d)
+    change_pct = (
+        round(100 * (current_avg - prev_avg) / prev_avg, 1) if prev_avg else None
+    )
+    engagement_trend_7d = {
+        "current_7d_avg": current_avg,
+        "previous_7d_avg": prev_avg,
+        "change_pct": change_pct,
+    }
+
+    # Top hashtags by avg engagement (mined from captions)
+    caption_rows = (
+        db.query(
+            Post.caption,
+            (
+                func.coalesce(func.sum(EngagementMetric.likes), 0)
+                + func.coalesce(func.sum(EngagementMetric.comments), 0)
+            ).label("eng"),
+        )
+        .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id == account_id)
+        .filter(Post.caption.isnot(None))
+        .group_by(Post.id, Post.caption)
+        .all()
+    )
+    tag_engagement: dict[str, list[int]] = {}
+    for row in caption_rows:
+        if not row.caption:
+            continue
+        eng = int(row.eng or 0)
+        for raw in _HASHTAG_RE.findall(row.caption):
+            tag_engagement.setdefault(raw.lower(), []).append(eng)
+    top_hashtags = sorted(
+        (
+            {
+                "tag": f"#{tag}",
+                "avg_engagement": round(sum(engs) / len(engs), 1),
+                "uses": len(engs),
+            }
+            for tag, engs in tag_engagement.items()
+        ),
+        key=lambda d: d["avg_engagement"],
+        reverse=True,
+    )[:5]
+
+    # Most recent 5 posts with sentiment + engagement
+    recent_rows = (
+        db.query(
+            Post.id,
+            Post.caption,
+            Post.content_type,
+            Post.posted_at,
+            func.coalesce(func.sum(EngagementMetric.likes), 0).label("likes"),
+            func.coalesce(func.sum(EngagementMetric.comments), 0).label("comments"),
+            AnalysisResult.sentiment,
+        )
+        .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .outerjoin(
+            AnalysisResult,
+            AnalysisResult.post_id == Post.id,
+        )
+        .filter(Post.social_account_id == account_id)
+        .group_by(Post.id, AnalysisResult.sentiment)
+        .order_by(Post.posted_at.desc().nullslast())
+        .limit(5)
+        .all()
+    )
+    recent_posts = [
+        {
+            "content_type": r.content_type.value if r.content_type else "unknown",
+            "caption_excerpt": (r.caption or "")[:100],
+            "likes": int(r.likes or 0),
+            "comments": int(r.comments or 0),
+            "sentiment": r.sentiment or "unknown",
+            "posted_at": r.posted_at.isoformat() if r.posted_at else None,
+        }
+        for r in recent_rows
+    ]
+
+    # Active audience segments
+    seg_rows = (
+        db.query(AudienceSegment)
+        .filter(AudienceSegment.social_account_id == account_id)
+        .order_by(AudienceSegment.size_estimate.desc().nullslast())
+        .all()
+    )
+    audience_segments = {
+        "count": len(seg_rows),
+        "top_segment_label": seg_rows[0].segment_label if seg_rows else None,
+    }
+
+    return {
+        "account_username": username,
+        "data_window": {
+            "first_post_at": first_post,
+            "last_post_at": last_post,
+            "total_posts": int(total_posts),
+            "total_posts_analyzed": int(analyzed_count),
+        },
+        "sentiment_30d": sentiment_pct_30d,
+        "top_content_type": top_content_type,
+        "best_posting_time": best_posting_time,
+        "engagement_trend_7d": engagement_trend_7d,
+        "top_hashtags": top_hashtags,
+        "recent_posts": recent_posts,
+        "audience_segments": audience_segments,
+    }
+
+
+def _ask_account_has_data(context: dict) -> bool:
+    """Decide whether the context is rich enough to answer questions from."""
+    window = context.get("data_window") or {}
+    return bool(window.get("total_posts_analyzed") or window.get("total_posts"))
+
+
+def _check_ask_rate_limit(account_id: str) -> int | None:
+    """Return remaining ask calls for the day, or raise a 503-payload by
+    returning -1 when the limit is hit. None = limit disabled."""
+    from app.core.database import SessionLocal
+    from app.models.ai_usage_log import AiUsageLog
+
+    limit = settings.AI_ASK_DAILY_LIMIT_PER_ACCOUNT
+    if limit <= 0:
+        return None
+
+    session = SessionLocal()
+    try:
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        used = (
+            session.query(func.count(AiUsageLog.id))
+            .filter(
+                AiUsageLog.social_account_id == account_id,
+                AiUsageLog.task == "ask",
+                AiUsageLog.called_at >= since,
+            )
+            .scalar()
+        ) or 0
+    finally:
+        session.close()
+    return max(0, limit - int(used))
+
+
+_ASK_QUESTION_MAX_CHARS = 500
+_ASK_HISTORY_MAX_TURNS = 6
+
+
+class AskHistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class AskRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=_ASK_QUESTION_MAX_CHARS)
+    language: LanguageParam = "en"
+    conversation_history: list[AskHistoryTurn] = Field(default_factory=list, max_length=_ASK_HISTORY_MAX_TURNS)
+
+
+@router.post("/ask")
+def ask_basiret(
+    body: AskRequest = Body(...),
+    user: User = Depends(RequireFeature("content_recommendations")),
+    db: Session = Depends(get_db),
+):
+    """Conversational Q&A grounded in the account's own Instagram data.
+
+    The response always carries a `data_used` array listing which context
+    buckets were injected — useful both for transparency and so the frontend
+    can render "based on X, Y, Z" labels next to the answer.
+    """
+    account_ids = _org_account_ids(db, user)
+    if not account_ids:
+        return {
+            "success": True,
+            "data": {
+                "answer": (
+                    "تحتاج إلى مزامنة حساب إنستغرام أولاً قبل أن أتمكن من الإجابة على أسئلتك."
+                    if body.language == "ar"
+                    else "Connect and sync an Instagram account first so I have data to draw from."
+                ),
+                "data_used": [],
+                "language": body.language,
+            },
+            "meta": build_fresh_meta(),
+        }
+
+    primary_account_id = str(account_ids[0])
+
+    # Rate-limit gate (per-account, task="ask"). Mirrors the structured 503
+    # used elsewhere when AI is unreachable.
+    remaining = _check_ask_rate_limit(primary_account_id)
+    if remaining is not None and remaining <= 0:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "data": None,
+                "meta": {
+                    "status": "degraded",
+                    "cached": False,
+                    "message": (
+                        "لقد وصلت إلى الحد اليومي من الأسئلة. حاول مرة أخرى غدًا."
+                        if body.language == "ar"
+                        else "You've reached today's question limit. Please try again tomorrow."
+                    ),
+                    "retry_after_hours": 24,
+                    "limit": settings.AI_ASK_DAILY_LIMIT_PER_ACCOUNT,
+                },
+            },
+        )
+
+    context = build_ask_context(db, primary_account_id)
+    has_data = _ask_account_has_data(context)
+    if not has_data:
+        return {
+            "success": True,
+            "data": {
+                "answer": (
+                    "لا توجد منشورات محللة بعد. عند مزامنة منشوراتك وتحليلها، سأتمكن من الإجابة على أسئلتك حول أدائك وجمهورك."
+                    if body.language == "ar"
+                    else "No analyzed posts yet. Once your posts are synced and analyzed, I can answer questions about your performance and audience."
+                ),
+                "data_used": [],
+                "language": body.language,
+            },
+            "meta": build_fresh_meta(),
+        }
+
+    # data_used = the keys we actually populated with non-empty values
+    data_used = [
+        key
+        for key in (
+            "data_window",
+            "sentiment_30d",
+            "top_content_type",
+            "best_posting_time",
+            "engagement_trend_7d",
+            "top_hashtags",
+            "recent_posts",
+            "audience_segments",
+        )
+        if context.get(key)
+    ]
+
+    if not _ai_available():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "data": None,
+                "meta": {
+                    "status": "degraded",
+                    "cached": False,
+                    "message": "AI service is not configured. Try again later.",
+                    "retry_after_hours": None,
+                },
+            },
+        )
+
+    lang_label = _lang_label(body.language)
+    system = (
+        "You are Basiret, an AI analytics assistant for Instagram. You answer "
+        "questions about the user's own Instagram account using only the data "
+        "provided below.\n\n"
+        "Rules:\n"
+        "- Never invent numbers. If the data doesn't contain the answer, say so directly.\n"
+        "- Be specific — use actual numbers from the data, not vague statements.\n"
+        "- Keep answers concise — 2-5 sentences for simple questions, up to 8 for complex ones.\n"
+        "- If the user asks for a recommendation, base it on patterns in the data.\n"
+        "- Tone: expert but approachable. Not corporate. Not overly casual.\n"
+        f"- Language: respond in {lang_label}. "
+        + ("If Arabic, use Modern Standard Arabic." if body.language == "ar" else "")
+        + "\n\nUser account data:\n"
+        + json.dumps(context, ensure_ascii=False, default=str)
+    )
+
+    history = [
+        {"role": turn.role, "content": turn.content}
+        for turn in body.conversation_history
+    ]
+
+    try:
+        answer = get_provider("ask").generate_chat(
+            system,
+            history,
+            body.question,
+            temperature=0.4,
+            account_id=primary_account_id,
+            task="ask",
+            source="user",
+        )
+    except AIProviderError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "data": None,
+                "meta": {
+                    "status": "degraded",
+                    "cached": False,
+                    "message": exc.user_message,
+                    "retry_after_hours": exc.retry_after_hours,
+                },
+            },
+        )
+
+    return {
+        "success": True,
+        "data": {
+            "answer": answer,
+            "data_used": data_used,
+            "language": body.language,
+        },
+        "meta": build_fresh_meta(),
     }

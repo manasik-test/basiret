@@ -182,6 +182,21 @@ CREATE TABLE ai_page_cache (
 CREATE INDEX idx_ai_page_cache_lookup ON ai_page_cache(social_account_id, page_name, language);
 
 -- ─────────────────────────────────────────
+-- AI USAGE LOG (per-call audit trail for rate limiting + admin visibility)
+-- ─────────────────────────────────────────
+CREATE TABLE ai_usage_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    social_account_id UUID REFERENCES social_account(id) ON DELETE CASCADE,
+    provider VARCHAR(20) NOT NULL,
+    task VARCHAR(20) NOT NULL,
+    source VARCHAR(20) NOT NULL DEFAULT 'user',
+    tokens_used INTEGER,
+    called_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_ai_usage_account_called ON ai_usage_log(social_account_id, called_at);
+CREATE INDEX idx_ai_usage_provider_called ON ai_usage_log(provider, called_at);
+
+-- ─────────────────────────────────────────
 -- FEATURE FLAG
 -- ─────────────────────────────────────────
 CREATE TABLE feature_flag (

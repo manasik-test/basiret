@@ -422,3 +422,30 @@ export async function fetchSentimentResponses(language: 'en' | 'ar' = 'en'): Pro
   )
   return res.data
 }
+
+// ── Ask Basiret (conversational Q&A) ──────────────────────────────────────
+
+export interface AskHistoryTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AskRequest {
+  question: string
+  language: 'en' | 'ar'
+  conversation_history: AskHistoryTurn[]
+}
+
+export interface AskResponseData {
+  answer: string
+  data_used: string[]
+  language: 'en' | 'ar'
+}
+
+// 503 with `{success:false, data:null, meta:{...}}` (rate limit or provider
+// down) is converted to a thrown Error by the shared interceptor — the caller
+// renders it as an assistant bubble per the degraded-UX spec.
+export async function askBasiret(req: AskRequest): Promise<AskResponseData> {
+  const res = await api.post<unknown, ApiResponse<AskResponseData>>('/ai-pages/ask', req)
+  return res.data
+}

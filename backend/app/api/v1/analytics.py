@@ -24,7 +24,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, cast, Date
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.ai_degradation import build_fresh_meta
+from app.core.ai_provider import AIProviderError, get_provider
 from app.core.database import get_db
 from app.core.deps import get_current_user, RequireFeature
 from app.models.user import User
@@ -32,7 +33,7 @@ from app.models.post import Post
 from app.models.comment import Comment
 from app.models.analysis_result import AnalysisResult
 from app.models.engagement_metric import EngagementMetric
-from app.models.social_account import SocialAccount, Platform
+from app.models.social_account import SocialAccount
 from app.models.audience_segment import AudienceSegment
 from app.models.insight_result import InsightResult
 from app.tasks.nlp_analysis import analyze_posts
@@ -114,52 +115,51 @@ def _generate_highlights(
     wow_change: dict[str, int],
     keywords: list[dict],
     language: str = "en",
+    account_id: str | None = None,
+    source: str = "user",
 ) -> str:
-    """Ask Gemini for a 2-sentence audience-intelligence summary. Empty string on failure."""
-    if not settings.GEMINI_API_KEY or total_week == 0:
+    """Ask Gemini for a 2-sentence audience-intelligence summary.
+
+    Raises `AIProviderError` on provider failure so the caller can decide
+    whether to serve a stale cache entry or surface the degraded state.
+    """
+    if total_week == 0:
         return ""
-    try:
-        import google.generativeai as genai
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        lang_label = "Arabic" if language == "ar" else "English"
-        model = genai.GenerativeModel(
-            "gemini-2.5-flash-lite",
-            system_instruction=(
-                "You are an audience-insights writer for a social media analytics tool. "
-                "Given comment-sentiment data from an Instagram creator's past week, write "
-                "EXACTLY TWO sentences summarizing what the audience is saying. "
-                "Be specific — reference the percentages, top keywords, and week-over-week "
-                "trend direction. Use a neutral, professional tone. "
-                "No markdown, no bullets, no emojis, no preamble. "
-                f"Respond ENTIRELY in {lang_label}. This is a hard requirement — "
-                f"do not switch languages even if the input keywords are in a different language."
-            ),
-            generation_config=genai.GenerationConfig(temperature=0.4),
-        )
+    lang_label = "Arabic" if language == "ar" else "English"
+    sys_prompt = (
+        "You are an audience-insights writer for a social media analytics tool. "
+        "Given comment-sentiment data from an Instagram creator's past week, write "
+        "EXACTLY TWO sentences summarizing what the audience is saying. "
+        "Be specific — reference the percentages, top keywords, and week-over-week "
+        "trend direction. Use a neutral, professional tone. "
+        "No markdown, no bullets, no emojis, no preamble. "
+        f"Respond ENTIRELY in {lang_label}. This is a hard requirement — "
+        f"do not switch languages even if the input keywords are in a different language."
+    )
 
-        def pct(n: int) -> int:
-            return round(100 * n / total_week) if total_week else 0
+    def pct(n: int) -> int:
+        return round(100 * n / total_week) if total_week else 0
 
-        kw_line = ", ".join(
-            f"{k['term']} ({k['sentiment']}, n={k['count']})" for k in keywords
-        ) or "(none)"
-        user_msg = (
-            f"Total comments this week: {total_week}\n"
-            f"Sentiment this week: {pct(current_counts.get('positive', 0))}% positive, "
-            f"{pct(current_counts.get('neutral', 0))}% neutral, "
-            f"{pct(current_counts.get('negative', 0))}% negative\n"
-            f"Week-over-week percentage-point change: "
-            f"positive {wow_change.get('positive', 0):+d}, "
-            f"neutral {wow_change.get('neutral', 0):+d}, "
-            f"negative {wow_change.get('negative', 0):+d}\n"
-            f"Top keywords: {kw_line}"
-        )
-        resp = model.generate_content(user_msg)
-        return (resp.text or "").strip()
-    except Exception as exc:
-        logger.warning("Gemini highlights generation failed: %s", exc)
-        return ""
+    kw_line = ", ".join(
+        f"{k['term']} ({k['sentiment']}, n={k['count']})" for k in keywords
+    ) or "(none)"
+    user_msg = (
+        f"Total comments this week: {total_week}\n"
+        f"Sentiment this week: {pct(current_counts.get('positive', 0))}% positive, "
+        f"{pct(current_counts.get('neutral', 0))}% neutral, "
+        f"{pct(current_counts.get('negative', 0))}% negative\n"
+        f"Week-over-week percentage-point change: "
+        f"positive {wow_change.get('positive', 0):+d}, "
+        f"neutral {wow_change.get('neutral', 0):+d}, "
+        f"negative {wow_change.get('negative', 0):+d}\n"
+        f"Top keywords: {kw_line}"
+    )
+
+    return get_provider("insights").generate_text(
+        sys_prompt, user_msg, temperature=0.4,
+        account_id=account_id, task="insights", source=source,
+    )
 
 router = APIRouter()
 
@@ -700,57 +700,44 @@ def sentiment_summary(
         "negative": _sample("negative"),
     }
 
-    # ── Gemini highlights (synchronous, graceful fallback, 24h cached) ─
+    # ── Gemini highlights (SWR cached: fresh ≤24h, stale 24-72h) ─────
     lang = "ar" if str(language).lower().startswith("ar") else "en"
-    from app.models.ai_page_cache import AiPageCache
+    from app.api.v1.ai_pages import _resolve_ai_payload
 
     highlights = ""
-    cache_account = account_ids[0] if account_ids else None
-    cache_row = None
+    meta = build_fresh_meta()
+    cache_account = str(account_ids[0]) if account_ids else None
     if cache_account and total_week > 0:
-        cache_row = (
-            db.query(AiPageCache)
-            .filter(
-                AiPageCache.social_account_id == cache_account,
-                AiPageCache.page_name == "sentiment-summary",
-                AiPageCache.language == lang,
-            )
-            .first()
-        )
-        if cache_row:
-            gen = cache_row.generated_at
-            if gen.tzinfo is None:
-                gen = gen.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) - gen <= timedelta(hours=24):
-                highlights = (cache_row.content or {}).get("highlights", "")
-
-    if cache_account and total_week > 0 and not highlights:
-        highlights = _generate_highlights(
-            total_week=total_week,
-            current_counts=current_counts,
-            wow_change=wow_change,
-            keywords=keywords,
-            language=lang,
-        )
-        try:
-            now_ts = datetime.now(timezone.utc)
-            if cache_row:
-                cache_row.content = {"highlights": highlights}
-                cache_row.generated_at = now_ts
-            else:
-                db.add(
-                    AiPageCache(
-                        social_account_id=cache_account,
-                        page_name="sentiment-summary",
-                        language=lang,
-                        content={"highlights": highlights},
-                        generated_at=now_ts,
-                    )
+        def _compute() -> dict:
+            return {
+                "highlights": _generate_highlights(
+                    total_week=total_week,
+                    current_counts=current_counts,
+                    wow_change=wow_change,
+                    keywords=keywords,
+                    language=lang,
+                    account_id=cache_account,
                 )
-            db.commit()
-        except Exception as cache_exc:
-            logger.warning("sentiment-summary cache write failed: %s", cache_exc)
-            db.rollback()
+            }
+        try:
+            cached, meta = _resolve_ai_payload(
+                db, cache_account, "sentiment-summary", lang, _compute,
+            )
+            highlights = (cached or {}).get("highlights", "")
+        except AIProviderError as exc:
+            # Highlights is enrichment, not the whole payload — degrade in
+            # place rather than failing the entire sentiment summary.
+            logger.info(
+                "sentiment summary highlights unavailable (%s)",
+                exc.__class__.__name__,
+            )
+            highlights = ""
+            meta = {
+                "status": "degraded",
+                "cached": False,
+                "message": exc.user_message,
+                "retry_after_hours": exc.retry_after_hours,
+            }
 
     return {
         "success": True,
@@ -765,6 +752,7 @@ def sentiment_summary(
             "needs_attention": needs_attention,
             "samples": samples,
         },
+        "meta": meta,
     }
 
 

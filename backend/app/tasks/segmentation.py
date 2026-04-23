@@ -2,20 +2,21 @@
 Celery task: K-means audience segmentation.
 
 Clusters posts by engagement patterns, content type, sentiment, and temporal
-features to identify audience archetypes for a social account.
-Uses Google Gemini 1.5 Flash for rich persona descriptions.
+features to identify audience archetypes for a social account. Uses the
+shared AI provider for rich persona descriptions; AI failures degrade to
+empty descriptions without crashing the cluster job.
 """
-import json
+import hashlib
 import logging
 import numpy as np
+from celery.exceptions import Ignore
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, text
 
-import google.generativeai as genai
+from app.core.ai_provider import AIProviderError, get_provider
 from app.core.celery_app import celery
-from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.post import Post
 from app.models.engagement_metric import EngagementMetric
@@ -25,6 +26,12 @@ from app.models.audience_segment import AudienceSegment
 logger = logging.getLogger(__name__)
 
 MIN_POSTS = 10
+
+
+def _advisory_lock_key(social_account_id: str) -> int:
+    """Hash a UUID string to a stable signed 64-bit int for pg_try_advisory_xact_lock."""
+    digest = hashlib.blake2b(str(social_account_id).encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
 
 FEATURE_NAMES = [
     "likes", "comments", "engagement_rate",
@@ -205,60 +212,66 @@ def _generate_cluster_label(centroid: np.ndarray) -> str:
     return f"{eng_label} {content_label}{sentiment_part} {time_label}"
 
 
-def _generate_persona_descriptions(segments_data: list[dict]) -> list[str]:
-    """Call Gemini to generate content-pattern descriptions for each K-means cluster.
+def _generate_persona_descriptions(
+    segments_data: list[dict],
+    account_id: str | None = None,
+) -> list[str]:
+    """Call the personas provider (Gemini) to generate content-pattern
+    descriptions for each K-means cluster.
 
-    Framing: these describe how the creator's *content* performs across format/time
+    These describe how the creator's *content* performs across format/time
     buckets, not audience personas. Each description must begin with
-    'Content posted in the <time> performs like this:' so the reader understands
+    'Content posted in the <time> performs like this:' so the reader sees
     immediately that the cluster is a content pattern, not a person.
-    """
-    if not settings.GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY not set — skipping persona descriptions")
-        return ["" for _ in segments_data]
 
-    try:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            "gemini-2.5-flash-lite",
-            system_instruction=(
-                "You are a content-performance analyst. Given K-means clusters of a creator's "
-                "own posts (NOT audience segments), write a short content-pattern description "
-                "(2-3 sentences) for each cluster. "
-                "Every description MUST start verbatim with: "
-                "'Content posted in the <time> performs like this:' where <time> is the lowercase "
-                "typical_posting_time value provided (morning/afternoon/evening/night). "
-                "After that sentence opener, describe what the content format looks like, how it "
-                "engages, and a concrete takeaway for the creator. Focus on content and timing "
-                "patterns — do NOT describe hypothetical audience members ('this user...', "
-                "'they are...'). Respond ONLY in valid JSON: an array of strings, one description "
-                "per cluster. No preamble, no markdown."
-            ),
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.5,
-            ),
+    AI failures (quota / unavailable / malformed) collapse to empty strings —
+    the cluster job still produces all its DB rows, just without prose.
+    """
+    sys_prompt = (
+        "You are a content-performance analyst. Given K-means clusters of a creator's "
+        "own posts (NOT audience segments), write a short content-pattern description "
+        "(2-3 sentences) for each cluster. "
+        "Every description MUST start verbatim with: "
+        "'Content posted in the <time> performs like this:' where <time> is the lowercase "
+        "typical_posting_time value provided (morning/afternoon/evening/night). "
+        "After that sentence opener, describe what the content format looks like, how it "
+        "engages, and a concrete takeaway for the creator. Focus on content and timing "
+        "patterns — do NOT describe hypothetical audience members ('this user...', "
+        "'they are...'). Respond ONLY in valid JSON: an object with key 'descriptions' "
+        "whose value is an array of strings, one description per cluster. "
+        "No preamble, no markdown."
+    )
+
+    prompt = "Generate content-pattern descriptions for these clusters:\n\n"
+    for i, seg in enumerate(segments_data):
+        prompt += (
+            f"Cluster {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
+            f"dominant content: {seg['dominant_content_type']}, "
+            f"sentiment: {seg['dominant_sentiment']}, "
+            f"typical_posting_time: {seg['typical_posting_time']}, "
+            f"avg likes: {seg['avg_likes']}, avg comments: {seg['avg_comments']}\n"
         )
 
-        prompt = "Generate content-pattern descriptions for these clusters:\n\n"
-        for i, seg in enumerate(segments_data):
-            prompt += (
-                f"Cluster {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
-                f"dominant content: {seg['dominant_content_type']}, "
-                f"sentiment: {seg['dominant_sentiment']}, "
-                f"typical_posting_time: {seg['typical_posting_time']}, "
-                f"avg likes: {seg['avg_likes']}, avg comments: {seg['avg_comments']}\n"
-            )
-
-        response = model.generate_content(prompt)
-        descriptions = json.loads(response.text)
-        if isinstance(descriptions, list) and len(descriptions) == len(segments_data):
-            return descriptions
-        logger.warning("Gemini returned %d descriptions for %d segments", len(descriptions), len(segments_data))
-        return descriptions + [""] * (len(segments_data) - len(descriptions))
-    except Exception as exc:
-        logger.error("Gemini persona generation failed: %s", exc)
+    try:
+        parsed = get_provider("personas").generate_json(
+            sys_prompt, prompt, temperature=0.5,
+            account_id=account_id, task="personas", source="user",
+        )
+    except AIProviderError as exc:
+        logger.warning(
+            "Persona description generation failed (%s) — descriptions will be empty",
+            exc.__class__.__name__,
+        )
         return ["" for _ in segments_data]
+
+    # The provider wraps bare arrays into {"items": [...]} so check both shapes.
+    descriptions = parsed.get("descriptions") or parsed.get("items") or []
+    if not isinstance(descriptions, list):
+        logger.warning("Persona response wasn't a list: %s", type(descriptions).__name__)
+        return ["" for _ in segments_data]
+    if len(descriptions) < len(segments_data):
+        descriptions = list(descriptions) + [""] * (len(segments_data) - len(descriptions))
+    return [str(d) if d else "" for d in descriptions[: len(segments_data)]]
 
 
 def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, silhouette):
@@ -296,8 +309,10 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
             "avg_comments": round(float(centroid[1]), 2),
         })
 
-    # Get AI persona descriptions
-    persona_descriptions = _generate_persona_descriptions(segments_data)
+    # Get AI persona descriptions (best-effort — empty strings on AI failure)
+    persona_descriptions = _generate_persona_descriptions(
+        segments_data, account_id=str(social_account_id),
+    )
 
     for cluster_id in range(k):
         mask = labels_arr == cluster_id
@@ -342,6 +357,21 @@ def segment_audience(self, social_account_id: str):
     """Run K-means segmentation on all posts for a social account."""
     db = SessionLocal()
     try:
+        # Serialize concurrent regenerations for the same account. Without this,
+        # two tasks racing on delete-then-insert would both delete, both insert,
+        # and leave duplicate segment rows. Lock is transaction-scoped — released
+        # automatically when this task's DB transaction ends.
+        acquired = db.execute(
+            text("SELECT pg_try_advisory_xact_lock(:k)"),
+            {"k": _advisory_lock_key(social_account_id)},
+        ).scalar()
+        if not acquired:
+            logger.info(
+                "Skipping duplicate segment_audience for %s (another task holds the advisory lock)",
+                social_account_id,
+            )
+            raise Ignore()
+
         logger.info("Starting segmentation for account %s", social_account_id)
 
         feature_matrix, post_ids = _build_feature_matrix(db, social_account_id)
@@ -371,6 +401,8 @@ def segment_audience(self, social_account_id: str):
             "social_account_id": social_account_id,
         }
 
+    except Ignore:
+        raise
     except Exception as exc:
         db.rollback()
         logger.error("segment_audience failed for %s: %s", social_account_id, exc)

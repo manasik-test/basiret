@@ -11,6 +11,7 @@ For each post without an analysis_result:
 6. Store results in analysis_result table
 """
 import logging
+import re
 
 import httpx
 from langdetect import detect, LangDetectException
@@ -88,18 +89,27 @@ def _detect_language(text: str) -> str:
         return "unknown"
 
 
-def _run_sentiment(text: str) -> tuple[str, float]:
-    """Run sentiment analysis, return (label, score)."""
-    if not text or not text.strip():
-        return "neutral", 0.0
+def _run_sentiment_batch(texts: list[str]) -> list[tuple[str, float]]:
+    """Run sentiment on a list of texts in one pipeline call. Returns one
+    (label, score) per input. Empty/whitespace items short-circuit to
+    ('neutral', 0.0) without being sent to the model."""
+    if not texts:
+        return []
+    non_empty_idx = [i for i, t in enumerate(texts) if t and t.strip()]
+    payload = [texts[i][:512] for i in non_empty_idx]
+    results: list[tuple[str, float]] = [("neutral", 0.0)] * len(texts)
+    if payload:
+        pipe = _get_sentiment_pipeline()
+        raw = pipe(payload, batch_size=32)
+        for idx, r in zip(non_empty_idx, raw):
+            label = LABEL_MAP.get(r["label"], "neutral")
+            results[idx] = (label, round(r["score"], 4))
+    return results
 
-    pipe = _get_sentiment_pipeline()
-    # Truncate to avoid tokenizer issues
-    result = pipe(text[:512])[0]
-    raw_label = result["label"]
-    label = LABEL_MAP.get(raw_label, "neutral")
-    score = round(result["score"], 4)
-    return label, score
+
+def _run_sentiment(text: str) -> tuple[str, float]:
+    """Single-item sentiment. Kept for non-batch callers; internally batches-of-1."""
+    return _run_sentiment_batch([text])[0]
 
 
 def _extract_ocr_text(media_url: str) -> str | None:
@@ -151,50 +161,98 @@ def _build_analysis_text(caption: str, ocr_text: str | None, audio_transcript: s
     return "\n\n".join(parts).strip()
 
 
-def _extract_topics_gemini(text: str, language: str) -> list[str]:
-    """Ask Gemini for 2-3 topics the post is about. Returns [] on any failure
-    (no key, network, parse error) — topics are best-effort metadata."""
-    if not text or not text.strip() or not settings.GEMINI_API_KEY:
-        return []
-    try:
-        import google.generativeai as genai
-        import json as _json
+# Minimal multilingual stop-word lists used by the local extractor.
+# Intentionally small — covers the most frequent particles so the frequency
+# counter isn't dominated by them. Not a substitute for a real keyword model.
+_STOPWORDS_EN = {
+    "the", "and", "for", "that", "this", "with", "you", "your", "are", "was",
+    "but", "not", "have", "has", "had", "from", "our", "they", "them", "what",
+    "when", "where", "will", "just", "too", "all", "any", "can", "out", "get",
+    "got", "one", "two", "about", "into", "there", "here", "more", "some",
+    "than", "then", "now", "also", "been", "their", "these", "those", "like",
+    "over", "very", "much", "such", "its", "who", "why", "how",
+}
+_STOPWORDS_AR = {
+    "من", "في", "على", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك",
+    "هو", "هي", "هم", "أن", "إن", "كان", "كانت", "يكون", "تكون", "لا",
+    "ما", "لم", "لن", "قد", "كل", "بعض", "نحن", "أنت", "أنتم", "بعد",
+    "قبل", "عند", "أو", "ثم", "إذا", "حتى", "لكن", "ولا", "ولكن", "أيضا",
+}
+_WORD_RE = re.compile(r"[\w\u0600-\u06FF]+", re.UNICODE)
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        lang_label = "Arabic" if language == "ar" else "English"
-        model = genai.GenerativeModel(
-            "gemini-2.5-flash-lite",
-            system_instruction=(
-                "You extract topics from social media posts. "
-                "Given a post's text (which may include caption, on-image text, "
-                "and audio transcript), return exactly 2-3 short topic tags that "
-                "describe what the post is ABOUT. "
-                "Topics must be 1-3 words each, lowercased, concrete (e.g. "
-                "'coffee brewing', 'ramadan recipes', 'gym form'), never generic "
-                f"('post', 'content'). Return topics in {lang_label}. "
-                'Respond ONLY as strict JSON: {"topics": ["...", "..."]}'
-            ),
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.3,
-            ),
-        )
-        resp = model.generate_content(text[:2000])
-        parsed = _json.loads(resp.text or "{}")
-        raw = parsed.get("topics") or []
-        topics = [str(t).strip().lower() for t in raw if str(t).strip()]
-        return topics[:3]
-    except Exception as exc:
-        logger.warning("Gemini topic extraction failed: %s", exc)
+
+def _extract_topics_local(text: str, language: str) -> list[str]:
+    """Frequency-based topic extraction with stop-word removal. Zero external
+    calls, zero heavy deps — good enough as a fallback when Gemini is off.
+    Quality is modest: favors nouns that repeat, misses paraphrased ideas."""
+    if not text or not text.strip():
         return []
+    stop = _STOPWORDS_AR if language == "ar" else _STOPWORDS_EN
+    tokens = [t.lower() for t in _WORD_RE.findall(text) if len(t) >= 3]
+    tokens = [t for t in tokens if t not in stop and not t.isdigit()]
+    if not tokens:
+        return []
+    from collections import Counter
+    counts = Counter(tokens)
+    return [w for w, _ in counts.most_common(3)]
+
+
+def _extract_topics_gemini(text: str, language: str) -> list[str]:
+    """Ask the topics provider (Gemini) for 2-3 topics the post is about.
+    Returns [] on any AI failure — topics are best-effort metadata, never a
+    blocker for the analysis pipeline."""
+    if not text or not text.strip():
+        return []
+    from app.core.ai_provider import AIProviderError, get_provider
+
+    lang_label = "Arabic" if language == "ar" else "English"
+    sys_prompt = (
+        "You extract topics from social media posts. "
+        "Given a post's text (which may include caption, on-image text, "
+        "and audio transcript), return exactly 2-3 short topic tags that "
+        "describe what the post is ABOUT. "
+        "Topics must be 1-3 words each, lowercased, concrete (e.g. "
+        "'coffee brewing', 'ramadan recipes', 'gym form'), never generic "
+        f"('post', 'content'). Return topics in {lang_label}. "
+        'Respond ONLY as strict JSON: {"topics": ["...", "..."]}'
+    )
+    try:
+        parsed = get_provider("pages").generate_json(
+            sys_prompt, text[:2000], temperature=0.3,
+            account_id=None, task="pages", source="background",
+        )
+    except AIProviderError as exc:
+        logger.info(
+            "Gemini topic extraction skipped (%s)", exc.__class__.__name__,
+        )
+        return []
+    raw = parsed.get("topics") or parsed.get("items") or []
+    topics = [str(t).strip().lower() for t in raw if str(t).strip()]
+    return topics[:3]
+
+
+def _extract_topics(text: str, language: str) -> list[str]:
+    """Route topic extraction based on settings.POST_TOPIC_EXTRACTOR:
+    'gemini' (default, remote), 'local' (frequency + stop words), or 'off'."""
+    mode = (settings.POST_TOPIC_EXTRACTOR or "gemini").strip().lower()
+    if mode == "off":
+        return []
+    if mode == "local":
+        return _extract_topics_local(text, language)
+    return _extract_topics_gemini(text, language)
 
 
 def _analyze_single_comment(comment: Comment, db: Session) -> bool:
-    """Analyze one comment and insert an analysis_result row."""
+    """Analyze one comment and insert an analysis_result row (single-item path).
+    The batch path `_analyze_comments_batch` is preferred for bulk work."""
     text = (comment.text or "").strip()
     lang = _detect_language(text)
     sentiment, score = _run_sentiment(text)
-    topics = _extract_topics_gemini(text, lang) if text else []
+    topics = (
+        _extract_topics(text, lang)
+        if text and settings.EXTRACT_COMMENT_TOPICS
+        else []
+    )
     result = AnalysisResult(
         comment_id=comment.id,
         sentiment=sentiment,
@@ -207,6 +265,53 @@ def _analyze_single_comment(comment: Comment, db: Session) -> bool:
     )
     db.add(result)
     return True
+
+
+def _analyze_comments_batch(comments: list[Comment], db: Session) -> tuple[int, int]:
+    """Analyze a list of comments using batched sentiment inference.
+    One pipeline call per chunk instead of one per comment. Returns
+    (analyzed, skipped). Safe to call with [] — returns (0, 0)."""
+    if not comments:
+        return 0, 0
+
+    texts = [(c.text or "").strip() for c in comments]
+    langs = [_detect_language(t) for t in texts]
+    try:
+        sentiments = _run_sentiment_batch(texts)
+    except Exception as exc:
+        logger.error("Batch sentiment failed for %d comments: %s", len(comments), exc)
+        return 0, len(comments)
+
+    analyzed = skipped = 0
+    for comment, text, lang, (sentiment, score) in zip(comments, texts, langs, sentiments):
+        try:
+            topics = (
+                _extract_topics(text, lang)
+                if text and settings.EXTRACT_COMMENT_TOPICS
+                else []
+            )
+            db.add(AnalysisResult(
+                comment_id=comment.id,
+                sentiment=sentiment,
+                sentiment_score=score,
+                topics=topics,
+                ocr_text=None,
+                audio_transcript=None,
+                language_detected=lang,
+                model_used=MODEL_NAME,
+            ))
+            analyzed += 1
+            if analyzed % 50 == 0:
+                db.commit()
+                logger.info("Comments progress: %d/%d", analyzed, len(comments))
+        except Exception as exc:
+            logger.error("Failed to store analysis for comment %s: %s", comment.id, exc)
+            db.rollback()
+            skipped += 1
+
+    if analyzed > 0:
+        db.commit()
+    return analyzed, skipped
 
 
 def _analyze_single_post(post: Post, db: Session) -> bool:
@@ -239,8 +344,10 @@ def _analyze_single_post(post: Post, db: Session) -> bool:
     # the actual tone of the content.
     sentiment, score = _run_sentiment(analysis_text)
 
-    # Extract 2-3 topics via Gemini on the combined document
-    topics = _extract_topics_gemini(analysis_text, lang) if analysis_text else []
+    # Extract 2-3 topics — routed via settings.POST_TOPIC_EXTRACTOR
+    # (gemini / local / off). Per-post only — comment topics gated by
+    # EXTRACT_COMMENT_TOPICS.
+    topics = _extract_topics(analysis_text, lang) if analysis_text else []
 
     # Update post language if currently unknown
     if post.language == LanguageCode.unknown and lang != "unknown":
@@ -307,20 +414,8 @@ def analyze_posts(self):
 
         db.commit()
 
-        comments_analyzed = comments_skipped = 0
-        for comment in comments:
-            try:
-                _analyze_single_comment(comment, db)
-                comments_analyzed += 1
-                if comments_analyzed % 25 == 0:
-                    db.commit()
-                    logger.info("Comments progress: %d/%d", comments_analyzed, len(comments))
-            except Exception as exc:
-                logger.error("Failed to analyze comment %s: %s", comment.id, exc)
-                db.rollback()
-                comments_skipped += 1
+        comments_analyzed, comments_skipped = _analyze_comments_batch(comments, db)
 
-        db.commit()
         logger.info(
             "Analysis complete: posts %d/%d, comments %d/%d",
             posts_analyzed, posts_skipped, comments_analyzed, comments_skipped,
@@ -355,19 +450,7 @@ def analyze_comments(self):
         if not comments:
             return {"status": "ok", "analyzed": 0, "skipped": 0}
 
-        analyzed = skipped = 0
-        for comment in comments:
-            try:
-                _analyze_single_comment(comment, db)
-                analyzed += 1
-                if analyzed % 25 == 0:
-                    db.commit()
-            except Exception as exc:
-                logger.error("Failed to analyze comment %s: %s", comment.id, exc)
-                db.rollback()
-                skipped += 1
-
-        db.commit()
+        analyzed, skipped = _analyze_comments_batch(comments, db)
         return {"status": "ok", "analyzed": analyzed, "skipped": skipped}
 
     except Exception as exc:
