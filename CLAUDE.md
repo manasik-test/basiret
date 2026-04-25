@@ -24,6 +24,11 @@ ingestion, analysis, or the Sentiment page should preserve and reinforce it.
 
 ---
 
+## Known debt
+marketing copy is inline in `frontend/src/components/landing/*` and `frontend/src/pages/marketing/*` via the `marketing-i18n.tsx` shim (uses `t("English","Arabic")` calls instead of i18next JSON keys) — not in the `landing.*` namespace of `frontend/src/i18n/{en,ar}.json`. Editing those JSON files will NOT change the marketing site copy. Follow-up: grep `t(` in `components/landing` + `pages/marketing` and migrate to `landing.*` namespace if/when SUS or content review demands a single source of truth.
+
+---
+
 ## Tech Stack (locked)
 - **Backend:** Python + FastAPI, SQLAlchemy, Alembic, Celery + Redis
 - **Database:** PostgreSQL (multi-tenant)

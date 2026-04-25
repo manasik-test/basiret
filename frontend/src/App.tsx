@@ -1,9 +1,10 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Swords, TrendingUp } from 'lucide-react'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
-import Landing from './pages/Landing'
+import MarketingLayout from './components/layout/MarketingLayout'
 import Dashboard from './pages/Dashboard'
 import Analytics from './pages/Analytics'
 import Audience from './pages/Audience'
@@ -18,14 +19,73 @@ import AskBasiretRedirect from './pages/AskBasiretRedirect'
 import MyGoals from './pages/MyGoals'
 import { useLanguageCacheInvalidation } from './hooks/useAnalytics'
 
+// Marketing routes are lazy-loaded — they ship Framer Motion + WebGL on top
+// of an already-large app bundle, so deferring keeps auth/dashboard cold-start
+// fast for returning users.
+const Home = lazy(() => import('./pages/marketing/Home'))
+const PricingPage = lazy(() => import('./pages/marketing/Pricing'))
+const PrivacyPage = lazy(() => import('./pages/marketing/Privacy'))
+const TermsPage = lazy(() => import('./pages/marketing/Terms'))
+const BlogIndexPage = lazy(() => import('./pages/marketing/blog/BlogIndex'))
+const BlogPostPage = lazy(() => import('./pages/marketing/blog/BlogPost'))
+const InstagramChannel = lazy(() => import('./pages/marketing/channels/Instagram'))
+const FacebookChannel = lazy(() => import('./pages/marketing/channels/Facebook'))
+const TikTokChannel = lazy(() => import('./pages/marketing/channels/TikTok'))
+const LinkedInChannel = lazy(() => import('./pages/marketing/channels/LinkedIn'))
+const XChannel = lazy(() => import('./pages/marketing/channels/X'))
+const FeatureAudience = lazy(() => import('./pages/marketing/features/Audience'))
+const FeatureActionPlan = lazy(() => import('./pages/marketing/features/ActionPlan'))
+const FeatureContentPlanner = lazy(() => import('./pages/marketing/features/ContentPlanner'))
+const FeatureCompetitors = lazy(() => import('./pages/marketing/features/Competitors'))
+const FeatureAiAdvisor = lazy(() => import('./pages/marketing/features/AiAdvisor'))
+const ForSmallBusiness = lazy(() => import('./pages/marketing/for/SmallBusiness'))
+const ForCreators = lazy(() => import('./pages/marketing/for/Creators'))
+const ForAgencies = lazy(() => import('./pages/marketing/for/Agencies'))
+const ForEnterprise = lazy(() => import('./pages/marketing/for/Enterprise'))
+
+function MarketingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="size-8 rounded-full border-2 border-[#664FA1]/20 border-t-[#664FA1] animate-spin" />
+    </div>
+  )
+}
+
 export default function App() {
   useLanguageCacheInvalidation()
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* Public landing page */}
-          <Route path="/" element={<Landing />} />
+          {/* Public marketing routes (22 total) — all share MarketingLayout (Navbar + Footer) */}
+          <Route
+            element={
+              <Suspense fallback={<MarketingFallback />}>
+                <MarketingLayout />
+              </Suspense>
+            }
+          >
+            <Route index element={<Home />} />
+            <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/blog" element={<BlogIndexPage />} />
+            <Route path="/blog/:slug" element={<BlogPostPage />} />
+            <Route path="/channels/instagram" element={<InstagramChannel />} />
+            <Route path="/channels/facebook" element={<FacebookChannel />} />
+            <Route path="/channels/tiktok" element={<TikTokChannel />} />
+            <Route path="/channels/linkedin" element={<LinkedInChannel />} />
+            <Route path="/channels/x" element={<XChannel />} />
+            <Route path="/features/audience" element={<FeatureAudience />} />
+            <Route path="/features/action-plan" element={<FeatureActionPlan />} />
+            <Route path="/features/content-planner" element={<FeatureContentPlanner />} />
+            <Route path="/features/competitors" element={<FeatureCompetitors />} />
+            <Route path="/features/ai-advisor" element={<FeatureAiAdvisor />} />
+            <Route path="/for/small-business" element={<ForSmallBusiness />} />
+            <Route path="/for/creators" element={<ForCreators />} />
+            <Route path="/for/agencies" element={<ForAgencies />} />
+            <Route path="/for/enterprise" element={<ForEnterprise />} />
+          </Route>
 
           {/* Public: registration is step 1 of the onboarding wizard */}
           <Route path="/register" element={<Onboarding />} />

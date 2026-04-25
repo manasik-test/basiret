@@ -17,4 +17,15 @@ i18n
     interpolation: { escapeValue: false },
   })
 
+// Keep <html dir> and <html lang> in sync globally — runs for every route
+// including public marketing pages, where the app-shell sync (Sidebar/TopBar)
+// is not mounted.
+const syncDocumentDirection = (lang: string) => {
+  const isAr = lang.toLowerCase().startsWith('ar')
+  document.documentElement.dir = isAr ? 'rtl' : 'ltr'
+  document.documentElement.lang = isAr ? 'ar' : 'en'
+}
+syncDocumentDirection(i18n.language || 'en')
+i18n.on('languageChanged', syncDocumentDirection)
+
 export default i18n

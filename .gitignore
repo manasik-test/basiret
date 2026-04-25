@@ -22,3 +22,17 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Claude Code / Playwright MCP / Vite cache (CLI + IDE runtime artefacts)
+.claude/
+.playwright-mcp/
+.vite/
+*.tsbuildinfo
+
+# Celery Beat runtime schedule file
+backend/celerybeat-schedule
+
+# Ad-hoc debug screenshots at repo root
+/*-check.png
+/analytics-final.png
+/content-plan-english.png
