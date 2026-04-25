@@ -54,3 +54,15 @@ export async function fetchMe(): Promise<AuthUser> {
   const res = await api.get<unknown, MeResponse>('/auth/me')
   return res.data
 }
+
+export async function updateProfile(fullName: string): Promise<AuthUser> {
+  const res = await api.patch<unknown, MeResponse>('/auth/profile', { full_name: fullName })
+  return res.data
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await api.post('/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  })
+}

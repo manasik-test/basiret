@@ -11,6 +11,8 @@ from app.models.feature_flag import FeatureFlag
 from app.models.insight_result import InsightResult
 from app.models.ai_page_cache import AiPageCache
 from app.models.ai_usage_log import AiUsageLog
+from app.models.goal import Goal, GoalMetric, GoalPeriod
+from app.models.recommendation_feedback import RecommendationFeedback, FeedbackKind
 
 __all__ = [
     "Organization",
@@ -26,4 +28,6 @@ __all__ = [
     "InsightResult",
     "AiPageCache",
     "AiUsageLog",
+    "Goal", "GoalMetric", "GoalPeriod",
+    "RecommendationFeedback", "FeedbackKind",
 ]

@@ -7,6 +7,7 @@ import { useAccounts } from '../hooks/useAnalytics'
 import { useSubscription, useIsFeatureLocked } from '../hooks/useBilling'
 import { createCheckout } from '../api/billing'
 import { fetchInstagramAuthUrl, disconnectInstagramAccount } from '../api/instagram'
+import { updateProfile as apiUpdateProfile, changePassword as apiChangePassword } from '../api/auth'
 import api from '../api/client'
 import LockedFeature from '../components/LockedFeature'
 import { cn } from '../lib/utils'
@@ -27,24 +28,46 @@ type TabKey = typeof tabs[number]['key']
 
 function ProfileTab() {
   const { t } = useTranslation()
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
   const [name, setName] = useState(user?.full_name || '')
   const [email] = useState(user?.email || '')
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
   const [profileSaved, setProfileSaved] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileError, setProfileError] = useState('')
   const [pwError, setPwError] = useState('')
   const [pwSaved, setPwSaved] = useState(false)
+  const [pwSaving, setPwSaving] = useState(false)
 
-  function handleSaveProfile(e: React.FormEvent) {
+  async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault()
-    // No backend endpoint yet — show success feedback
-    setProfileSaved(true)
-    setTimeout(() => setProfileSaved(false), 3000)
+    setProfileError('')
+    setProfileSaved(false)
+
+    const trimmed = name.trim()
+    if (trimmed.length < 2) {
+      setProfileError(t('settings.nameTooShort'))
+      return
+    }
+
+    setProfileSaving(true)
+    try {
+      const updated = await apiUpdateProfile(trimmed)
+      updateUser(updated)
+      setProfileSaved(true)
+      setTimeout(() => setProfileSaved(false), 3000)
+    } catch (err) {
+      setProfileError(
+        err instanceof Error ? err.message : t('settings.profileSaveError'),
+      )
+    } finally {
+      setProfileSaving(false)
+    }
   }
 
-  function handleChangePassword(e: React.FormEvent) {
+  async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault()
     setPwError('')
     setPwSaved(false)
@@ -52,12 +75,26 @@ function ProfileTab() {
       setPwError(t('settings.passwordMismatch'))
       return
     }
-    // No backend endpoint yet — show success feedback
-    setPwSaved(true)
-    setCurrentPw('')
-    setNewPw('')
-    setConfirmPw('')
-    setTimeout(() => setPwSaved(false), 3000)
+    if (newPw.length < 8) {
+      setPwError(t('auth.passwordTooShort'))
+      return
+    }
+
+    setPwSaving(true)
+    try {
+      await apiChangePassword(currentPw, newPw)
+      setPwSaved(true)
+      setCurrentPw('')
+      setNewPw('')
+      setConfirmPw('')
+      setTimeout(() => setPwSaved(false), 3000)
+    } catch (err) {
+      setPwError(
+        err instanceof Error ? err.message : t('settings.passwordChangeError'),
+      )
+    } finally {
+      setPwSaving(false)
+    }
   }
 
   return (
@@ -82,11 +119,20 @@ function ProfileTab() {
             className="glass w-full rounded-lg px-4 py-2.5 text-sm text-muted-foreground cursor-not-allowed"
           />
         </div>
+        {profileError && <p className="text-xs text-red-500">{profileError}</p>}
+        {profileSaved && (
+          <p className="text-xs text-green-600">{t('settings.profileUpdated')}</p>
+        )}
         <button
           type="submit"
-          className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
+          disabled={profileSaving}
+          className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
         >
-          {profileSaved ? t('settings.saved') : t('settings.saveProfile')}
+          {profileSaving
+            ? t('settings.saving')
+            : profileSaved
+            ? t('settings.saved')
+            : t('settings.saveProfile')}
         </button>
       </form>
 
@@ -124,9 +170,10 @@ function ProfileTab() {
         {pwSaved && <p className="text-xs text-green-600">{t('settings.passwordUpdated')}</p>}
         <button
           type="submit"
-          className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
+          disabled={pwSaving}
+          className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
         >
-          {t('settings.changePassword')}
+          {pwSaving ? t('settings.saving') : t('settings.changePassword')}
         </button>
       </form>
     </div>

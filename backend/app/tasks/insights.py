@@ -437,3 +437,27 @@ def generate_weekly_insights(self, social_account_id: str, language: str = "Engl
         raise self.retry(exc=exc, countdown=120)
     finally:
         db.close()
+
+
+@celery.task(name="generate_insights_all_accounts")
+def generate_insights_all_accounts():
+    """Queue weekly insight generation for every active social account, EN + AR.
+
+    Scheduled via Celery Beat (weekly Sun 03:00 UTC). Uses `.delay()` so each
+    per-account run is independently retryable and their failures don't cascade.
+    """
+    db = SessionLocal()
+    try:
+        accounts = db.query(SocialAccount).filter(SocialAccount.is_active == True).all()  # noqa: E712
+        queued = 0
+        for account in accounts:
+            generate_weekly_insights.delay(str(account.id), "English")
+            generate_weekly_insights.delay(str(account.id), "Arabic")
+            queued += 2
+        logger.info(
+            "Queued %d insight tasks across %d accounts",
+            queued, len(accounts),
+        )
+        return {"status": "ok", "accounts": len(accounts), "tasks_queued": queued}
+    finally:
+        db.close()

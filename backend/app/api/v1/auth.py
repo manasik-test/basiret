@@ -10,7 +10,7 @@ GET  /me        — return current user profile
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -54,6 +54,15 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 # ── Helpers ─────────────────────────────────────────────────
@@ -230,3 +239,54 @@ def me(user: User = Depends(get_current_user)):
             "organization_name": user.organization.name,
         },
     }
+
+
+@router.patch("/profile")
+def update_profile(
+    body: UpdateProfileRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's profile (full_name only for now)."""
+    user.full_name = body.full_name.strip()
+    db.commit()
+    db.refresh(user)
+    return {
+        "success": True,
+        "data": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.value,
+            "organization_id": str(user.organization_id),
+            "organization_name": user.organization.name,
+        },
+    }
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Verify current password, update to new one, and rotate refresh token."""
+    if not user.hashed_password or not verify_password(body.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    user.hashed_password = hash_password(body.new_password)
+    db.commit()
+
+    # Rotate refresh token: blacklist the old one (if present), issue a new cookie
+    old_token = request.cookies.get(REFRESH_COOKIE)
+    if old_token:
+        payload = decode_token(old_token)
+        if payload and payload.get("jti"):
+            blacklist_refresh_token(payload["jti"])
+
+    new_refresh, _ = create_refresh_token(str(user.id))
+    _set_refresh_cookie(response, new_refresh)
+
+    return {"success": True, "data": None}

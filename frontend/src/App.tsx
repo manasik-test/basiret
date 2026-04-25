@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Swords, TrendingUp, Target } from 'lucide-react'
+import { Swords, TrendingUp } from 'lucide-react'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
@@ -15,6 +15,7 @@ import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
 import ComingSoon from './pages/ComingSoon'
 import AskBasiretRedirect from './pages/AskBasiretRedirect'
+import MyGoals from './pages/MyGoals'
 import { useLanguageCacheInvalidation } from './hooks/useAnalytics'
 
 export default function App() {
@@ -106,7 +107,7 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AppLayout>
-                  <ComingSoon titleKey="nav.myGoals" questionKey="comingSoon.myGoalsQ" icon={Target} />
+                  <MyGoals />
                 </AppLayout>
               </ProtectedRoute>
             }

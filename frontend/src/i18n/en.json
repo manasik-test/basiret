@@ -21,6 +21,40 @@
     "myGoalsQ": "What growth goals are you chasing, and how close are you to hitting them?",
     "askBasiretQ": "Ask Basiret anything about your audience, your content, or your next move."
   },
+  "myGoalsPage": {
+    "title": "My Goals",
+    "subtitle": "Set Instagram growth targets and track progress against real data.",
+    "addGoal": "Add Goal",
+    "emptyTitle": "Set your first goal to start tracking progress",
+    "emptySubtitle": "Pick a metric you care about and define a target. We'll update the numbers every time your data syncs.",
+    "maxGoalsReached": "You've reached the max of 4 active goals. Delete one to add another.",
+    "statusOnTrack": "On Track",
+    "statusInProgress": "In Progress",
+    "statusNeedsWork": "Needs Work",
+    "of": "of",
+    "current": "Current",
+    "target": "Target",
+    "period": "Period",
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "deleteGoal": "Delete goal",
+    "deleteConfirm": "Delete this goal? You can always create it again.",
+    "modalTitle": "Add a goal",
+    "metric": "Metric",
+    "targetValue": "Target value",
+    "save": "Save",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "saveError": "Could not save your goal. Please try again.",
+    "metrics": {
+      "avg_engagement_rate": "Average engagement per post",
+      "posts_per_week": "Posts per week",
+      "positive_sentiment_pct": "Positive sentiment %",
+      "follower_growth_pct": "Follower growth %"
+    },
+    "followerGrowthHint": "Follower counts aren't available on this Instagram plan yet — we'll track this once we can read them.",
+    "noAccount": "Connect Instagram first to set growth goals."
+  },
   "askBasiret": {
     "title": "Ask Basiret",
     "subtitle": "Grounded in your own data",
@@ -359,7 +393,16 @@
     "languageUnknown": "Unknown",
     "languageAvgEng": "Avg engagement: {{value}}",
     "languageInsight": "Insight",
-    "languageWinner": "{{language}} posts get better engagement ({{value}} avg). Consider leaning into what's working."
+    "languageWinner": "{{language}} posts get better engagement ({{value}} avg). Consider leaning into what's working.",
+    "hashtagsTitle": "Hashtag Performance",
+    "hashtagsSubtitle": "Which hashtags drive the most engagement",
+    "hashtagCol": "Hashtag",
+    "usesCol": "Uses",
+    "avgEngagementCol": "Avg engagement",
+    "vsBaselineCol": "vs baseline",
+    "showAll": "Show all",
+    "showLess": "Show less",
+    "hashtagsEmpty": "Not enough hashtag data yet — post more content with hashtags"
   },
   "myAudiencePage": {
     "question": "Who is your audience this week, what do they want, and when should you reach them?",
@@ -500,6 +543,10 @@
     "nextBilling": "Next billing date",
     "passwordMismatch": "Passwords do not match",
     "passwordUpdated": "Password updated successfully",
+    "profileUpdated": "Profile updated",
+    "profileSaveError": "Failed to update profile. Please try again.",
+    "passwordChangeError": "Failed to change password. Please try again.",
+    "nameTooShort": "Name must be at least 2 characters",
     "reportsTab": "Reports",
     "reportsTitle": "Weekly Report",
     "reportsDesc": "Generate a branded PDF summary of the last 7 days — KPIs, top actions, top posts, and sentiment breakdown. Pro feature.",
@@ -527,7 +574,9 @@
     "nextBestTime": "Next best time to post",
     "high": "High",
     "medium": "Medium",
-    "low": "Low"
+    "low": "Low",
+    "feedbackHelpful": "Helpful",
+    "feedbackNotHelpful": "Not helpful"
   },
   "common": {
     "language": "English"

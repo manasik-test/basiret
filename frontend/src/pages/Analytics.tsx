@@ -3,10 +3,13 @@ import { useTranslation } from 'react-i18next'
 import {
   Sparkles, TrendingUp, AlertTriangle, ArrowRight, Image, Video, Layers, Film,
   Wand2, Check, Copy, ExternalLink, Loader2, ScanText, ChevronDown, ChevronUp,
-  Languages,
+  Languages, Hash,
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { usePostsBreakdown, usePostsInsights, useGenerateCaption, useAccounts } from '../hooks/useAnalytics'
+import {
+  usePostsBreakdown, usePostsInsights, useGenerateCaption, useAccounts,
+  useHashtagPerformance,
+} from '../hooks/useAnalytics'
 import TopPostsTable from '../components/dashboard/TopPostsTable'
 
 const typeLabels: Record<string, string> = {
@@ -418,6 +421,126 @@ function LanguageBreakdown() {
   )
 }
 
+/* ── Hashtag performance card ──────────────────────────────────────────── */
+
+function HashtagPerformance() {
+  const { t } = useTranslation()
+  const { data, isLoading } = useHashtagPerformance(30)
+  const [expanded, setExpanded] = useState(false)
+
+  if (isLoading) return null
+  if (!data || data.hashtags.length === 0) {
+    return (
+      <div className="glass rounded-2xl p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Hash className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-bold text-foreground">
+            {t('myPostsPage.hashtagsTitle')}
+          </h2>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          {t('myPostsPage.hashtagsSubtitle')}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {t('myPostsPage.hashtagsEmpty')}
+        </p>
+      </div>
+    )
+  }
+
+  const visible = expanded ? data.hashtags : data.hashtags.slice(0, 10)
+  const canToggle = data.hashtags.length > 10
+
+  return (
+    <div className="glass rounded-2xl p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <Hash className="w-5 h-5 text-primary" />
+        <h2 className="text-lg font-bold text-foreground">
+          {t('myPostsPage.hashtagsTitle')}
+        </h2>
+      </div>
+      <p className="text-xs text-muted-foreground mb-4">
+        {t('myPostsPage.hashtagsSubtitle')}
+      </p>
+
+      <div dir="ltr" className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-primary/10">
+              <th className="text-left py-2 px-2 font-semibold">
+                {t('myPostsPage.hashtagCol')}
+              </th>
+              <th className="text-right py-2 px-2 font-semibold">
+                {t('myPostsPage.usesCol')}
+              </th>
+              <th className="text-right py-2 px-2 font-semibold">
+                {t('myPostsPage.avgEngagementCol')}
+              </th>
+              <th className="text-right py-2 px-2 font-semibold">
+                {t('myPostsPage.vsBaselineCol')}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((h, idx) => {
+              const highlight = idx < 3
+              const positive = h.avg_engagement_delta > 0
+              const zero = h.avg_engagement_delta === 0
+              return (
+                <tr
+                  key={h.hashtag}
+                  className={`border-b border-primary/5 ${
+                    highlight ? 'bg-primary/5' : ''
+                  }`}
+                >
+                  <td className="py-2 px-2 font-medium text-foreground">
+                    #{h.hashtag}
+                  </td>
+                  <td className="py-2 px-2 text-right text-foreground/80 tabular-nums">
+                    {h.uses}
+                  </td>
+                  <td className="py-2 px-2 text-right text-foreground/80 tabular-nums">
+                    {h.avg_engagement}
+                  </td>
+                  <td className="py-2 px-2 text-right">
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${
+                        zero
+                          ? 'bg-slate-100 text-slate-600'
+                          : positive
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-rose-50 text-rose-700'
+                      }`}
+                    >
+                      {positive && '+'}
+                      {h.avg_engagement_delta}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {canToggle ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          {expanded ? t('myPostsPage.showLess') : t('myPostsPage.showAll')}
+          {expanded ? (
+            <ChevronUp className="w-3 h-3" />
+          ) : (
+            <ChevronDown className="w-3 h-3" />
+          )}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 /* ── Page ──────────────────────────────────────────────────────────────── */
 
 export default function Analytics() {
@@ -443,6 +566,7 @@ export default function Analytics() {
         </h2>
       </div>
       <ContentTypeChart />
+      <HashtagPerformance />
       <LanguageBreakdown />
       <TopPostsTable />
     </div>

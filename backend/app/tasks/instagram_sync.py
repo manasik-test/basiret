@@ -11,9 +11,10 @@ endpoint returns 400/403 — this task logs and skips, so post sync still
 succeeds. See CLAUDE.md (Sprint 9 / OAuth scope notes) for scope upgrade plan.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import httpx
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.celery_app import celery
@@ -223,5 +224,62 @@ def sync_instagram_posts(self, social_account_id: str):
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+@celery.task(name="sync_all_active_accounts")
+def sync_all_active_accounts():
+    """Queue instagram sync for every active account with a token.
+
+    Skips accounts whose last post was synced less than 20 hours ago to avoid
+    hammering the Instagram Graph API (200 calls/hour/user rate limit).
+    Scheduled via Celery Beat (daily 02:00 UTC).
+    """
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        twenty_hours_ago = now - timedelta(hours=20)
+
+        accounts = db.query(SocialAccount).filter(
+            SocialAccount.is_active == True,  # noqa: E712
+            SocialAccount.access_token_encrypted.isnot(None),
+        ).all()
+
+        queued = 0
+        skipped_recent = 0
+        skipped_no_token = 0
+        for account in accounts:
+            if not account.access_token_encrypted:
+                skipped_no_token += 1
+                continue
+
+            # Last sync proxy: newest EngagementMetric.recorded_at across this
+            # account's posts. `sync_instagram_posts` appends a metric row on
+            # every run, so this is a reliable "last synced" marker.
+            last_metric = (
+                db.query(func.max(EngagementMetric.recorded_at))
+                .join(Post, EngagementMetric.post_id == Post.id)
+                .filter(Post.social_account_id == account.id)
+                .scalar()
+            )
+            if last_metric and last_metric >= twenty_hours_ago:
+                skipped_recent += 1
+                continue
+
+            sync_instagram_posts.delay(str(account.id))
+            queued += 1
+
+        logger.info(
+            "Scheduled sync: queued=%d skipped_recent=%d skipped_no_token=%d total=%d",
+            queued, skipped_recent, skipped_no_token, len(accounts),
+        )
+        return {
+            "status": "ok",
+            "accounts": len(accounts),
+            "queued": queued,
+            "skipped_recent": skipped_recent,
+            "skipped_no_token": skipped_no_token,
+        }
     finally:
         db.close()

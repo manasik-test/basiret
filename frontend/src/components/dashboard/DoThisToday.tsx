@@ -1,9 +1,15 @@
 import { useTranslation } from 'react-i18next'
-import { Sparkles, RefreshCw, ArrowRight, Clock, AlertTriangle, Zap } from 'lucide-react'
-import { useInsights, useGenerateInsights } from '../../hooks/useAnalytics'
+import {
+  Sparkles, RefreshCw, ArrowRight, Clock, AlertTriangle, Zap,
+  ThumbsUp, ThumbsDown,
+} from 'lucide-react'
+import {
+  useInsights, useGenerateInsights,
+  useRecommendationFeedback, useSubmitRecommendationFeedback,
+} from '../../hooks/useAnalytics'
 import { useIsFeatureLocked } from '../../hooks/useBilling'
 import LockedFeature from '../LockedFeature'
-import type { InsightAction } from '../../api/analytics'
+import type { InsightAction, RecFeedback } from '../../api/analytics'
 
 const priorityConfig: Record<string, { color: string; bg: string; icon: React.ReactNode; label: string }> = {
   high: { color: '#BF499B', bg: '#BF499B20', icon: <AlertTriangle className="w-3.5 h-3.5" />, label: 'High' },
@@ -11,9 +17,28 @@ const priorityConfig: Record<string, { color: string; bg: string; icon: React.Re
   low: { color: '#A5DDEC', bg: '#A5DDEC40', icon: <Clock className="w-3.5 h-3.5" />, label: 'Low' },
 }
 
-function InsightCard({ insight }: { insight: InsightAction }) {
+function InsightCard({
+  insight,
+  insightResultId,
+  currentVote,
+}: {
+  insight: InsightAction
+  insightResultId: string | null
+  currentVote: RecFeedback | null
+}) {
   const { t } = useTranslation()
   const cfg = priorityConfig[insight.priority] || priorityConfig.medium
+  const submit = useSubmitRecommendationFeedback()
+
+  const recommendationText = insight.action || insight.title
+
+  function onVote(feedback: RecFeedback) {
+    submit.mutate({
+      recommendation_text: recommendationText,
+      feedback,
+      insight_result_id: insightResultId,
+    })
+  }
 
   return (
     <div className="glass rounded-xl p-4 flex flex-col gap-2 hover:shadow-md transition-shadow">
@@ -30,7 +55,41 @@ function InsightCard({ insight }: { insight: InsightAction }) {
       <p className="text-xs text-muted-foreground leading-relaxed">{insight.action}</p>
       <div className="flex items-center justify-between mt-auto pt-1">
         <span className="text-[10px] text-muted-foreground">{insight.timeframe}</span>
-        <span className="text-[10px] text-primary font-medium">{insight.expected_impact}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-primary font-medium">{insight.expected_impact}</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onVote('helpful')}
+              aria-label={t('insights.feedbackHelpful')}
+              title={t('insights.feedbackHelpful')}
+              className="p-1 rounded-md transition-colors hover:bg-emerald-50"
+            >
+              <ThumbsUp
+                className={`w-3.5 h-3.5 ${
+                  currentVote === 'helpful'
+                    ? 'fill-emerald-500 text-emerald-500'
+                    : 'text-muted-foreground'
+                }`}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => onVote('not_helpful')}
+              aria-label={t('insights.feedbackNotHelpful')}
+              title={t('insights.feedbackNotHelpful')}
+              className="p-1 rounded-md transition-colors hover:bg-rose-50"
+            >
+              <ThumbsDown
+                className={`w-3.5 h-3.5 ${
+                  currentVote === 'not_helpful'
+                    ? 'fill-rose-500 text-rose-500'
+                    : 'text-muted-foreground'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -40,8 +99,13 @@ function DoThisTodayContent() {
   const { t } = useTranslation()
   const { data: insight, isLoading } = useInsights()
   const generate = useGenerateInsights()
+  const { data: feedbackList } = useRecommendationFeedback()
 
   const topActions = insight?.insights?.slice(0, 3) ?? []
+
+  const feedbackMap = new Map<string, RecFeedback>(
+    (feedbackList?.feedback ?? []).map((f) => [f.recommendation_text, f.feedback]),
+  )
 
   return (
     <div className="glass rounded-2xl p-5 space-y-4">
@@ -100,7 +164,12 @@ function DoThisTodayContent() {
       ) : topActions.length > 0 ? (
         <div className="grid grid-cols-1 gap-3">
           {topActions.map((action, i) => (
-            <InsightCard key={i} insight={action} />
+            <InsightCard
+              key={i}
+              insight={action}
+              insightResultId={insight?.id ?? null}
+              currentVote={feedbackMap.get(action.action || action.title) ?? null}
+            />
           ))}
         </div>
       ) : (

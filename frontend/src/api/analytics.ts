@@ -138,6 +138,27 @@ export async function fetchPostsBreakdown(): Promise<PostsBreakdownData> {
   return res.data
 }
 
+export interface HashtagPerformanceEntry {
+  hashtag: string
+  uses: number
+  avg_engagement: number
+  avg_engagement_delta: number
+  best_content_type: string
+}
+
+export interface HashtagPerformanceData {
+  hashtags: HashtagPerformanceEntry[]
+  account_baseline_avg: number
+  total_posts_analyzed: number
+}
+
+export async function fetchHashtagPerformance(days = 30): Promise<HashtagPerformanceData> {
+  const res = await api.get<unknown, ApiResponse<HashtagPerformanceData>>(
+    `/analytics/hashtags?days=${days}`,
+  )
+  return res.data
+}
+
 export interface TopPost {
   id: string
   caption: string
@@ -194,6 +215,36 @@ export interface InsightData {
 export async function fetchInsights(lang: 'en' | 'ar' = 'en'): Promise<InsightData | null> {
   const res = await api.get<unknown, ApiResponse<InsightData | null>>(
     `/analytics/insights?lang=${lang}`,
+  )
+  return res.data
+}
+
+export type RecFeedback = 'helpful' | 'not_helpful'
+
+export interface RecommendationFeedbackEntry {
+  recommendation_text: string
+  feedback: RecFeedback
+}
+
+export interface RecommendationFeedbackList {
+  feedback: RecommendationFeedbackEntry[]
+}
+
+export async function fetchRecommendationFeedback(): Promise<RecommendationFeedbackList> {
+  const res = await api.get<unknown, ApiResponse<RecommendationFeedbackList>>(
+    '/analytics/insights/feedback',
+  )
+  return res.data
+}
+
+export async function submitRecommendationFeedback(body: {
+  recommendation_text: string
+  feedback: RecFeedback
+  insight_result_id?: string | null
+}): Promise<RecommendationFeedbackEntry> {
+  const res = await api.post<unknown, ApiResponse<RecommendationFeedbackEntry & { id: string }>>(
+    '/analytics/insights/feedback',
+    body,
   )
   return res.data
 }

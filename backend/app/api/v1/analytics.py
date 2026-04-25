@@ -21,7 +21,9 @@ from typing import Literal
 
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func, cast, Date
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.ai_degradation import build_fresh_meta
@@ -36,6 +38,7 @@ from app.models.engagement_metric import EngagementMetric
 from app.models.social_account import SocialAccount
 from app.models.audience_segment import AudienceSegment
 from app.models.insight_result import InsightResult
+from app.models.recommendation_feedback import RecommendationFeedback, FeedbackKind
 from app.tasks.nlp_analysis import analyze_posts
 from app.tasks.segmentation import segment_audience
 from app.tasks.insights import generate_weekly_insights
@@ -317,6 +320,121 @@ def posts_breakdown(
             "by_type": by_type,
             "posting_dates": posting_dates,
             "by_language": by_language,
+        },
+    }
+
+
+@router.get("/hashtags")
+def hashtag_performance(
+    account_id: str | None = None,
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return hashtag performance for the user's organization.
+
+    Extracts hashtags from post captions via regex, groups by tag, and
+    computes avg engagement (likes + comments) per tag. Filters out one-off
+    hashtags (uses < 2). Returns top 20 by avg_engagement desc, plus the
+    account's baseline avg so the frontend can show relative deltas.
+    """
+    # Clamp inputs
+    days = max(1, min(days, 365))
+
+    accounts_q = db.query(SocialAccount).filter(
+        SocialAccount.organization_id == user.organization_id,
+        SocialAccount.is_active == True,  # noqa: E712
+    )
+    if account_id:
+        accounts_q = accounts_q.filter(SocialAccount.id == account_id)
+    account_ids = [a.id for a in accounts_q.all()]
+
+    if not account_ids:
+        return {
+            "success": True,
+            "data": {
+                "hashtags": [],
+                "account_baseline_avg": 0.0,
+                "total_posts_analyzed": 0,
+            },
+        }
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = (
+        db.query(
+            Post.id,
+            Post.caption,
+            Post.content_type,
+            func.coalesce(func.sum(EngagementMetric.likes), 0).label("likes"),
+            func.coalesce(func.sum(EngagementMetric.comments), 0).label("comments"),
+        )
+        .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.social_account_id.in_(account_ids))
+        .filter(Post.posted_at >= since)
+        .filter(Post.caption.isnot(None))
+        .group_by(Post.id, Post.caption, Post.content_type)
+        .all()
+    )
+
+    if not rows:
+        return {
+            "success": True,
+            "data": {
+                "hashtags": [],
+                "account_baseline_avg": 0.0,
+                "total_posts_analyzed": 0,
+            },
+        }
+
+    # Account-wide baseline = avg engagement across all posts in window
+    total_engagement = sum(int(r.likes or 0) + int(r.comments or 0) for r in rows)
+    baseline = round(total_engagement / len(rows), 2) if rows else 0.0
+
+    # Per-hashtag accumulator
+    # { tag: { "engagements": [..], "types": {image: n, video: n, ...} } }
+    hashtag_re = re.compile(r"#(\w+)", re.UNICODE)
+    tag_data: dict[str, dict] = {}
+    for r in rows:
+        engagement = int(r.likes or 0) + int(r.comments or 0)
+        ct = r.content_type.value if r.content_type else "unknown"
+        tags = hashtag_re.findall(r.caption or "")
+        # Dedupe per post so a caption with "#sale #sale" doesn't double-count
+        for tag in {t.lower() for t in tags}:
+            bucket = tag_data.setdefault(
+                tag, {"engagements": [], "types": {}}
+            )
+            bucket["engagements"].append(engagement)
+            bucket["types"][ct] = bucket["types"].get(ct, 0) + 1
+
+    hashtags: list[dict] = []
+    for tag, bucket in tag_data.items():
+        uses = len(bucket["engagements"])
+        if uses < 2:
+            continue
+        avg_eng = round(sum(bucket["engagements"]) / uses, 2)
+        # Pick the content type this tag appears most in; ties resolve alphabetically
+        best_type = (
+            max(bucket["types"].items(), key=lambda kv: (kv[1], kv[0]))[0]
+            if bucket["types"]
+            else "unknown"
+        )
+        hashtags.append({
+            "hashtag": tag,
+            "uses": uses,
+            "avg_engagement": avg_eng,
+            "avg_engagement_delta": round(avg_eng - baseline, 2),
+            "best_content_type": best_type,
+        })
+
+    hashtags.sort(key=lambda h: h["avg_engagement"], reverse=True)
+
+    return {
+        "success": True,
+        "data": {
+            "hashtags": hashtags[:20],
+            "account_baseline_avg": baseline,
+            "total_posts_analyzed": len(rows),
         },
     }
 
@@ -933,6 +1051,137 @@ def get_insights(
             "next_best_time": insight.next_best_time,
             "language": insight.language,
             "generated_at": str(insight.generated_at),
+        },
+    }
+
+
+class RecFeedbackRequest(BaseModel):
+    recommendation_text: str = Field(min_length=1)
+    feedback: FeedbackKind
+    insight_result_id: str | None = None
+
+
+@router.post("/insights/feedback")
+def submit_recommendation_feedback(
+    body: RecFeedbackRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Record a helpful / not-helpful vote on a recommendation.
+
+    Upsert: one row per (social_account, recommendation_text). Flipping the
+    vote updates the existing row in place.
+    """
+    account = (
+        db.query(SocialAccount)
+        .filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active == True,  # noqa: E712
+        )
+        .order_by(SocialAccount.connected_at.asc())
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=400, detail="No active social account")
+
+    insight_id = None
+    if body.insight_result_id:
+        insight = (
+            db.query(InsightResult)
+            .filter(
+                InsightResult.id == body.insight_result_id,
+                InsightResult.social_account_id == account.id,
+            )
+            .first()
+        )
+        if insight:
+            insight_id = insight.id
+
+    existing = (
+        db.query(RecommendationFeedback)
+        .filter(
+            RecommendationFeedback.social_account_id == account.id,
+            RecommendationFeedback.recommendation_text == body.recommendation_text,
+        )
+        .first()
+    )
+
+    if existing:
+        existing.feedback = body.feedback
+        if insight_id is not None:
+            existing.insight_result_id = insight_id
+        db.commit()
+        row = existing
+    else:
+        row = RecommendationFeedback(
+            organization_id=user.organization_id,
+            social_account_id=account.id,
+            insight_result_id=insight_id,
+            recommendation_text=body.recommendation_text,
+            feedback=body.feedback,
+        )
+        db.add(row)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Race: another request upserted the same key — swallow and refresh
+            db.rollback()
+            row = (
+                db.query(RecommendationFeedback)
+                .filter(
+                    RecommendationFeedback.social_account_id == account.id,
+                    RecommendationFeedback.recommendation_text == body.recommendation_text,
+                )
+                .first()
+            )
+            if row:
+                row.feedback = body.feedback
+                db.commit()
+        db.refresh(row)
+
+    return {
+        "success": True,
+        "data": {
+            "id": str(row.id),
+            "feedback": row.feedback.value,
+            "recommendation_text": row.recommendation_text,
+        },
+    }
+
+
+@router.get("/insights/feedback")
+def list_recommendation_feedback(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the user's current feedback votes so the UI can render filled icons."""
+    account = (
+        db.query(SocialAccount)
+        .filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active == True,  # noqa: E712
+        )
+        .order_by(SocialAccount.connected_at.asc())
+        .first()
+    )
+    if not account:
+        return {"success": True, "data": {"feedback": []}}
+
+    rows = (
+        db.query(RecommendationFeedback)
+        .filter(RecommendationFeedback.social_account_id == account.id)
+        .all()
+    )
+    return {
+        "success": True,
+        "data": {
+            "feedback": [
+                {
+                    "recommendation_text": r.recommendation_text,
+                    "feedback": r.feedback.value,
+                }
+                for r in rows
+            ],
         },
     }
 

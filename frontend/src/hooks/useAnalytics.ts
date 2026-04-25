@@ -3,11 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
   fetchOverview, fetchSentiment, fetchSentimentTimeline, fetchPostsBreakdown,
-  fetchTopPosts,
+  fetchTopPosts, fetchHashtagPerformance,
   fetchAccounts, fetchSegments, regenerateSegments, fetchInsights, generateInsights,
   fetchCommentsAnalytics, fetchSentimentSummary,
   fetchPostsInsights, generateCaption, fetchAudienceInsights, fetchContentPlan, fetchSentimentResponses,
-  type GenerateCaptionRequest,
+  fetchRecommendationFeedback, submitRecommendationFeedback,
+  type GenerateCaptionRequest, type RecFeedback,
 } from '../api/analytics'
 
 // Resolve the UI language to the two values our backend accepts (en|ar).
@@ -101,6 +102,14 @@ export function usePostsBreakdown() {
   })
 }
 
+export function useHashtagPerformance(days = 30) {
+  return useQuery({
+    queryKey: ['analytics', 'hashtags', days],
+    queryFn: () => fetchHashtagPerformance(days),
+    staleTime: 60_000,
+  })
+}
+
 export function useTopPosts(limit = 10) {
   return useQuery({
     queryKey: ['analytics', 'posts-top', limit],
@@ -136,6 +145,49 @@ export function useInsights() {
     queryKey: ['analytics', 'insights', lang],
     queryFn: () => fetchInsights(lang),
     staleTime: 60_000,
+  })
+}
+
+export function useRecommendationFeedback() {
+  return useQuery({
+    queryKey: ['analytics', 'recommendation-feedback'],
+    queryFn: fetchRecommendationFeedback,
+    staleTime: 60_000,
+  })
+}
+
+export function useSubmitRecommendationFeedback() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: {
+      recommendation_text: string
+      feedback: RecFeedback
+      insight_result_id?: string | null
+    }) => submitRecommendationFeedback(body),
+    onMutate: async (vars) => {
+      // Optimistic update — fill the icon immediately.
+      await queryClient.cancelQueries({ queryKey: ['analytics', 'recommendation-feedback'] })
+      const prev = queryClient.getQueryData<{ feedback: { recommendation_text: string; feedback: RecFeedback }[] }>(
+        ['analytics', 'recommendation-feedback'],
+      )
+      queryClient.setQueryData(
+        ['analytics', 'recommendation-feedback'],
+        (old: { feedback: { recommendation_text: string; feedback: RecFeedback }[] } | undefined) => {
+          const cur = old?.feedback ?? []
+          const without = cur.filter((f) => f.recommendation_text !== vars.recommendation_text)
+          return { feedback: [...without, { recommendation_text: vars.recommendation_text, feedback: vars.feedback }] }
+        },
+      )
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(['analytics', 'recommendation-feedback'], ctx.prev)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'recommendation-feedback'] })
+    },
   })
 }
 

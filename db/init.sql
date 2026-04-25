@@ -197,6 +197,45 @@ CREATE INDEX idx_ai_usage_account_called ON ai_usage_log(social_account_id, call
 CREATE INDEX idx_ai_usage_provider_called ON ai_usage_log(provider, called_at);
 
 -- ─────────────────────────────────────────
+-- GOAL (user-defined Instagram growth targets)
+-- ─────────────────────────────────────────
+CREATE TYPE goal_metric AS ENUM (
+    'avg_engagement_rate', 'posts_per_week',
+    'positive_sentiment_pct', 'follower_growth_pct'
+);
+CREATE TYPE goal_period AS ENUM ('weekly', 'monthly');
+
+CREATE TABLE goal (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    metric goal_metric NOT NULL,
+    target_value DOUBLE PRECISION NOT NULL,
+    period goal_period NOT NULL DEFAULT 'weekly',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_goal_org_active ON goal(organization_id, is_active);
+CREATE INDEX idx_goal_account_active ON goal(social_account_id, is_active);
+
+-- ─────────────────────────────────────────
+-- RECOMMENDATION FEEDBACK (private thumbs up/down per action)
+-- ─────────────────────────────────────────
+CREATE TYPE feedback_kind AS ENUM ('helpful', 'not_helpful');
+
+CREATE TABLE recommendation_feedback (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    insight_result_id UUID REFERENCES insight_result(id) ON DELETE SET NULL,
+    recommendation_text TEXT NOT NULL,
+    feedback feedback_kind NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_rec_feedback_account_text UNIQUE (social_account_id, recommendation_text)
+);
+CREATE INDEX idx_rec_feedback_org ON recommendation_feedback(organization_id);
+
+-- ─────────────────────────────────────────
 -- FEATURE FLAG
 -- ─────────────────────────────────────────
 CREATE TABLE feature_flag (
