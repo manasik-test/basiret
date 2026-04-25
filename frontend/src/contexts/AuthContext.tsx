@@ -16,7 +16,13 @@ interface AuthState {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, fullName: string, orgName: string) => Promise<void>
-  logout: () => Promise<void>
+  /**
+   * Tear down the session.
+   * `silent: true` skips the POST /auth/logout call — used by the account-
+   * deletion flow where the user row no longer exists and a server logout
+   * would 401-bounce through the refresh interceptor.
+   */
+  logout: (opts?: { silent?: boolean }) => Promise<void>
   updateUser: (user: AuthUser) => void
 }
 
@@ -92,7 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   )
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (opts?: { silent?: boolean }) => {
+    if (opts?.silent) {
+      clearSession()
+      return
+    }
     try {
       await logoutUser()
     } finally {

@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download, Camera, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download, Camera, Trash2, CheckCircle2, AlertCircle, AlertTriangle, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useAccounts } from '../hooks/useAnalytics'
 import { useSubscription, useIsFeatureLocked } from '../hooks/useBilling'
 import { createCheckout } from '../api/billing'
 import { fetchInstagramAuthUrl, disconnectInstagramAccount } from '../api/instagram'
-import { updateProfile as apiUpdateProfile, changePassword as apiChangePassword } from '../api/auth'
+import {
+  updateProfile as apiUpdateProfile,
+  changePassword as apiChangePassword,
+  deleteAccount as apiDeleteAccount,
+} from '../api/auth'
 import api from '../api/client'
 import LockedFeature from '../components/LockedFeature'
 import { cn } from '../lib/utils'
@@ -20,6 +25,7 @@ const tabs = [
   { key: 'notifications', icon: Bell },
   { key: 'reports', icon: FileText },
   { key: 'billing', icon: CreditCard },
+  { key: 'danger', icon: AlertTriangle },
 ] as const
 
 type TabKey = typeof tabs[number]['key']
@@ -468,6 +474,153 @@ function BillingTab() {
   )
 }
 
+/* ── Danger Zone Tab ────────────────────────────────────── */
+
+function DangerZoneTab() {
+  const { t } = useTranslation()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+  const [modalOpen, setModalOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  // We don't know whether the user is the last admin until the request runs
+  // (it's a server-side check). So we soften the messaging both ways.
+  const orgName = user?.organization_name || ''
+
+  async function handleConfirmDelete() {
+    if (!password) {
+      setError(t('settings.dangerError'))
+      return
+    }
+    setError('')
+    setDeleting(true)
+    try {
+      await apiDeleteAccount(password)
+      // Account is gone. Navigate FIRST so we leave the protected /settings
+      // subtree before clearing the session — otherwise ProtectedRoute sees
+      // user=null and redirects to /login, racing our /-redirect. Then clear
+      // in-memory state. We deliberately do NOT call POST /auth/logout (the
+      // user row no longer exists; the call would 401 and bounce through the
+      // refresh interceptor).
+      navigate('/', { replace: true })
+      logout({ silent: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('settings.dangerError'))
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border-2 border-red-200 bg-red-50/40 p-6 space-y-4">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-red-900">{t('settings.dangerTitle')}</h3>
+            <p className="text-sm text-red-800">{t('settings.dangerWarning')}</p>
+          </div>
+        </div>
+
+        <div className="text-sm text-foreground/80 space-y-2">
+          <p>{t('settings.dangerListIntro')}</p>
+          <ul className="list-disc ms-5 space-y-1 text-foreground/70">
+            <li>{t('settings.dangerListProfile')}</li>
+            <li>{t('settings.dangerListPosts')}</li>
+            <li>{t('settings.dangerListSegments')}</li>
+            <li>{t('settings.dangerListSubscription')}</li>
+          </ul>
+          <p className="pt-2 text-xs text-foreground/60">
+            {t('settings.dangerLastAdminNote', { org: orgName })}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setError('')
+            setPassword('')
+            setModalOpen(true)
+          }}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors"
+        >
+          <Trash2 className="w-4 h-4" />
+          {t('settings.dangerCta')}
+        </button>
+      </div>
+
+      {modalOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          onClick={() => !deleting && setModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white shadow-2xl p-6 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <h3 className="text-lg font-bold text-foreground">
+                  {t('settings.dangerModalTitle')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !deleting && setModalOpen(false)}
+                className="text-foreground/40 hover:text-foreground/70"
+                aria-label={t('settings.dangerModalCancel')}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-foreground/70">{t('settings.dangerModalDesc')}</p>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">
+                {t('settings.dangerModalPasswordLabel')}
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={deleting}
+                autoFocus
+                className="w-full rounded-lg border border-border px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-50"
+              />
+            </div>
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                disabled={deleting}
+                className="px-4 py-2.5 rounded-lg text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {t('settings.dangerModalCancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting || !password}
+                className="px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {deleting ? t('settings.dangerModalDeleting') : t('settings.dangerModalConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Settings Page ──────────────────────────────────────── */
 
 /* ── OAuth result banner ────────────────────────────────── */
@@ -573,6 +726,7 @@ export default function Settings() {
       {activeTab === 'notifications' && <NotificationsTab />}
       {activeTab === 'reports' && <ReportsTab />}
       {activeTab === 'billing' && <BillingTab />}
+      {activeTab === 'danger' && <DangerZoneTab />}
     </div>
   )
 }

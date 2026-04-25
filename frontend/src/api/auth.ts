@@ -66,3 +66,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
     new_password: newPassword,
   })
 }
+
+export async function deleteAccount(password: string): Promise<{ outcome: 'org_deleted' | 'user_only' }> {
+  // Axios `delete` only sends a body when explicitly placed under `data`.
+  const res = await api.delete<unknown, { success: boolean; data: { outcome: 'org_deleted' | 'user_only' } }>(
+    '/auth/account',
+    { data: { password } },
+  )
+  return res.data
+}

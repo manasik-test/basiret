@@ -19,7 +19,13 @@ celery.conf.update(
 )
 
 celery.conf.update(
-    include=["app.tasks.instagram_sync", "app.tasks.nlp_analysis", "app.tasks.segmentation", "app.tasks.insights"],
+    include=[
+        "app.tasks.instagram_sync",
+        "app.tasks.nlp_analysis",
+        "app.tasks.segmentation",
+        "app.tasks.insights",
+        "app.tasks.account_deletion",
+    ],
 )
 
 # Celery Beat schedule — scheduled batch tasks run by the `celery-beat` service.

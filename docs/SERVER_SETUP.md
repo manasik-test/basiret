@@ -399,3 +399,60 @@ docker compose -f docker-compose.prod.yml exec -T db \
 **Stripe webhook 400s with "Invalid signature"** — `STRIPE_WEBHOOK_SECRET` doesn't match what Stripe is sending. Re-copy from the Stripe dashboard and `force-recreate api`.
 
 **GitHub Actions deploy fails at the SSH step** — re-check that the **public** half of `SSH_PRIVATE_KEY` is in `/home/deploy/.ssh/authorized_keys` on the server, and that `~/.ssh` is `700` and `authorized_keys` is `600`.
+
+---
+
+## Meta App: Data Deletion Callback
+
+Meta App Review requires every app that requests user data to expose either an in-product "delete account" button **or** a programmatic Data Deletion Callback URL — Basiret has both.
+
+### Endpoint
+
+| | |
+|---|---|
+| **URL** | `https://basiret.co/api/v1/auth/data-deletion-callback` |
+| **Method** | `POST` (`application/x-www-form-urlencoded`) |
+| **Body field** | `signed_request` |
+| **Response** | `{"url": "https://basiret.co/deletion-status?id=<code>", "confirmation_code": "<hex>"}` |
+| **Auth** | None — verified via HMAC-SHA256 against `META_APP_SECRET` |
+
+The handler lives in [backend/app/api/v1/auth.py](../backend/app/api/v1/auth.py) (`data_deletion_callback`). It parses Meta's `signed_request` (format: `<base64url(hmac-sha256)>.<base64url(json_payload)>`), extracts the Meta-scoped `user_id`, and queues `delete_data_for_meta_user_id` in Celery so we return inside Meta's response budget.
+
+The Celery task ([backend/app/tasks/account_deletion.py](../backend/app/tasks/account_deletion.py)) finds every `social_account` row with that `platform_account_id` and deletes the entire owning organisation. Postgres `ON DELETE CASCADE` chains the delete through every child table (posts, comments, analyses, segments, insights, AI cache, AI usage log, goals, recommendation feedback, subscription, users).
+
+### Configure on the Meta App dashboard
+
+1. Open the Meta App at https://developers.facebook.com/apps/ → **Settings → Basic**.
+2. Set **Data Deletion Instructions URL** to `https://basiret.co/privacy#section-9` (the in-product deletion route — Section 9 of the Privacy Policy describes the Settings → Danger Zone flow plus the email fallback).
+3. Set **Data Deletion Callback URL** to `https://basiret.co/api/v1/auth/data-deletion-callback`.
+4. Confirm **App Secret** is set as `META_APP_SECRET` in `/opt/basiret/.env` on the server (already used by the Instagram OAuth flow). Both Meta surfaces — OAuth and the deletion callback — share this single secret.
+
+### Test it locally
+
+```bash
+# Generate a valid signed_request for testing.
+# Replace APP_SECRET and TEST_USER_ID with real values.
+python3 - <<'PY'
+import base64, hmac, hashlib, json
+APP_SECRET = b"your_meta_app_secret"
+payload = json.dumps({
+    "algorithm": "HMAC-SHA256",
+    "issued_at": 0,
+    "user_id": "1234567890",
+}).encode()
+b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+payload_b64 = b64(payload)
+sig = hmac.new(APP_SECRET, payload_b64.encode(), hashlib.sha256).digest()
+print(f"{b64(sig)}.{payload_b64}")
+PY
+
+# Then:
+curl -X POST http://localhost:8000/api/v1/auth/data-deletion-callback \
+  -d "signed_request=<the output of the script above>"
+```
+
+You should get back a JSON envelope `{"url": "...", "confirmation_code": "..."}` and the Celery worker log should show `meta deletion callback queued`.
+
+### Test it from Meta's dashboard
+
+Meta provides a "Test data deletion" button on the App Settings → Basic page. Clicking it sends a real signed request with a fake `user_id`. Our endpoint will accept it and queue a no-op deletion (since no real `social_account` rows match the fake id). Verify the JSON response renders with both fields populated.

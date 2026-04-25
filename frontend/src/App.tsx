@@ -42,6 +42,7 @@ const ForSmallBusiness = lazy(() => import('./pages/marketing/for/SmallBusiness'
 const ForCreators = lazy(() => import('./pages/marketing/for/Creators'))
 const ForAgencies = lazy(() => import('./pages/marketing/for/Agencies'))
 const ForEnterprise = lazy(() => import('./pages/marketing/for/Enterprise'))
+const DeletionStatusPage = lazy(() => import('./pages/marketing/DeletionStatus'))
 
 function MarketingFallback() {
   return (
@@ -85,6 +86,7 @@ export default function App() {
             <Route path="/for/creators" element={<ForCreators />} />
             <Route path="/for/agencies" element={<ForAgencies />} />
             <Route path="/for/enterprise" element={<ForEnterprise />} />
+            <Route path="/deletion-status" element={<DeletionStatusPage />} />
           </Route>
 
           {/* Public: registration is step 1 of the onboarding wizard */}
