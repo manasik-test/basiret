@@ -26,7 +26,63 @@ from app.models.post import Post
 from app.models.engagement_metric import EngagementMetric
 from app.models.analysis_result import AnalysisResult
 from app.models.social_account import SocialAccount
+from app.models.organization import Organization
 from app.models.insight_result import InsightResult
+
+
+# Human-readable labels for business profile codes — keeps Gemini grounded
+# in the same vocabulary users see in the UI.
+_CATEGORY_LABELS = {
+    "restaurant_cafe": "Restaurant/Cafe",
+    "fashion_clothing": "Fashion/Clothing",
+    "beauty_salon": "Beauty/Salon",
+    "fitness_gym": "Fitness/Gym",
+    "real_estate": "Real Estate",
+    "retail_shop": "Retail/Shop",
+    "services": "Services",
+    "other": "Other",
+}
+
+_COUNTRY_LABELS = {
+    "AE": "United Arab Emirates",
+    "SA": "Saudi Arabia",
+    "EG": "Egypt",
+    "JO": "Jordan",
+    "KW": "Kuwait",
+    "QA": "Qatar",
+    "BH": "Bahrain",
+    "OM": "Oman",
+    "TR": "Turkey",
+    "SD": "Sudan",
+    "OTHER": "Other",
+}
+
+
+def format_business_profile(profile: dict | None) -> str:
+    """Format a business_profile dict into a 1-2 line context block for prompts.
+
+    Returns an empty string if the profile is missing or empty so callers can
+    safely concatenate without conditional formatting at every call site.
+    """
+    if not profile:
+        return ""
+    parts = []
+    cat = _CATEGORY_LABELS.get(profile.get("category"), profile.get("category"))
+    country = _COUNTRY_LABELS.get(profile.get("country"), profile.get("country"))
+    city = (profile.get("city") or "").strip()
+    audience_lang = profile.get("audience_language")
+    if cat:
+        parts.append(f"Industry: {cat}")
+    where = ", ".join(p for p in [city, country] if p)
+    if where:
+        parts.append(f"Location: {where}")
+    if audience_lang == "ar":
+        parts.append("Target audience speaks Arabic")
+    elif audience_lang == "en":
+        parts.append("Target audience speaks English")
+    elif audience_lang == "both":
+        parts.append("Target audience is bilingual (Arabic + English)")
+    return ". ".join(parts)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +93,7 @@ RULES:
 - Every recommendation must have a concrete action, a reason, and a timeframe.
 - Tone: direct, encouraging, professional. Write as if you are a trusted marketing advisor, not a report generator.
 - Respond ONLY in the language specified in the user message (Arabic or English).
+- If a BUSINESS CONTEXT line is present, tailor every recommendation to that industry, city, and audience language. A restaurant in Dubai should hear about food photography and local hashtags; a fashion brand in Cairo should hear about styling reels and culturally relevant trends. Generic advice that ignores the business context is a failure.
 - Always respond in valid JSON matching the schema below. No preamble, no markdown.
 
 OUTPUT SCHEMA:
@@ -67,6 +124,9 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
     account = db.query(SocialAccount).filter(SocialAccount.id == social_account_id).first()
     if not account:
         return None
+
+    org = db.query(Organization).filter(Organization.id == account.organization_id).first()
+    business_profile = org.business_profile if org else None
 
     # Posts this week
     posts = (
@@ -276,17 +336,20 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
         "pct_arabic": pct_ar,
         "pct_english": pct_en,
         "top_topics": topics_line,
+        "business_profile": business_profile,
     }
 
 
 def _build_user_message(data: dict, language: str = "English") -> str:
     """Build the user message from gathered metrics, matching the prompt schema."""
+    bp_line = format_business_profile(data.get("business_profile"))
+    bp_block = f"BUSINESS CONTEXT: {bp_line}\n\n" if bp_line else ""
     return f"""Analyze this account's performance for the week of {data['date_range']}.
 Language: {language}
 
 ACCOUNT: {data['account_name']} on {data['platform']}
 
-METRICS THIS WEEK:
+{bp_block}METRICS THIS WEEK:
 - Total posts: {data['total_posts']}
 - Total impressions: {data['total_impressions']}
 - Avg engagement per post: {data['avg_engagement_rate']}

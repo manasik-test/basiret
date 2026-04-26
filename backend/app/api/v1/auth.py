@@ -20,6 +20,8 @@ import re
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -83,6 +85,43 @@ class ChangePasswordRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     password: str
+
+
+# Allowed values are validated at schema level so future additions stay
+# explicit. Frontend dropdowns are kept in sync with these literals.
+BusinessCategory = Literal[
+    "restaurant_cafe",
+    "fashion_clothing",
+    "beauty_salon",
+    "fitness_gym",
+    "real_estate",
+    "retail_shop",
+    "services",
+    "other",
+]
+
+BusinessCountry = Literal[
+    "AE",  # UAE
+    "SA",  # Saudi Arabia
+    "EG",  # Egypt
+    "JO",  # Jordan
+    "KW",  # Kuwait
+    "QA",  # Qatar
+    "BH",  # Bahrain
+    "OM",  # Oman
+    "TR",  # Turkey
+    "SD",  # Sudan
+    "OTHER",
+]
+
+AudienceLanguage = Literal["ar", "en", "both"]
+
+
+class BusinessProfile(BaseModel):
+    category: BusinessCategory
+    city: str = Field(min_length=1, max_length=100)
+    country: BusinessCountry
+    audience_language: AudienceLanguage
 
 
 # ── Helpers ─────────────────────────────────────────────────
@@ -257,8 +296,32 @@ def me(user: User = Depends(get_current_user)):
             "role": user.role.value,
             "organization_id": str(user.organization_id),
             "organization_name": user.organization.name,
+            "business_profile": user.organization.business_profile,
         },
     }
+
+
+@router.get("/business-profile")
+def get_business_profile(user: User = Depends(get_current_user)):
+    """Return the current organization's business profile (or null if not set)."""
+    return {"success": True, "data": user.organization.business_profile}
+
+
+@router.put("/business-profile")
+def upsert_business_profile(
+    body: BusinessProfile,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Set or update the current organization's business profile.
+
+    Anyone in the org with a valid session can call this — onboarding-step-2
+    runs before any role assignment beyond the auto-admin from /register.
+    """
+    user.organization.business_profile = body.model_dump()
+    db.commit()
+    db.refresh(user.organization)
+    return {"success": True, "data": user.organization.business_profile}
 
 
 @router.patch("/profile")

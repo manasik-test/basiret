@@ -50,9 +50,11 @@ from app.models.analysis_result import AnalysisResult
 from app.models.audience_segment import AudienceSegment
 from app.models.comment import Comment
 from app.models.engagement_metric import EngagementMetric
+from app.models.organization import Organization
 from app.models.post import Post
 from app.models.social_account import SocialAccount
 from app.models.user import User
+from app.tasks.insights import format_business_profile
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -77,6 +79,39 @@ def _language_rule(language: str) -> str:
         f"This is a hard requirement — do not switch languages even if the "
         f"input data is in a different language."
     )
+
+
+def _business_profile_for_account(db: Session, account_id: str | None) -> dict | None:
+    """Fetch the organization's business_profile for a given social account.
+
+    Returns None when the profile is unset or the account is missing — callers
+    pass the result through `format_business_profile` which already handles
+    None gracefully.
+    """
+    if not account_id:
+        return None
+    row = (
+        db.query(Organization.business_profile)
+        .join(SocialAccount, SocialAccount.organization_id == Organization.id)
+        .filter(SocialAccount.id == account_id)
+        .first()
+    )
+    return row[0] if row else None
+
+
+def _business_context_block(profile: dict | None) -> str:
+    """Build the BUSINESS CONTEXT line that gets prepended to user messages."""
+    line = format_business_profile(profile)
+    return f"BUSINESS CONTEXT: {line}\n\n" if line else ""
+
+
+_BUSINESS_TAILORING_RULE = (
+    " If a BUSINESS CONTEXT line is provided, every recommendation must be "
+    "specific to that industry, city, and audience language — a restaurant in "
+    "Dubai expects food-styling and local-hashtag advice; a fashion brand in "
+    "Cairo expects styling reels and culturally relevant trends. Generic "
+    "advice that ignores the business context is a failure."
+)
 
 
 # ── AI page cache (24h TTL) ───────────────────────────────────────────────
@@ -434,9 +469,12 @@ def posts_insights(
         if best_ocr
         else ""
     )
+    primary_account_id = str(account_ids[0])
+    bp = _business_profile_for_account(db, primary_account_id)
     user_msg = (
         "Analyze the following Instagram performance data and return strict JSON.\n\n"
-        "TOP POST:\n"
+        + _business_context_block(bp)
+        + "TOP POST:\n"
         f"- type: {best_payload['content_type']}\n"
         f"- likes: {best_payload['likes']}, comments: {best_payload['comments']}\n"
         f"- caption: '''{best_payload['caption']}'''\n"
@@ -454,11 +492,11 @@ def posts_insights(
     sys = (
         "You are a content-performance analyst for an Instagram creator. "
         "Compare a top-performing post against low-performing posts and return strict JSON. "
-        "Be specific and actionable, never generic. No emojis, no markdown. "
+        "Be specific and actionable, never generic. No emojis, no markdown."
+        + _BUSINESS_TAILORING_RULE
+        + " "
         + _language_rule(language)
     )
-
-    primary_account_id = str(account_ids[0])
 
     def _compute() -> dict:
         result = _gemini_json(sys, user_msg, account_id=primary_account_id) or {}
@@ -578,6 +616,9 @@ def generate_caption(
         else "Do NOT use any emojis, emoticons, or pictograph characters anywhere in the caption."
     )
 
+    bp = _business_profile_for_account(db, primary_account_id)
+    bp_line = format_business_profile(bp)
+
     sys = (
         f"You are an Instagram copywriter. Write a single caption ENTIRELY in {lang_label}. "
         f"This is a hard requirement — even if the reference caption is in a different language, "
@@ -585,7 +626,14 @@ def generate_caption(
         "Write something a small business owner can paste directly into Instagram. "
         "Match Instagram's voice — short, punchy, scannable. "
         "1-3 lines, end with a clear question or call-to-action. "
-        f"{hashtag_rule} "
+        + (
+            f"This caption is for: {bp_line}. Tailor language, references, and CTA to that "
+            "industry, city, and audience language; avoid generic copy that could apply to "
+            "any business. "
+            if bp_line
+            else ""
+        )
+        + f"{hashtag_rule} "
         f"{emoji_rule} "
         "No quotation marks around the caption. No preamble like 'Here is...'. "
         "Return ONLY the caption text."
@@ -595,6 +643,8 @@ def generate_caption(
         f"Content type: {body.content_type}",
         f"Target language: {lang_label}",
     ]
+    if bp_line:
+        parts.append(f"Business context: {bp_line}")
     if body.topic:
         parts.append(f"Topic: {body.topic}")
     if top_hashtags:
@@ -744,6 +794,8 @@ def audience_insights(
     if not _gemini_available():
         return {"success": True, "data": payload, "meta": build_fresh_meta()}
 
+    primary_account_id = str(account_ids[0])
+    bp = _business_profile_for_account(db, primary_account_id)
     sys = (
         "You are an audience-strategy advisor for an Instagram creator. "
         "Given last week's audience signals, return strict JSON describing: "
@@ -751,11 +803,14 @@ def audience_insights(
         "(2) THREE specific content topics this audience wants to see next, "
         "(3) WHY the top posting slot works for this audience. "
         "Be specific. Reference percentages, comment themes, content types. "
-        "No emojis, no markdown, no preamble. "
+        "No emojis, no markdown, no preamble."
+        + _BUSINESS_TAILORING_RULE
+        + " "
         + _language_rule(language)
     )
     user_msg = (
-        f"Total comments last 7 days: {total_week_comments}\n"
+        _business_context_block(bp)
+        + f"Total comments last 7 days: {total_week_comments}\n"
         f"Sentiment split: {sentiment_week}\n"
         f"Top content type by engagement (all-time): {top_type}\n"
         f"Top time slot: {best_day} at {best_time} (avg {best_avg} engagement)\n"
@@ -772,8 +827,6 @@ def audience_insights(
         '  "best_time_reason": "1 sentence why this slot works"\n'
         '}'
     )
-
-    primary_account_id = str(account_ids[0])
 
     def _compute() -> dict:
         result = _gemini_json(sys, user_msg, account_id=primary_account_id) or {}
@@ -917,13 +970,17 @@ def content_plan(
     if not _gemini_available():
         return {"success": True, "data": {"days": days}, "meta": build_fresh_meta()}
 
+    primary_account_id = str(account_ids[0])
+    bp = _business_profile_for_account(db, primary_account_id)
     sys = (
         "You are a content-planning advisor for an Instagram creator. "
         "Given the creator's top-performing captions and a 7-day plan skeleton "
         "(date + content type per day), return strict JSON adding ONE specific "
         "topic per day that is fresh, on-brand, and varied across the week. "
         "Topics must be 4-10 words, written as headlines (no markdown, no quotes). "
-        "Do NOT repeat the same topic across days. "
+        "Do NOT repeat the same topic across days."
+        + _BUSINESS_TAILORING_RULE
+        + " "
         + _language_rule(language)
     )
     skeleton_lines = [
@@ -931,7 +988,8 @@ def content_plan(
         for d in days
     ]
     user_msg = (
-        "Top-performing captions from this account (for inspiration only):\n"
+        _business_context_block(bp)
+        + "Top-performing captions from this account (for inspiration only):\n"
         + ("\n".join(top_caps_lines) or "(none yet)")
         + "\n\nWeek plan skeleton:\n"
         + "\n".join(skeleton_lines)
@@ -941,8 +999,6 @@ def content_plan(
         "  ...7 entries\n"
         "]}"
     )
-
-    primary_account_id = str(account_ids[0])
 
     def _compute() -> dict:
         result = _gemini_json(
@@ -1044,17 +1100,22 @@ def sentiment_responses(
             "meta": build_fresh_meta(),
         }
 
+    primary_account_id = str(account_ids[0])
+    bp = _business_profile_for_account(db, primary_account_id)
     sys = (
         "You are a customer-care specialist replying publicly on Instagram. "
         "For each post, write ONE empathetic, professional reply (1-2 sentences) "
         "the business owner can paste verbatim under the post. "
         "Acknowledge the concern, take responsibility where appropriate, and "
         "offer a concrete next step (e.g. 'DM us your order number'). "
-        "Never sound defensive or corporate. No emojis, no hashtags, no markdown. "
+        "Never sound defensive or corporate. No emojis, no hashtags, no markdown."
+        + _BUSINESS_TAILORING_RULE
+        + " "
         + _language_rule(language)
     )
     user_msg = (
-        "For each post below, return ONE response template. Return strict JSON:\n"
+        _business_context_block(bp)
+        + "For each post below, return ONE response template. Return strict JSON:\n"
         '{ "templates": [ { "post_id": "...", "response_template": "..." } ] }\n\n'
         + "\n\n".join(
             f"POST {i + 1} (id={r['post_id']}, {r['neg_count']} negative comments)\n"
@@ -1063,8 +1124,6 @@ def sentiment_responses(
             for i, r in enumerate(payload_rows)
         )
     )
-
-    primary_account_id = str(account_ids[0])
 
     def _compute() -> dict:
         result = _gemini_json(
@@ -1122,6 +1181,7 @@ def build_ask_context(db: Session, account_id: str) -> dict:
 
     account = db.query(SocialAccount).filter(SocialAccount.id == account_id).first()
     username = account.username if account else None
+    business_profile = _business_profile_for_account(db, account_id)
 
     posts_q = db.query(Post).filter(Post.social_account_id == account_id)
     total_posts = posts_q.count()
@@ -1324,6 +1384,7 @@ def build_ask_context(db: Session, account_id: str) -> dict:
 
     return {
         "account_username": username,
+        "business_profile": business_profile,
         "data_window": {
             "first_post_at": first_post,
             "last_post_at": last_post,
@@ -1462,6 +1523,7 @@ def ask_basiret(
     data_used = [
         key
         for key in (
+            "business_profile",
             "data_window",
             "sentiment_30d",
             "top_content_type",
@@ -1499,6 +1561,9 @@ def ask_basiret(
         "- Be specific — use actual numbers from the data, not vague statements.\n"
         "- Keep answers concise — 2-5 sentences for simple questions, up to 8 for complex ones.\n"
         "- If the user asks for a recommendation, base it on patterns in the data.\n"
+        "- If `business_profile` is present, tailor recommendations to that industry, city, "
+        "and audience language — a restaurant in Dubai expects different advice than a "
+        "fashion brand in Cairo. Generic advice that ignores the business context is a failure.\n"
         "- Tone: expert but approachable. Not corporate. Not overly casual.\n"
         f"- Language: respond in {lang_label}. "
         + ("If Arabic, use Modern Standard Arabic." if body.language == "ar" else "")

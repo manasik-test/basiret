@@ -1,5 +1,37 @@
 import api from './client'
 
+export type BusinessCategory =
+  | 'restaurant_cafe'
+  | 'fashion_clothing'
+  | 'beauty_salon'
+  | 'fitness_gym'
+  | 'real_estate'
+  | 'retail_shop'
+  | 'services'
+  | 'other'
+
+export type BusinessCountry =
+  | 'AE'
+  | 'SA'
+  | 'EG'
+  | 'JO'
+  | 'KW'
+  | 'QA'
+  | 'BH'
+  | 'OM'
+  | 'TR'
+  | 'SD'
+  | 'OTHER'
+
+export type AudienceLanguage = 'ar' | 'en' | 'both'
+
+export interface BusinessProfile {
+  category: BusinessCategory
+  city: string
+  country: BusinessCountry
+  audience_language: AudienceLanguage
+}
+
 export interface AuthUser {
   id: string
   email: string
@@ -7,6 +39,7 @@ export interface AuthUser {
   role: string
   organization_id: string
   organization_name: string
+  business_profile?: BusinessProfile | null
 }
 
 interface AuthResponse {
@@ -65,6 +98,14 @@ export async function changePassword(currentPassword: string, newPassword: strin
     current_password: currentPassword,
     new_password: newPassword,
   })
+}
+
+export async function saveBusinessProfile(profile: BusinessProfile): Promise<BusinessProfile> {
+  const res = await api.put<unknown, { success: boolean; data: BusinessProfile }>(
+    '/auth/business-profile',
+    profile,
+  )
+  return res.data
 }
 
 export async function deleteAccount(password: string): Promise<{ outcome: 'org_deleted' | 'user_only' }> {
