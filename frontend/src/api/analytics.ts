@@ -182,9 +182,12 @@ export async function fetchSentimentTimeline(): Promise<SentimentTimelineData> {
   return res.data
 }
 
-export async function regenerateSegments(socialAccountId: string): Promise<{ task_id: string }> {
+export async function regenerateSegments(
+  socialAccountId: string,
+  language: 'en' | 'ar' = 'en',
+): Promise<{ task_id: string }> {
   const res = await api.post<unknown, ApiResponse<{ task_id: string; status: string }>>(
-    `/analytics/segments/regenerate?social_account_id=${socialAccountId}`,
+    `/analytics/segments/regenerate?social_account_id=${socialAccountId}&language=${language}`,
   )
   return res.data
 }

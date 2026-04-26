@@ -215,31 +215,48 @@ def _generate_cluster_label(centroid: np.ndarray) -> str:
 def _generate_persona_descriptions(
     segments_data: list[dict],
     account_id: str | None = None,
+    language: str = "en",
 ) -> list[str]:
     """Call the personas provider (Gemini) to generate content-pattern
     descriptions for each K-means cluster.
 
     These describe how the creator's *content* performs across format/time
-    buckets, not audience personas. Each description must begin with
-    'Content posted in the <time> performs like this:' so the reader sees
-    immediately that the cluster is a content pattern, not a person.
+    buckets, not audience personas. Each description must begin with the
+    language-appropriate equivalent of 'Content posted in the <time> performs
+    like this:' so the reader sees immediately that the cluster is a content
+    pattern, not a person.
 
     AI failures (quota / unavailable / malformed) collapse to empty strings —
     the cluster job still produces all its DB rows, just without prose.
     """
+    lang_label = "Arabic" if language == "ar" else "English"
+    if language == "ar":
+        opener_rule = (
+            "Every description MUST start verbatim with the Arabic phrase: "
+            "'المحتوى المنشور في فترة <time> يحقق هذا الأداء:' where <time> is the Arabic "
+            "translation of the typical_posting_time value (morning=الصباح, afternoon=الظهيرة, "
+            "evening=المساء, night=الليل). "
+        )
+    else:
+        opener_rule = (
+            "Every description MUST start verbatim with: "
+            "'Content posted in the <time> performs like this:' where <time> is the lowercase "
+            "typical_posting_time value provided (morning/afternoon/evening/night). "
+        )
+
     sys_prompt = (
         "You are a content-performance analyst. Given K-means clusters of a creator's "
         "own posts (NOT audience segments), write a short content-pattern description "
         "(2-3 sentences) for each cluster. "
-        "Every description MUST start verbatim with: "
-        "'Content posted in the <time> performs like this:' where <time> is the lowercase "
-        "typical_posting_time value provided (morning/afternoon/evening/night). "
+        + opener_rule +
         "After that sentence opener, describe what the content format looks like, how it "
         "engages, and a concrete takeaway for the creator. Focus on content and timing "
         "patterns — do NOT describe hypothetical audience members ('this user...', "
         "'they are...'). Respond ONLY in valid JSON: an object with key 'descriptions' "
         "whose value is an array of strings, one description per cluster. "
-        "No preamble, no markdown."
+        "No preamble, no markdown. "
+        f"Respond ENTIRELY in {lang_label}. Every description string MUST be in {lang_label} "
+        "— do not switch languages even if the input data is in another language."
     )
 
     prompt = "Generate content-pattern descriptions for these clusters:\n\n"
@@ -274,7 +291,7 @@ def _generate_persona_descriptions(
     return [str(d) if d else "" for d in descriptions[: len(segments_data)]]
 
 
-def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, silhouette):
+def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, silhouette, language: str = "en"):
     """Delete old segments and insert new cluster rows with AI persona descriptions."""
     db.query(AudienceSegment).filter(
         AudienceSegment.social_account_id == social_account_id,
@@ -311,7 +328,7 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
 
     # Get AI persona descriptions (best-effort — empty strings on AI failure)
     persona_descriptions = _generate_persona_descriptions(
-        segments_data, account_id=str(social_account_id),
+        segments_data, account_id=str(social_account_id), language=language,
     )
 
     for cluster_id in range(k):
@@ -353,8 +370,12 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
 
 
 @celery.task(name="segment_audience", bind=True, max_retries=2)
-def segment_audience(self, social_account_id: str):
-    """Run K-means segmentation on all posts for a social account."""
+def segment_audience(self, social_account_id: str, language: str = "en"):
+    """Run K-means segmentation on all posts for a social account.
+
+    `language` is forwarded to the persona-description Gemini call so the
+    written prose matches the user's UI language. Accepted values: "en", "ar".
+    """
     db = SessionLocal()
     try:
         # Serialize concurrent regenerations for the same account. Without this,
@@ -391,7 +412,7 @@ def segment_audience(self, social_account_id: str):
 
         labels, centroids, k, sil = result
 
-        _save_segments(db, social_account_id, labels, centroids, post_ids, k, sil)
+        _save_segments(db, social_account_id, labels, centroids, post_ids, k, sil, language=language)
 
         return {
             "status": "ok",

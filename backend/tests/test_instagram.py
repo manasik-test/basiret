@@ -202,6 +202,43 @@ def test_callback_full_flow_connects_account(client, db, starter_user):
     assert account.is_active is True
 
 
+def test_callback_state_replay_rejected(client, starter_user):
+    """A previously-consumed state JWT must NOT be replayable, even within its TTL."""
+    user, _, _ = starter_user
+    state = create_oauth_state_token(str(user.id))
+
+    fake_short = MagicMock(status_code=200, json=lambda: {"access_token": "short_tok", "user_id": "5566"})
+    fake_long = MagicMock(status_code=200, json=lambda: {"access_token": "long_tok", "expires_in": 5_184_000})
+    fake_me = MagicMock(status_code=200, json=lambda: {"id": "5566", "username": "replay_handle"})
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, *_, **__):
+            return fake_short
+
+        async def get(self, url, *_, **__):
+            return fake_long if "access_token" in url else fake_me
+
+    with patch("app.api.v1.instagram.httpx.AsyncClient", FakeAsyncClient):
+        first = client.get(
+            f"/api/v1/instagram/callback?code=fake_code&state={state}",
+            follow_redirects=False,
+        )
+        second = client.get(
+            f"/api/v1/instagram/callback?code=fake_code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert first.status_code == 302
+    assert "ig=connected" in first.headers["location"]
+    # Second use of the same JWT must fail nonce consumption.
+    assert second.status_code == 302
+    assert "ig=invalid_state" in second.headers["location"]
 
 
 # ── 7. Carousel: album-level insights + children structure ──

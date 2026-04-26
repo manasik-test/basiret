@@ -146,7 +146,20 @@
     "noAccount": "Don't have an account?",
     "haveAccount": "Already have an account?",
     "loginFailed": "Login failed",
-    "registerFailed": "Registration failed"
+    "registerFailed": "Registration failed",
+    "forgotPassword": "Forgot your password?",
+    "forgotSubtitle": "Enter your email and we'll send you a reset link",
+    "forgotSent": "If that email is registered, a reset link is on its way. The link expires in 15 minutes.",
+    "sendResetLink": "Send reset link",
+    "sending": "Sending...",
+    "backToLogin": "Back to sign in",
+    "resetSubtitle": "Choose a new password for your account",
+    "resetMissingToken": "This reset link is missing or invalid.",
+    "requestNewLink": "Request a new reset link",
+    "resetPassword": "Reset password",
+    "resetting": "Resetting...",
+    "resetSuccess": "Password updated. Redirecting to sign in...",
+    "resetFailed": "Could not reset password. The link may have expired."
   },
   "admin": {
     "title": "Admin Panel",

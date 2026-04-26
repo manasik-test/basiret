@@ -130,9 +130,10 @@ export function useRegenerateSegments() {
   const queryClient = useQueryClient()
   const accounts = useAccounts()
   const firstAccountId = accounts.data?.[0]?.id
+  const lang = useUiLanguage()
 
   return useMutation({
-    mutationFn: () => regenerateSegments(firstAccountId!),
+    mutationFn: () => regenerateSegments(firstAccountId!, lang),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['analytics', 'segments'] })
     },

@@ -78,21 +78,43 @@ def decode_token(token: str) -> dict | None:
 
 # ── OAuth state token (single-purpose, short-lived) ─────────
 
+OAUTH_STATE_NONCE_PREFIX = "oauth_state_nonce:"
+
+
 def create_oauth_state_token(user_id: str, ttl_minutes: int = 10) -> str:
     """Sign a short-lived JWT used as the OAuth `state` param.
 
     Carried through Meta's redirect so the public /callback can identify the
     user without requiring a session token. Single-purpose (`type=oauth_state`)
     so a leaked state can't be replayed against authenticated endpoints.
+
+    A random `jti` is embedded and registered in Redis with the same TTL —
+    the callback consumes it atomically so a captured state cannot be replayed
+    within the JWT's exp window.
     """
+    jti = str(uuid.uuid4())
     expires = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
     payload = {
         "sub": user_id,
         "type": "oauth_state",
+        "jti": jti,
         "exp": expires,
         "iat": datetime.now(timezone.utc),
     }
+    get_redis().setex(f"{OAUTH_STATE_NONCE_PREFIX}{jti}", ttl_minutes * 60, "1")
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def consume_oauth_state_nonce(jti: str) -> bool:
+    """Atomically delete the nonce. Returns True if it was present.
+
+    A False return means either the state was never issued by us, was already
+    consumed, or has expired — the caller MUST treat all three as failure.
+    """
+    if not jti:
+        return False
+    deleted = get_redis().delete(f"{OAUTH_STATE_NONCE_PREFIX}{jti}")
+    return deleted > 0
 
 
 # ── Refresh-token blacklist (Redis) ────────────────────────

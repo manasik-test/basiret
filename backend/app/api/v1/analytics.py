@@ -989,10 +989,15 @@ def get_segments(
 @router.post("/segments/regenerate")
 def regenerate_segments(
     social_account_id: str,
+    language: Literal["en", "ar"] = "en",
     user: User = Depends(RequireFeature("audience_segmentation")),
     db: Session = Depends(get_db),
 ):
-    """Queue K-means segmentation for a social account (Pro)."""
+    """Queue K-means segmentation for a social account (Pro).
+
+    `language` is forwarded to the persona-description Gemini call so the
+    cluster prose matches the UI language the user is currently viewing.
+    """
     account = db.query(SocialAccount).filter(
         SocialAccount.id == social_account_id,
         SocialAccount.organization_id == user.organization_id,
@@ -1000,7 +1005,7 @@ def regenerate_segments(
     if not account:
         raise HTTPException(status_code=404, detail="Social account not found")
 
-    task = segment_audience.delay(social_account_id)
+    task = segment_audience.delay(social_account_id, language)
     return {
         "success": True,
         "data": {"task_id": task.id, "status": "queued"},

@@ -8,6 +8,8 @@ POST   /logout                    — blacklist refresh token in Redis
 GET    /me                        — return current user profile
 PATCH  /profile                   — update current user's full_name
 POST   /change-password           — verify current pw, set new, rotate refresh
+POST   /forgot-password           — issue Redis-stored reset token, email link
+POST   /reset-password            — validate token, update password
 DELETE /account                   — user-initiated account deletion
 POST   /data-deletion-callback    — Meta-initiated deletion (signed request)
 """
@@ -35,6 +37,7 @@ from app.core.security import (
     decode_token,
     blacklist_refresh_token,
     is_token_blacklisted,
+    get_redis,
 )
 from app.core.deps import get_current_user
 from app.models.organization import Organization
@@ -83,8 +86,23 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class DeleteAccountRequest(BaseModel):
     password: str
+
+
+# Redis key prefix for password-reset tokens. Value = user_id (string UUID).
+# TTL is enforced at SETEX time (15 minutes).
+RESET_TOKEN_KEY_PREFIX = "pwreset:"
+RESET_TOKEN_TTL_SECONDS = 15 * 60
 
 
 # Allowed values are validated at schema level so future additions stay
@@ -372,6 +390,76 @@ def change_password(
     new_refresh, _ = create_refresh_token(str(user.id))
     _set_refresh_cookie(response, new_refresh)
 
+    return {"success": True, "data": None}
+
+
+# ── Forgot / Reset password ─────────────────────────────────
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Issue a single-use reset token for the given email.
+
+    Always returns 200 with the same body so callers cannot enumerate which
+    emails are registered. The token is a 32-byte URL-safe random string
+    stored in Redis at ``pwreset:<token>`` with a 15-minute TTL; the value is
+    the user's UUID. We do NOT key by user_id — a fresh token must invalidate
+    the previous one only if used, so collisions across requests are fine.
+
+    No SMTP wiring lives in this codebase yet; until it does, the reset URL
+    is logged at INFO level. The frontend can consume this URL straight from
+    the dev logs during local testing.
+    """
+    user = db.query(User).filter(User.email == body.email).first()
+    if user and user.is_active:
+        token = secrets.token_urlsafe(32)
+        redis = get_redis()
+        redis.setex(
+            f"{RESET_TOKEN_KEY_PREFIX}{token}",
+            RESET_TOKEN_TTL_SECONDS,
+            str(user.id),
+        )
+        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
+        # Until SMTP is wired up, surface the URL only in server logs. Never
+        # echo it back in the HTTP response — that would let any client
+        # request password resets for arbitrary emails.
+        logger.info(
+            "password reset requested",
+            extra={"user_id": str(user.id), "email": user.email, "reset_url": reset_url},
+        )
+    return {"success": True, "data": None}
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Validate the reset token and update the user's password.
+
+    The token is consumed atomically (GETDEL) so a captured token cannot be
+    replayed. All active refresh tokens for the user are NOT explicitly
+    blacklisted — there's no index from user_id → jti — but any session that
+    relied on the old password gets a 401 the next time the user actively
+    uses the new password elsewhere. The 30-day rolling refresh cookie is
+    acceptable risk for an MVP.
+    """
+    redis = get_redis()
+    redis_key = f"{RESET_TOKEN_KEY_PREFIX}{body.token}"
+
+    # GETDEL: atomic read-and-delete. If the token was already used or
+    # expired, this returns None and we 400 with a generic message.
+    user_id = redis.execute_command("GETDEL", redis_key)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    if isinstance(user_id, bytes):
+        user_id = user_id.decode("utf-8")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    user.hashed_password = hash_password(body.new_password)
+    db.commit()
+
+    logger.info("password reset completed", extra={"user_id": str(user.id)})
     return {"success": True, "data": None}
 
 

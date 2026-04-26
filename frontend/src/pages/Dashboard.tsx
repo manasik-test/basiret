@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users, Calendar, Layers, CheckCircle2, TrendingUp, TrendingDown, Gauge } from 'lucide-react'
 import DoThisToday from '../components/dashboard/DoThisToday'
+import TopPostsTable from '../components/dashboard/TopPostsTable'
 import { useAuth } from '../contexts/AuthContext'
 import {
   useOverview,
@@ -434,6 +435,8 @@ export default function Dashboard() {
         aiScore={aiScore}
         scoreChange={scoreChange}
       />
+
+      <TopPostsTable />
     </div>
   )
 }

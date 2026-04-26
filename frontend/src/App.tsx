@@ -12,6 +12,8 @@ import Recommendations from './pages/Recommendations'
 import Sentiment from './pages/Sentiment'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
 import ComingSoon from './pages/ComingSoon'
@@ -92,6 +94,8 @@ export default function App() {
           {/* Public: registration is step 1 of the onboarding wizard */}
           <Route path="/register" element={<Onboarding />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Protected: deep-link into step 2 if user is already authenticated */}
           <Route

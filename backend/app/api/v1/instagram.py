@@ -20,7 +20,11 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.encryption import encrypt_token
-from app.core.security import create_oauth_state_token, decode_token
+from app.core.security import (
+    create_oauth_state_token,
+    decode_token,
+    consume_oauth_state_nonce,
+)
 from app.models.user import User
 from app.models.social_account import SocialAccount, Platform
 from app.tasks.instagram_sync import sync_instagram_posts
@@ -99,6 +103,16 @@ async def oauth_callback(
     payload = decode_token(state)
     if payload is None or payload.get("type") != "oauth_state":
         logger.warning("Instagram OAuth state token invalid or expired")
+        return _settings_redirect("invalid_state")
+
+    # Atomically consume the Redis-stored nonce to defeat replay within the
+    # JWT's exp window. A second callback with the same `state` will fail
+    # here because the nonce is gone after the first successful consume.
+    if not consume_oauth_state_nonce(payload.get("jti", "")):
+        logger.warning(
+            "Instagram OAuth state nonce already consumed or unknown: jti=%s",
+            payload.get("jti"),
+        )
         return _settings_redirect("invalid_state")
 
     user = db.query(User).filter(User.id == payload["sub"]).first()

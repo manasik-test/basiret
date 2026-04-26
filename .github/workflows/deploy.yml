@@ -68,12 +68,36 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
           echo "Verified $SERVER_HOST host key matches $EXPECTED_HOST_FPR"
 
-      - name: Deploy (git pull + docker compose up --build)
+      - name: Deploy (git pull + docker compose up --build, rollback on failure)
         run: |
           ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" REPO_DIR="$REPO_DIR" bash <<'REMOTE'
           set -euo pipefail
           cd "$REPO_DIR"
+
+          # Snapshot the SHA we're rolling forward from so we can revert the
+          # working tree if the new build fails to come up. We ignore detached-
+          # HEAD and missing-ref edge cases (first deploy) — `git rev-parse`
+          # returns "HEAD" verbatim if there are no commits yet, which is a
+          # safe no-op for the rollback path below.
+          PREV_SHA=$(git rev-parse HEAD)
+          echo "Previous SHA: $PREV_SHA"
+
           git pull --ff-only
-          docker compose -f docker-compose.prod.yml up -d --build
+
+          # Try to build + start the new stack. On failure: restore the
+          # working tree to $PREV_SHA and re-up the previous images so the
+          # site stays live, then exit non-zero to fail the workflow run.
+          if ! docker compose -f docker-compose.prod.yml up -d --build; then
+            echo "::error::docker compose up failed — rolling back to $PREV_SHA"
+            git reset --hard "$PREV_SHA"
+            # Best-effort restore of the previous containers. If THIS also
+            # fails the previous containers were already running (compose up
+            # only restarts what changed), so the site likely never actually
+            # went down.
+            docker compose -f docker-compose.prod.yml up -d || true
+            docker compose -f docker-compose.prod.yml ps
+            exit 1
+          fi
+
           docker compose -f docker-compose.prod.yml ps
           REMOTE

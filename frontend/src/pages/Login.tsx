@@ -99,6 +99,12 @@ export default function Login() {
           >
             {loading ? t('auth.signingIn') : t('auth.signIn')}
           </button>
+
+          <div className="text-center">
+            <Link to="/forgot-password" className="text-xs text-primary hover:underline">
+              {t('auth.forgotPassword')}
+            </Link>
+          </div>
         </form>
 
         <p className="text-center text-sm text-muted-foreground">
