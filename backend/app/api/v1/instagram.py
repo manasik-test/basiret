@@ -206,10 +206,33 @@ def trigger_sync(
 
     # Dev convenience: bootstrap a test account if none exist
     if not accounts and settings.INSTAGRAM_TEST_TOKEN:
+        # Pull the real username + IG user id from /me so the seeded row matches
+        # the account the token actually points at. Fall back to placeholders if
+        # the API is unreachable (dev offline) — the row is still usable for tests.
+        ig_user_id = "test_user"
+        ig_username = "test_user"
+        try:
+            with httpx.Client(timeout=10) as client:
+                me_resp = client.get(ME_URL, params={
+                    "fields": "id,username",
+                    "access_token": settings.INSTAGRAM_TEST_TOKEN,
+                })
+            if me_resp.status_code == 200:
+                me = me_resp.json()
+                ig_user_id = str(me.get("id") or ig_user_id)
+                ig_username = me.get("username") or ig_username
+            else:
+                logger.warning(
+                    "Bootstrap /me failed (%s): %s — falling back to placeholders",
+                    me_resp.status_code, me_resp.text[:200],
+                )
+        except httpx.HTTPError as exc:
+            logger.warning("Bootstrap /me network error: %s — falling back to placeholders", exc)
+
         test_account = SocialAccount(
             platform=Platform.instagram,
-            platform_account_id="test_user",
-            username="test_user",
+            platform_account_id=ig_user_id,
+            username=ig_username,
             access_token_encrypted=encrypt_token(settings.INSTAGRAM_TEST_TOKEN),
             token_expires_at=datetime.now(timezone.utc) + timedelta(days=60),
             organization_id=user.organization_id,
