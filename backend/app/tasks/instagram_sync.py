@@ -1,14 +1,15 @@
 """
-Celery task: fetch posts + comments from Instagram Graph API and store in DB.
+Celery task: fetch posts + comments + post-level insights from Instagram Graph API.
 
-Uses /me/media to get recent posts, then /{media-id}/comments per post.
-Stores raw post data in post table, metrics in engagement_metric, individual
-comments (including author + timestamp) in comment.
+Uses /me/media to get recent posts, then /{media-id}/comments and
+/{media-id}/insights per post. Stores raw post data in post, metrics
+(likes/comments/shares/saves/reach/impressions) in engagement_metric, and
+individual comments in comment.
 
-Comment fetching requires the `instagram_business_manage_comments` scope on the
-access token. If the token only has `instagram_business_basic`, the comments
-endpoint returns 400/403 — this task logs and skips, so post sync still
-succeeds. See CLAUDE.md (Sprint 9 / OAuth scope notes) for scope upgrade plan.
+Optional scopes (graceful degradation if missing — feature is logged + skipped,
+post sync still succeeds):
+  - `instagram_business_manage_comments` — needed for /{media-id}/comments
+  - `instagram_business_manage_insights`  — needed for /{media-id}/insights
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,18 @@ MEDIA_FIELDS = (
 )
 COMMENT_FIELDS = "id,text,timestamp,username"
 COMMENTS_PAGE_LIMIT = 50
+
+# Media-insights metrics. `impressions` was deprecated in April 2025 — `views` is its
+# replacement and we map it into the `impressions` DB column for schema continuity.
+INSIGHTS_METRICS = "reach,saved,shares,views"
+
+# IG insights metric name → EngagementMetric column name.
+_INSIGHTS_FIELD_MAP = {
+    "reach": "reach",
+    "saved": "saves",
+    "shares": "shares",
+    "views": "impressions",
+}
 
 # Map Instagram media_type to our content_type enum
 MEDIA_TYPE_MAP = {
@@ -89,6 +102,57 @@ def _fetch_comments_for_media(client: httpx.Client, media_id: str, access_token:
         out.extend(data.get("data", []))
         url = data.get("paging", {}).get("next")
         params = None
+    return out
+
+
+def _fetch_insights_for_media(
+    client: httpx.Client,
+    media_id: str,
+    media_type: str | None,
+    access_token: str,
+) -> dict[str, int]:
+    """Fetch lifetime insights for a single media item.
+
+    Returns dict with keys reach/impressions/shares/saves (all default 0).
+    Per-media errors (400 unsupported metric/media, 403 missing scope, etc.)
+    are logged and degrade to zeros so post sync still succeeds when the token
+    lacks `instagram_business_manage_insights` or the media type doesn't
+    support insights (e.g. CAROUSEL_ALBUM has no album-level insights).
+    """
+    blank = {"reach": 0, "impressions": 0, "shares": 0, "saves": 0}
+
+    # CAROUSEL_ALBUM doesn't support insights at the album level — skip the call entirely.
+    if media_type == "CAROUSEL_ALBUM":
+        return blank
+
+    url = f"{GRAPH_BASE}/{media_id}/insights"
+    params = {"metric": INSIGHTS_METRICS, "period": "lifetime", "access_token": access_token}
+    try:
+        resp = client.get(url, params=params)
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (400, 403):
+            logger.warning(
+                "Insights fetch denied for media %s (status=%s, type=%s): %s — likely "
+                "missing `instagram_business_manage_insights` scope or unsupported metrics",
+                media_id, status, media_type, exc.response.text[:200],
+            )
+            return blank
+        raise
+
+    out = dict(blank)
+    for entry in resp.json().get("data", []):
+        column = _INSIGHTS_FIELD_MAP.get(entry.get("name"))
+        if not column:
+            continue
+        values = entry.get("values") or []
+        if not values:
+            continue
+        try:
+            out[column] = int(values[0].get("value", 0) or 0)
+        except (TypeError, ValueError):
+            pass
     return out
 
 
@@ -188,11 +252,20 @@ def sync_instagram_posts(self, social_account_id: str):
 
                 like_count = item.get("like_count", 0)
                 comments_count = item.get("comments_count", 0)
+
+                # Best-effort insights fetch — zeros if scope missing or unsupported metric/media type
+                insights = _fetch_insights_for_media(
+                    comments_client, item["id"], item.get("media_type"), access_token,
+                )
+
                 metric = EngagementMetric(
                     post_id=post.id,
                     likes=like_count,
                     comments=comments_count,
-                    shares=0, saves=0, reach=0, impressions=0,
+                    shares=insights["shares"],
+                    saves=insights["saves"],
+                    reach=insights["reach"],
+                    impressions=insights["impressions"],
                     engagement_rate=0.0,
                 )
                 db.add(metric)

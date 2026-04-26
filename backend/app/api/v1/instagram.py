@@ -62,9 +62,11 @@ def get_auth_url(user: User = Depends(get_current_user)):
         "client_id": settings.META_APP_ID,
         "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
         # `instagram_business_manage_comments` is required to read /{media-id}/comments.
-        # Without it, comment fetching gracefully degrades (logged + skipped) so existing
-        # tokens that only have `instagram_business_basic` keep working for post sync.
-        "scope": "instagram_business_basic,instagram_business_manage_comments",
+        # `instagram_business_manage_insights` is required to read /{media-id}/insights
+        # (reach, views, shares, saved). Both gracefully degrade in instagram_sync.py
+        # (logged + skipped) so existing tokens missing either scope keep working for
+        # the parts they still cover.
+        "scope": "instagram_business_basic,instagram_business_manage_comments,instagram_business_manage_insights",
         "response_type": "code",
         "state": state,
     }
