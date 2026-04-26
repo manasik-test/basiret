@@ -105,6 +105,23 @@ def _fetch_comments_for_media(client: httpx.Client, media_id: str, access_token:
     return out
 
 
+def _parse_insights_response(payload: dict) -> dict[str, int]:
+    """Parse an /insights response body into our EngagementMetric column dict."""
+    out = {"reach": 0, "impressions": 0, "shares": 0, "saves": 0}
+    for entry in payload.get("data", []):
+        column = _INSIGHTS_FIELD_MAP.get(entry.get("name"))
+        if not column:
+            continue
+        values = entry.get("values") or []
+        if not values:
+            continue
+        try:
+            out[column] = int(values[0].get("value", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def _fetch_insights_for_media(
     client: httpx.Client,
     media_id: str,
@@ -113,17 +130,16 @@ def _fetch_insights_for_media(
 ) -> dict[str, int]:
     """Fetch lifetime insights for a single media item.
 
-    Returns dict with keys reach/impressions/shares/saves (all default 0).
+    Works for IMAGE, VIDEO, and CAROUSEL_ALBUM — Instagram exposes
+    reach/views/saved/shares at the **album** level on carousels (the
+    `/{child-id}/insights` endpoint returns "Field is not available for
+    Carousel children media" and is therefore not used).
+
     Per-media errors (400 unsupported metric/media, 403 missing scope, etc.)
     are logged and degrade to zeros so post sync still succeeds when the token
-    lacks `instagram_business_manage_insights` or the media type doesn't
-    support insights (e.g. CAROUSEL_ALBUM has no album-level insights).
+    lacks `instagram_business_manage_insights`.
     """
     blank = {"reach": 0, "impressions": 0, "shares": 0, "saves": 0}
-
-    # CAROUSEL_ALBUM doesn't support insights at the album level — skip the call entirely.
-    if media_type == "CAROUSEL_ALBUM":
-        return blank
 
     url = f"{GRAPH_BASE}/{media_id}/insights"
     params = {"metric": INSIGHTS_METRICS, "period": "lifetime", "access_token": access_token}
@@ -141,19 +157,38 @@ def _fetch_insights_for_media(
             return blank
         raise
 
-    out = dict(blank)
-    for entry in resp.json().get("data", []):
-        column = _INSIGHTS_FIELD_MAP.get(entry.get("name"))
-        if not column:
-            continue
-        values = entry.get("values") or []
-        if not values:
-            continue
-        try:
-            out[column] = int(values[0].get("value", 0) or 0)
-        except (TypeError, ValueError):
-            pass
-    return out
+    return _parse_insights_response(resp.json())
+
+
+def _fetch_carousel_children(
+    client: httpx.Client, media_id: str, access_token: str,
+) -> list[dict]:
+    """Fetch per-slide structure (id + media_type) for a CAROUSEL_ALBUM.
+
+    Per-child *insights* are NOT exposed by Instagram (any
+    `/{child-id}/insights` call 400s with "Field is not available for
+    Carousel children media"), so we only use this for structural metadata —
+    slide count + per-slide media type — which the upcoming "optimal
+    carousel length" feature consumes.
+
+    Returns [] on 400/403 so a single permission/availability gap doesn't
+    abort the parent post sync.
+    """
+    url = f"{GRAPH_BASE}/{media_id}/children"
+    params = {"fields": "id,media_type", "access_token": access_token}
+    try:
+        resp = client.get(url, params=params)
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (400, 403):
+            logger.warning(
+                "Carousel children fetch denied for %s (status=%s): %s",
+                media_id, status, exc.response.text[:200],
+            )
+            return []
+        raise
+    return resp.json().get("data", []) or []
 
 
 def _parse_ig_timestamp(value: str | None) -> datetime | None:
@@ -218,12 +253,33 @@ def sync_instagram_posts(self, social_account_id: str):
         with httpx.Client(timeout=30) as comments_client:
             for item in media_items:
                 posted_at = _parse_ig_timestamp(item.get("timestamp"))
+                media_type = item.get("media_type")
+
+                # Album-level insights work for every media type (the prior
+                # carousel-skip in this branch was wrong — `/{album-id}/insights`
+                # returns reach/views/saves/shares cleanly on CAROUSEL_ALBUM).
+                insights = _fetch_insights_for_media(
+                    comments_client, item["id"], media_type, access_token,
+                )
+
+                # Carousels: also fetch per-slide structure (id + media_type)
+                # for the future "optimal carousel length" feature. Stash on
+                # raw_data BEFORE upsert so it persists in the JSONB column.
+                # `slide_count` is duplicated as a top-level int so SQL queries
+                # can filter/group by carousel length without unnesting the array.
+                if media_type == "CAROUSEL_ALBUM":
+                    children = _fetch_carousel_children(
+                        comments_client, item["id"], access_token,
+                    )
+                    if children:
+                        item["children"] = children
+                        item["slide_count"] = len(children)
 
                 post_values = {
                     "social_account_id": social_account_id,
                     "platform_post_id": item["id"],
                     "platform": "instagram",
-                    "content_type": MEDIA_TYPE_MAP.get(item.get("media_type"), "image"),
+                    "content_type": MEDIA_TYPE_MAP.get(media_type, "image"),
                     "caption": item.get("caption"),
                     "media_url": item.get("media_url"),
                     "posted_at": posted_at,
@@ -252,11 +308,6 @@ def sync_instagram_posts(self, social_account_id: str):
 
                 like_count = item.get("like_count", 0)
                 comments_count = item.get("comments_count", 0)
-
-                # Best-effort insights fetch — zeros if scope missing or unsupported metric/media type
-                insights = _fetch_insights_for_media(
-                    comments_client, item["id"], item.get("media_type"), access_token,
-                )
 
                 metric = EngagementMetric(
                     post_id=post.id,

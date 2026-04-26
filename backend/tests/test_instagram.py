@@ -4,8 +4,40 @@ Instagram endpoint tests — auth URL, sync trigger, account disconnect.
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch, MagicMock
 
+import httpx
+
 from app.core.security import decode_token, create_oauth_state_token
+from app.tasks.instagram_sync import (
+    _fetch_carousel_children,
+    _fetch_insights_for_media,
+)
 from tests.conftest import seed_social_account_with_posts
+
+
+def _mock_client(responses: list[MagicMock]) -> MagicMock:
+    """Build a fake httpx.Client whose .get() returns the given responses in order."""
+    client = MagicMock(spec=httpx.Client)
+    client.get.side_effect = responses
+    return client
+
+
+def _ok_resp(payload: dict) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = payload
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def _err_resp(status: int, body: str = "") -> MagicMock:
+    """Build an httpx response that .raise_for_status() will turn into HTTPStatusError."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.text = body
+    resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "boom", request=MagicMock(), response=resp,
+    )
+    return resp
 
 
 # ── 1. Get Instagram auth URL ──────────────────────────────
@@ -168,3 +200,64 @@ def test_callback_full_flow_connects_account(client, db, starter_user):
     assert account is not None
     assert account.username == "test_handle"
     assert account.is_active is True
+
+
+
+
+# ── 7. Carousel: album-level insights + children structure ──
+
+
+def test_fetch_insights_for_album_succeeds():
+    """Album-level /insights returns reach/views/saved/shares for CAROUSEL_ALBUM.
+
+    Per-child insights are NOT supported by Instagram (always 400), so we rely
+    on the album-level call exclusively.
+    """
+    client = _mock_client([
+        _ok_resp({"data": [
+            {"name": "reach", "values": [{"value": 15}]},
+            {"name": "saved", "values": [{"value": 0}]},
+            {"name": "shares", "values": [{"value": 0}]},
+            {"name": "views", "values": [{"value": 105}]},
+        ]}),
+    ])
+    out = _fetch_insights_for_media(client, "album_1", "CAROUSEL_ALBUM", "tok")
+    assert out == {"reach": 15, "impressions": 105, "shares": 0, "saves": 0}
+
+
+def test_fetch_insights_for_album_degrades_on_403():
+    """Missing scope / unsupported metric → zero dict, no raise."""
+    client = _mock_client([_err_resp(403, "no permission")])
+    out = _fetch_insights_for_media(client, "album_1", "CAROUSEL_ALBUM", "tok")
+    assert out == {"reach": 0, "impressions": 0, "shares": 0, "saves": 0}
+
+
+def test_fetch_carousel_children_returns_list_on_success():
+    """Happy path: /children returns a list of {id, media_type} per slide."""
+    client = _mock_client([
+        _ok_resp({"data": [
+            {"id": "child_1", "media_type": "IMAGE"},
+            {"id": "child_2", "media_type": "VIDEO"},
+            {"id": "child_3", "media_type": "IMAGE"},
+        ]}),
+    ])
+    children = _fetch_carousel_children(client, "album_1", "tok")
+    assert children == [
+        {"id": "child_1", "media_type": "IMAGE"},
+        {"id": "child_2", "media_type": "VIDEO"},
+        {"id": "child_3", "media_type": "IMAGE"},
+    ]
+    # slide_count derived in the caller — verify the array is a count source
+    assert len(children) == 3
+
+
+def test_fetch_carousel_children_returns_empty_on_403():
+    """Missing scope / forbidden: degrade to [] without raising."""
+    client = _mock_client([_err_resp(403, "no permission")])
+    assert _fetch_carousel_children(client, "album_1", "tok") == []
+
+
+def test_fetch_carousel_children_returns_empty_on_empty_data():
+    """Album with no children (shouldn't happen, but) returns []."""
+    client = _mock_client([_ok_resp({"data": []})])
+    assert _fetch_carousel_children(client, "album_1", "tok") == []
