@@ -1,8 +1,5 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Users, Calendar, Layers, CheckCircle2, TrendingUp, TrendingDown, Gauge } from 'lucide-react'
-import DoThisToday from '../components/dashboard/DoThisToday'
-import TopPostsTable from '../components/dashboard/TopPostsTable'
 import { useAuth } from '../contexts/AuthContext'
 import {
   useOverview,
@@ -11,9 +8,20 @@ import {
   usePostsBreakdown,
   useInsights,
 } from '../hooks/useAnalytics'
-import type { SegmentsData, PostsBreakdownData, SentimentData, OverviewData } from '../api/analytics'
+import type {
+  PostsBreakdownData,
+  SentimentData,
+  OverviewData,
+  InsightAction,
+  SegmentsData,
+} from '../api/analytics'
+import { Icon, I } from '../components/redesign/icons'
 
-type DotColor = 'green' | 'amber' | 'red'
+/* ------------------------------------------------------------------ */
+/* Types and helpers                                                  */
+/* ------------------------------------------------------------------ */
+
+type DotColor = 'good' | 'warn' | 'bad'
 
 interface Bullet {
   color: DotColor
@@ -21,138 +29,363 @@ interface Bullet {
   params?: Record<string, string | number>
 }
 
-const dotClass: Record<DotColor, string> = {
-  green: 'bg-emerald-500',
-  amber: 'bg-amber-500',
-  red: 'bg-red-500',
+type ActionPriority = 'urgent' | 'today' | 'week'
+
+interface ActionVm {
+  pri: ActionPriority
+  source: keyof typeof ACTION_SOURCES
+  title: string
+  why: string
+  cta: string
+  impact: string
+  time: string
 }
 
-function Greeting() {
+const ACTION_SOURCES = {
+  sentiment: { iconPath: I.heart, bg: 'oklch(0.96 0.05 30)', fg: 'oklch(0.5 0.17 30)' },
+  consistency: { iconPath: I.clock, bg: 'oklch(0.96 0.06 60)', fg: 'oklch(0.5 0.13 60)' },
+  schedule: { iconPath: I.bolt, bg: 'oklch(0.96 0.06 280)', fg: 'var(--purple-700)' },
+  competitor: { iconPath: I.users, bg: 'oklch(0.95 0.05 200)', fg: 'oklch(0.5 0.13 200)' },
+  audience: { iconPath: I.wand, bg: 'oklch(0.95 0.06 285)', fg: 'var(--purple-700)' },
+  plan: { iconPath: I.calendar, bg: 'var(--ink-100)', fg: 'var(--ink-700)' },
+} as const
+
+// Pick a source category from an action's title/finding text. Heuristic — matches
+// the design's six categories. Falls back to 'audience'.
+function pickSource(action: InsightAction): keyof typeof ACTION_SOURCES {
+  const blob = `${action.title} ${action.finding}`.toLowerCase()
+  if (/(sentiment|negat|comment|reply|complain)/.test(blob)) return 'sentiment'
+  if (/(post|consist|cadence|schedule|frequency|day|week)/.test(blob) && /(stop|pause|gap|miss|skip)/.test(blob))
+    return 'consistency'
+  if (/(time|hour|window|tuesday|monday|peak|am|pm|morning|evening|night)/.test(blob)) return 'schedule'
+  if (/(competit|raid|outperform|rival)/.test(blob)) return 'competitor'
+  if (/(plan|calendar|schedule|next week|upcoming)/.test(blob)) return 'plan'
+  return 'audience'
+}
+
+function priorityToBucket(p: 'high' | 'medium' | 'low'): ActionPriority {
+  if (p === 'high') return 'urgent'
+  if (p === 'medium') return 'today'
+  return 'week'
+}
+
+// Compress posting_dates to N evenly-spaced sparkline buckets covering the last
+// 30 days. Used for the 3 KPI sparklines on the home page.
+function sparkBuckets(
+  dates: PostsBreakdownData['posting_dates'] | undefined,
+  bucketCount = 12,
+  scale = 1,
+): number[] {
+  if (!dates || dates.length === 0) {
+    return Array.from({ length: bucketCount }, () => 0)
+  }
+  const now = Date.now()
+  const start = now - 30 * 24 * 60 * 60 * 1000
+  const bucketSize = (now - start) / bucketCount
+  const out = Array<number>(bucketCount).fill(0)
+  for (const d of dates) {
+    const ts = new Date(d.date).getTime()
+    if (ts < start || ts > now) continue
+    const idx = Math.min(bucketCount - 1, Math.floor((ts - start) / bucketSize))
+    out[idx] += d.count
+  }
+  return out.map((v) => v * scale)
+}
+
+function maxOr1(arr: number[]): number {
+  return Math.max(1, ...arr)
+}
+
+function formatCount(n: number): string {
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K'
+  return String(Math.round(n))
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                             */
+/* ------------------------------------------------------------------ */
+
+function Header({ range, setRange }: { range: '7d' | '30d' | '90d'; setRange: (r: '7d' | '30d' | '90d') => void }) {
   const { t, i18n } = useTranslation()
   const { user } = useAuth()
-  const firstName = user?.full_name.split(' ')[0] ?? ''
+  const firstName = user?.full_name?.split(' ')[0] ?? ''
   const hour = new Date().getHours()
-  const key = hour < 12 ? 'home.greetingMorning' : hour < 18 ? 'home.greetingAfternoon' : 'home.greetingEvening'
-  const now = new Date()
-  const dateStr = now.toLocaleDateString(i18n.language === 'ar' ? 'ar-EG' : 'en-US', {
+  const greetKey =
+    hour < 12 ? 'home.greetingMorning' : hour < 18 ? 'home.greetingAfternoon' : 'home.greetingEvening'
+
+  const dateStr = new Date().toLocaleDateString(i18n.language?.startsWith('ar') ? 'ar-EG' : 'en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
   })
 
   return (
-    <div className="flex flex-col gap-1" dir="auto">
-      <h2 className="text-2xl md:text-3xl font-bold text-foreground">
-        {t(key, { name: firstName })}
-      </h2>
-      <p className="text-sm text-muted-foreground">{dateStr}</p>
-    </div>
-  )
-}
-
-function PersonaCard({
-  primary,
-  percent,
-  contentType,
-  postingTime,
-}: {
-  primary: string
-  percent: number
-  contentType?: string
-  postingTime?: string
-}) {
-  const { t } = useTranslation()
-  const ctKey =
-    contentType === 'CAROUSEL_ALBUM'
-      ? 'carousel'
-      : contentType
-        ? contentType.toLowerCase()
-        : undefined
-  const timeKey = postingTime?.toLowerCase() as 'morning' | 'afternoon' | 'evening' | undefined
-
-  return (
-    <div className="rounded-xl border border-border/60 bg-white/40 p-4 hover:bg-white/60 transition-colors">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-semibold text-foreground leading-snug" dir="auto">
-          {primary}
-        </p>
-        <span className="shrink-0 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-          {percent}%
-        </span>
+    <header className="hm-head">
+      <div>
+        <div className="hm-crumb">{dateStr}</div>
+        <h1 dir="auto">
+          {t(greetKey, { name: firstName })} <span className="hm-wave">👋</span>
+        </h1>
+        <p dir="auto">{t('home.headerSubtitle')}</p>
       </div>
-      {(ctKey || timeKey) && (
-        <div className="flex flex-wrap gap-1.5 mt-3">
-          {ctKey && (
-            <span className="px-2 py-0.5 rounded-md bg-accent/30 text-primary text-[10px] font-semibold">
-              {t(`analytics.${ctKey}`)}
-            </span>
-          )}
-          {timeKey && (
-            <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-semibold">
-              {t(`audience.${timeKey}`)}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ContentPatterns({ segments }: { segments: SegmentsData | undefined }) {
-  const { t } = useTranslation()
-  const top3 = useMemo(() => {
-    if (!segments?.segments?.length) return []
-    const total = segments.segments.reduce((s, x) => s + x.size, 0) || 1
-    return [...segments.segments]
-      .sort((a, b) => b.size - a.size)
-      .slice(0, 3)
-      .map((s) => {
-        const c = s.characteristics as
-          | { persona_description?: string; dominant_content_type?: string; typical_posting_time?: string }
-          | undefined
-        const desc = c?.persona_description?.trim()
-        return {
-          id: s.id,
-          primary: desc && desc.length > 0 ? desc : s.label,
-          percent: Math.round((s.size / total) * 100),
-          contentType: c?.dominant_content_type,
-          postingTime: c?.typical_posting_time,
-        }
-      })
-  }, [segments])
-
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-4">
-      <div className="flex items-start gap-2">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-          <Users className="w-4 h-4" />
-        </div>
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <h3 className="text-base font-bold text-foreground">{t('home.patternsTitle')}</h3>
-          <p className="text-xs text-muted-foreground" dir="auto">{t('home.patternsSubtitle')}</p>
-        </div>
-      </div>
-
-      {top3.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          {top3.map((s) => (
-            <PersonaCard
-              key={s.id}
-              primary={s.primary}
-              percent={s.percent}
-              contentType={s.contentType}
-              postingTime={s.postingTime}
-            />
+      <div className="hm-head-r">
+        <div className="hm-seg">
+          {(['7d', '30d', '90d'] as const).map((r) => (
+            <button key={r} className={range === r ? 'is-on' : ''} onClick={() => setRange(r)}>
+              {t(`home.dateRange.${r}` as const)}
+            </button>
           ))}
         </div>
-      ) : (
-        <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          {t('home.patternsEmpty')}
+      </div>
+    </header>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* KPI strip                                                          */
+/* ------------------------------------------------------------------ */
+
+function GrowthRing({ score, change }: { score: number; change: number }) {
+  const r = 50
+  const circ = 2 * Math.PI * r
+  const offset = circ * (1 - Math.max(0, Math.min(100, score)) / 100)
+  return (
+    <div className="hm-kpi-ring">
+      <svg viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r={r} fill="none" stroke="rgba(255,255,255,.25)" strokeWidth="10" />
+        <circle
+          cx="60"
+          cy="60"
+          r={r}
+          fill="none"
+          stroke="#fff"
+          strokeWidth="10"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 60 60)"
+        />
+      </svg>
+      <div className="hm-kpi-ring-c">
+        <span className="num">{Math.round(score)}</span>
+        <em>/100</em>
+      </div>
+      {change !== 0 && (
+        <div className="hm-kpi-ring-delta">
+          {change > 0 ? '↑' : '↓'} <span className="num">{change > 0 ? `+${change}` : change}</span>
         </div>
       )}
     </div>
   )
 }
+
+function Sparkline({ values }: { values: number[] }) {
+  const max = maxOr1(values)
+  return (
+    <div className="hm-kpi-spark">
+      {values.map((v, i) => (
+        <div key={i} style={{ height: `${Math.max(8, (v / max) * 100)}%` }} />
+      ))}
+    </div>
+  )
+}
+
+function KpiStrip({
+  overview,
+  sentiment,
+  breakdown,
+  insightScore,
+  insightChange,
+  consistencyValue,
+  audienceFitValue,
+  varietyValue,
+  igPerfValue,
+}: {
+  overview: OverviewData | undefined
+  sentiment: SentimentData | undefined
+  breakdown: PostsBreakdownData | undefined
+  insightScore: number | null
+  insightChange: number
+  consistencyValue: number
+  audienceFitValue: number
+  varietyValue: number
+  igPerfValue: number
+}) {
+  const { t } = useTranslation()
+
+  // Derive a fallback score when no insights yet — average of bottom-grid bars.
+  const score =
+    insightScore ?? Math.round(((consistencyValue + audienceFitValue + varietyValue + igPerfValue) / 4) * 100)
+
+  const totalEng = overview?.total_engagement ?? (sentiment?.positive ?? 0) + (sentiment?.neutral ?? 0) + (sentiment?.negative ?? 0)
+  const reach = overview ? Math.round(overview.total_engagement * 5) : 0
+  const postsThisMonth = breakdown?.posting_dates?.reduce((s, d) => s + d.count, 0) ?? overview?.total_posts ?? 0
+
+  // Sparkline buckets
+  const dates = breakdown?.posting_dates
+  const engBuckets = sparkBuckets(dates, 12, overview?.avg_engagement_per_post || 1)
+  const reachBuckets = sparkBuckets(dates, 12, 5)
+  const postBuckets = sparkBuckets(dates, 12, 1)
+
+  return (
+    <section className="hm-kpi">
+      {/* Hero — growth health ring */}
+      <div className="hm-kpi-card hm-kpi--hero">
+        <div className="hm-kpi-hero-l">
+          <div className="hm-kpi-k">{t('home.kpi.growthHealth')}</div>
+          <div className="hm-kpi-d up">
+            {insightChange !== 0 && (
+              <>
+                {insightChange > 0 ? '↑' : '↓'}{' '}
+                <span className="num">{insightChange > 0 ? `+${insightChange}` : insightChange}</span>{' '}
+                {t('home.kpi.pointsThisMonth', { value: '' })}
+              </>
+            )}
+            {insightChange === 0 && t('home.growthHealthSubtitle')}
+          </div>
+        </div>
+        <GrowthRing score={score} change={insightChange} />
+      </div>
+
+      <div className="hm-kpi-card">
+        <div className="hm-kpi-k">{t('home.kpi.totalEngagement')}</div>
+        <div className="hm-kpi-v num">{formatCount(totalEng)}</div>
+        <Sparkline values={engBuckets} />
+      </div>
+      <div className="hm-kpi-card">
+        <div className="hm-kpi-k">{t('home.kpi.reach')}</div>
+        <div className="hm-kpi-v num">{formatCount(reach)}</div>
+        <Sparkline values={reachBuckets} />
+      </div>
+      <div className="hm-kpi-card">
+        <div className="hm-kpi-k">{t('home.kpi.postsThisMonth')}</div>
+        <div className="hm-kpi-v num">{postsThisMonth}</div>
+        <Sparkline values={postBuckets} />
+      </div>
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* NBA banner                                                         */
+/* ------------------------------------------------------------------ */
+
+function NBABanner({ insight, summary }: { insight: InsightAction | null; summary: string }) {
+  const { t } = useTranslation()
+  return (
+    <section className="hm-nba">
+      <div className="hm-nba-l">
+        <span className="hm-nba-av">✦</span>
+        <div>
+          <div className="hm-nba-k">{t('home.nba.label')}</div>
+          <div className="hm-nba-t" dir="auto">
+            {insight ? (
+              <>
+                <strong>{insight.title}</strong>
+                {insight.finding ? <> — {insight.finding}</> : null}
+              </>
+            ) : (
+              summary || t('home.nba.fallback')
+            )}
+          </div>
+        </div>
+      </div>
+      <button className="hm-nba-btn">
+        {t('home.nba.cta')}
+        <Icon path={I.chevL} size={12} />
+      </button>
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Today's actions                                                    */
+/* ------------------------------------------------------------------ */
+
+function ActionsList({ actions }: { actions: ActionVm[] }) {
+  const { t } = useTranslation()
+  const buckets = {
+    urgent: actions.filter((a) => a.pri === 'urgent').length,
+    today: actions.filter((a) => a.pri === 'today').length,
+    week: actions.filter((a) => a.pri === 'week').length,
+  }
+
+  return (
+    <section className="hm-actions">
+      <div className="hm-actions-head">
+        <div>
+          <h3>{t('home.actions.title')}</h3>
+          <p dir="auto">{t('home.actions.subtitle')}</p>
+        </div>
+        <div className="hm-actions-stats">
+          <span>
+            <b className="num">{buckets.urgent}</b> {t('home.actions.urgentCount')}
+          </span>
+          <span>
+            <b className="num">{buckets.today}</b> {t('home.actions.todayCount')}
+          </span>
+          <span>
+            <b className="num">{buckets.week}</b> {t('home.actions.weekCount')}
+          </span>
+        </div>
+      </div>
+
+      {actions.length === 0 ? (
+        <div className="hm-actions-empty" dir="auto">
+          {t('home.actions.empty')}
+        </div>
+      ) : (
+        <div className="hm-actions-list">
+          {actions.map((a, i) => {
+            const meta = ACTION_SOURCES[a.source]
+            const priLabelKey =
+              a.pri === 'urgent'
+                ? 'home.actions.priorityUrgent'
+                : a.pri === 'today'
+                  ? 'home.actions.priorityToday'
+                  : 'home.actions.priorityWeek'
+            const priColors =
+              a.pri === 'urgent'
+                ? { bg: 'oklch(0.96 0.05 30)', fg: 'oklch(0.5 0.17 30)' }
+                : a.pri === 'today'
+                  ? { bg: 'oklch(0.96 0.06 280)', fg: 'var(--purple-700)' }
+                  : { bg: 'var(--ink-100)', fg: 'var(--ink-700)' }
+            return (
+              <article key={i} className={`hm-act hm-act--${a.pri}`}>
+                <div className="hm-act-pri" style={{ background: priColors.bg, color: priColors.fg }}>
+                  <span className="hm-act-pri-dot" style={{ background: priColors.fg }} />
+                  {t(priLabelKey)}
+                </div>
+                <div className="hm-act-body">
+                  <div className="hm-act-title" dir="auto">{a.title}</div>
+                  <div className="hm-act-why" dir="auto">
+                    <span className="hm-act-src" style={{ color: meta.fg }}>
+                      {t(`home.actions.sources.${a.source}` as const)}
+                    </span>
+                    {a.why && (
+                      <>
+                        <span className="hm-act-dot">·</span>
+                        {a.why}
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="hm-act-meta">
+                  {a.impact && <span className="hm-act-impact" title={a.impact}>{a.impact}</span>}
+                  {a.time && <span className="hm-act-time num">⏱ {a.time}</span>}
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Bottom 2-col grid (What's working + Growth health breakdown)       */
+/* ------------------------------------------------------------------ */
 
 function WhatsWorking({
   breakdown,
@@ -172,17 +405,18 @@ function WhatsWorking({
       const winner = sorted[0]
       const runnerUp = sorted[1]
       if (winner && (!runnerUp || winner.avg_likes > runnerUp.avg_likes * 1.2)) {
-        const typeKey = winner.content_type === 'CAROUSEL_ALBUM' ? 'carousel' : winner.content_type.toLowerCase()
+        const typeKey =
+          winner.content_type === 'CAROUSEL_ALBUM' ? 'carousel' : winner.content_type.toLowerCase()
         out.push({
-          color: 'green',
+          color: 'good',
           textKey: 'home.bullets.typeWinner',
           params: { type: t(`analytics.${typeKey}`) },
         })
       } else if (winner) {
-        out.push({ color: 'amber', textKey: 'home.bullets.noClearWinner' })
+        out.push({ color: 'warn', textKey: 'home.bullets.noClearWinner' })
       }
     } else {
-      out.push({ color: 'amber', textKey: 'home.bullets.noPosts' })
+      out.push({ color: 'warn', textKey: 'home.bullets.noPosts' })
     }
 
     // 2. Sentiment
@@ -192,144 +426,185 @@ function WhatsWorking({
         const posPct = sentiment.positive / total
         const negPct = sentiment.negative / total
         if (posPct >= 0.6) {
-          out.push({ color: 'green', textKey: 'home.bullets.sentimentStrong', params: { pct: Math.round(posPct * 100) } })
+          out.push({
+            color: 'good',
+            textKey: 'home.bullets.sentimentStrong',
+            params: { pct: Math.round(posPct * 100) },
+          })
         } else if (negPct >= 0.3) {
-          out.push({ color: 'red', textKey: 'home.bullets.sentimentConcern', params: { pct: Math.round(negPct * 100) } })
+          out.push({
+            color: 'bad',
+            textKey: 'home.bullets.sentimentConcern',
+            params: { pct: Math.round(negPct * 100) },
+          })
         } else {
-          out.push({ color: 'amber', textKey: 'home.bullets.sentimentMixed' })
+          out.push({ color: 'warn', textKey: 'home.bullets.sentimentMixed' })
         }
       }
     }
 
-    // 3. Consistency (posts in last 7 days)
+    // 3. Consistency
     if (breakdown?.posting_dates) {
-      const now = Date.now()
-      const weekAgo = now - 7 * 24 * 60 * 60 * 1000
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
       const recent = breakdown.posting_dates.filter((d) => new Date(d.date).getTime() >= weekAgo)
       const postsThisWeek = recent.reduce((s, r) => s + r.count, 0)
       if (postsThisWeek >= 3) {
-        out.push({ color: 'green', textKey: 'home.bullets.consistencyGood', params: { n: postsThisWeek } })
+        out.push({ color: 'good', textKey: 'home.bullets.consistencyGood', params: { n: postsThisWeek } })
       } else if (postsThisWeek >= 1) {
-        out.push({ color: 'amber', textKey: 'home.bullets.consistencyUneven', params: { n: postsThisWeek } })
+        out.push({ color: 'warn', textKey: 'home.bullets.consistencyUneven', params: { n: postsThisWeek } })
       } else {
-        out.push({ color: 'red', textKey: 'home.bullets.consistencyGap' })
+        out.push({ color: 'bad', textKey: 'home.bullets.consistencyGap' })
       }
     }
 
     // 4. Variety
     const types = new Set((breakdown?.by_type ?? []).map((b) => b.content_type))
     if (types.size >= 3) {
-      out.push({ color: 'green', textKey: 'home.bullets.varietyGood' })
+      out.push({ color: 'good', textKey: 'home.bullets.varietyGood' })
     } else if (types.size === 2) {
-      out.push({ color: 'amber', textKey: 'home.bullets.varietyLow' })
+      out.push({ color: 'warn', textKey: 'home.bullets.varietyLow' })
     } else if (types.size === 1) {
-      out.push({ color: 'red', textKey: 'home.bullets.varietyMono' })
+      out.push({ color: 'bad', textKey: 'home.bullets.varietyMono' })
     }
 
     return out.slice(0, 4)
   }, [breakdown, sentiment, t])
 
   return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-lg bg-cta/10 text-cta flex items-center justify-center">
-          <CheckCircle2 className="w-4 h-4" />
+    <section className="hm-card">
+      <div className="hm-card-head">
+        <div>
+          <h3>{t('home.whatsWorkingTitle')}</h3>
+          <p>{t('home.whatsWorkingSubtitle')}</p>
         </div>
-        <h3 className="text-base font-bold text-foreground">{t('home.whatsWorkingTitle')}</h3>
       </div>
-
       {bullets.length > 0 ? (
-        <ul className="flex flex-col gap-3">
+        <ul className="hm-bullets">
           {bullets.map((b, i) => (
-            <li key={i} className="flex items-start gap-3">
-              <span className={`mt-1.5 w-2.5 h-2.5 rounded-full shrink-0 ${dotClass[b.color]}`} />
-              <p className="text-sm text-foreground/85 leading-relaxed" dir="auto">
-                {t(b.textKey, b.params)}
-              </p>
+            <li key={i}>
+              <span className={`hm-dot ${b.color}`} />
+              <div dir="auto">{t(b.textKey, b.params)}</div>
             </li>
           ))}
         </ul>
       ) : (
-        <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+        <div className="hm-empty" dir="auto">
           {t('home.whatsWorkingEmpty')}
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
-function HealthBar({
-  label,
-  icon,
-  value,
-  helper,
+function GrowthHealthBreakdown({
+  consistency,
+  consistencyHelper,
+  audienceFit,
+  variety,
+  igPerformance,
+  displayScore,
 }: {
-  label: string
-  icon: React.ReactNode
-  value: number
-  helper?: string
+  consistency: number
+  consistencyHelper: string
+  audienceFit: number
+  variety: number
+  igPerformance: number
+  displayScore: number
 }) {
-  const pct = Math.max(0, Math.min(100, Math.round(value * 100)))
-  const color = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500'
+  const { t } = useTranslation()
+  const rows: Array<{ k: string; v: number; hint: string; tone: 'good' | 'warn' | 'bad' }> = [
+    {
+      k: t('home.bar.audienceFit'),
+      v: Math.round(audienceFit * 100),
+      hint: t('home.bar.audienceFitHint'),
+      tone: audienceFit >= 0.7 ? 'good' : audienceFit >= 0.4 ? 'warn' : 'bad',
+    },
+    {
+      k: t('home.bar.instagramPerf'),
+      v: Math.round(igPerformance * 100),
+      hint: t('home.bar.instagramPerfHint'),
+      tone: igPerformance >= 0.7 ? 'good' : igPerformance >= 0.4 ? 'warn' : 'bad',
+    },
+    {
+      k: t('home.bar.consistency'),
+      v: Math.round(consistency * 100),
+      hint: consistencyHelper,
+      tone: consistency >= 0.7 ? 'good' : consistency >= 0.4 ? 'warn' : 'bad',
+    },
+    {
+      k: t('home.bar.variety'),
+      v: Math.round(variety * 100),
+      hint: t('home.bar.varietyHint'),
+      tone: variety >= 0.7 ? 'good' : variety >= 0.4 ? 'warn' : 'bad',
+    },
+  ]
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm text-foreground/80">
-          <div className="w-6 h-6 rounded-md bg-primary/10 text-primary flex items-center justify-center">
-            {icon}
-          </div>
-          <span className="font-medium">{label}</span>
+    <section className="hm-card">
+      <div className="hm-card-head">
+        <div>
+          <h3>{t('home.growthHealthBreakdown')}</h3>
+          <p>{t('home.growthHealthBreakdownSubtitle')}</p>
         </div>
-        <span className="text-sm font-semibold text-foreground">{pct}%</span>
+        <div className="hm-score">
+          <span className="num">{displayScore}</span>
+          <em>/100</em>
+        </div>
       </div>
-      <div dir="ltr" className="h-2 rounded-full bg-border/60 overflow-hidden">
-        <div className={`h-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+      <div className="hm-health">
+        {rows.map((row, i) => (
+          <div key={i} className="hm-hr">
+            <div className="hm-hr-top">
+              <div className="hm-hr-k">{row.k}</div>
+              <div className={`hm-hr-v num ${row.tone}`}>{row.v}%</div>
+            </div>
+            <div className="hm-hr-track">
+              <div className={`hm-hr-fill ${row.tone}`} style={{ width: `${row.v}%` }} />
+            </div>
+            <div className="hm-hr-hint" dir="auto">
+              {row.hint}
+            </div>
+          </div>
+        ))}
       </div>
-      {helper && <p className="text-[11px] text-muted-foreground" dir="auto">{helper}</p>}
-    </div>
+    </section>
   )
 }
 
-function GrowthHealth({
-  overview,
-  sentiment,
-  breakdown,
-  aiScore,
-  scoreChange,
-}: {
-  overview: OverviewData | undefined
-  sentiment: SentimentData | undefined
-  breakdown: PostsBreakdownData | undefined
-  aiScore: number | null
-  scoreChange: number
-}) {
+/* ------------------------------------------------------------------ */
+/* Page                                                               */
+/* ------------------------------------------------------------------ */
+
+export default function Dashboard() {
+  const overview = useOverview()
+  const sentiment = useSentiment()
+  const segments = useSegments()
+  const breakdown = usePostsBreakdown()
+  const insights = useInsights()
+  const [range, setRange] = useState<'7d' | '30d' | '90d'>('30d')
   const { t, i18n } = useTranslation()
 
+  // Derived values used both by the bottom panel AND by the KPI fallback score.
   const consistency = useMemo(() => {
-    if (!breakdown?.posting_dates) return 0
+    const dates = breakdown.data?.posting_dates
+    if (!dates) return 0
     const weekAgo = Date.now() - 14 * 24 * 60 * 60 * 1000
     const activeDays = new Set(
-      breakdown.posting_dates
-        .filter((d) => new Date(d.date).getTime() >= weekAgo)
-        .map((d) => d.date),
+      dates.filter((d) => new Date(d.date).getTime() >= weekAgo).map((d) => d.date),
     ).size
     return Math.min(1, activeDays / 7)
-  }, [breakdown])
+  }, [breakdown.data])
 
   const mostRecentPostDate = useMemo(() => {
-    if (!breakdown?.posting_dates?.length) return null
-    const latest = breakdown.posting_dates
-      .map((d) => d.date)
-      .sort()
-      .pop()
-    return latest ?? null
-  }, [breakdown])
+    const dates = breakdown.data?.posting_dates
+    if (!dates?.length) return null
+    return [...dates].sort((a, b) => a.date.localeCompare(b.date)).pop()?.date ?? null
+  }, [breakdown.data])
 
   const consistencyHelper = useMemo(() => {
     if (consistency === 0 && mostRecentPostDate) {
       const formatted = new Date(mostRecentPostDate).toLocaleDateString(
-        i18n.language === 'ar' ? 'ar-EG' : 'en-US',
+        i18n.language?.startsWith('ar') ? 'ar-EG' : 'en-US',
         { month: 'short', day: 'numeric', year: 'numeric' },
       )
       return t('home.bar.consistencyLastPost', { date: formatted })
@@ -338,105 +613,222 @@ function GrowthHealth({
   }, [consistency, mostRecentPostDate, i18n.language, t])
 
   const audienceFit = useMemo(() => {
-    if (!sentiment) return 0
-    const total = sentiment.positive + sentiment.neutral + sentiment.negative
-    return total > 0 ? sentiment.positive / total : 0
-  }, [sentiment])
+    const s = sentiment.data
+    if (!s) return 0
+    const total = s.positive + s.neutral + s.negative
+    return total > 0 ? s.positive / total : 0
+  }, [sentiment.data])
 
   const variety = useMemo(() => {
-    const n = new Set((breakdown?.by_type ?? []).map((b) => b.content_type)).size
+    const n = new Set((breakdown.data?.by_type ?? []).map((b) => b.content_type)).size
     return Math.min(1, n / 3)
-  }, [breakdown])
+  }, [breakdown.data])
 
   const igPerformance = useMemo(() => {
-    if (!overview) return 0
-    return Math.min(1, overview.avg_engagement_per_post / 100)
-  }, [overview])
+    const o = overview.data
+    if (!o) return 0
+    return Math.min(1, o.avg_engagement_per_post / 100)
+  }, [overview.data])
 
-  const displayScore = aiScore ?? Math.round(((consistency + audienceFit + variety + igPerformance) / 4) * 100)
-  const change = scoreChange
+  // Map insights → action list. Gemini returns long sentences for `action` and
+  // `expected_impact`, but the design expects short labels. Truncate impact to
+  // fit the meta column and keep the CTA button generic ("Open"); the full
+  // action text is surfaced as the `why` line below the title so users see it.
+  const actions: ActionVm[] = useMemo(() => {
+    const data = insights.data
+    if (!data?.insights?.length) return []
+    const truncate = (s: string, max: number) =>
+      s && s.length > max ? `${s.slice(0, max - 1).trim()}…` : s
+    return data.insights.slice(0, 6).map<ActionVm>((a) => ({
+      pri: priorityToBucket(a.priority),
+      source: pickSource(a),
+      title: a.title,
+      why: a.action || a.finding,
+      cta: '',
+      impact: truncate(a.expected_impact || '', 20),
+      time: truncate(a.timeframe || '', 18),
+    }))
+  }, [insights.data])
+
+  const insightScore = insights.data?.score ?? null
+  const insightChange = insights.data?.score_change ?? 0
+  const displayScore =
+    insightScore ?? Math.round(((consistency + audienceFit + variety + igPerformance) / 4) * 100)
+
+  // Suppress unused warning for `segments` — kept available so the underlying
+  // query stays warm; the segments-derived "Content patterns" section was
+  // removed in this redesign and now lives on the My Audience page.
+  void segments
 
   return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h3 className="text-base font-bold text-foreground">{t('home.growthHealthTitle')}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">{t('home.growthHealthSubtitle')}</p>
-        </div>
-        <div className="flex items-end gap-2">
-          <span className="text-4xl md:text-5xl font-black text-primary leading-none">{displayScore}</span>
-          <span className="text-sm text-muted-foreground pb-1">/100</span>
-          {change !== 0 && (
-            <span
-              className={`flex items-center gap-0.5 pb-1 text-xs font-semibold ${change > 0 ? 'text-emerald-600' : 'text-red-600'}`}
-            >
-              {change > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-              {change > 0 ? '+' : ''}{change}
-            </span>
-          )}
+    <div className="rd-canvas">
+      <div className="hm-main">
+        <Header range={range} setRange={setRange} />
+
+        <KpiStrip
+          overview={overview.data}
+          sentiment={sentiment.data}
+          breakdown={breakdown.data}
+          insightScore={insightScore}
+          insightChange={insightChange}
+          consistencyValue={consistency}
+          audienceFitValue={audienceFit}
+          varietyValue={variety}
+          igPerfValue={igPerformance}
+        />
+
+        <NBABanner
+          insight={insights.data?.insights?.[0] ?? null}
+          summary={insights.data?.summary ?? ''}
+        />
+
+        <ActionsList actions={actions} />
+
+        <div className="hm-grid">
+          <WhatsWorking breakdown={breakdown.data} sentiment={sentiment.data} />
+          <GrowthHealthBreakdown
+            consistency={consistency}
+            consistencyHelper={consistencyHelper}
+            audienceFit={audienceFit}
+            variety={variety}
+            igPerformance={igPerformance}
+            displayScore={displayScore}
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-        <HealthBar
-          label={t('home.bar.consistency')}
-          icon={<Calendar className="w-3.5 h-3.5" />}
-          value={consistency}
-          helper={consistencyHelper}
-        />
-        <HealthBar
-          label={t('home.bar.audienceFit')}
-          icon={<Users className="w-3.5 h-3.5" />}
-          value={audienceFit}
-          helper={t('home.bar.audienceFitHint')}
-        />
-        <HealthBar
-          label={t('home.bar.variety')}
-          icon={<Layers className="w-3.5 h-3.5" />}
-          value={variety}
-          helper={t('home.bar.varietyHint')}
-        />
-        <HealthBar
-          label={t('home.bar.instagramPerf')}
-          icon={<Gauge className="w-3.5 h-3.5" />}
-          value={igPerformance}
-          helper={t('home.bar.instagramPerfHint')}
-        />
-      </div>
+      <style>{HM_STYLES}</style>
     </div>
   )
 }
 
-export default function Dashboard() {
-  const overview = useOverview()
-  const sentiment = useSentiment()
-  const segments = useSegments()
-  const breakdown = usePostsBreakdown()
-  const insights = useInsights()
+/* ------------------------------------------------------------------ */
+/* Styles (ported from components/HomeApp.jsx)                        */
+/* ------------------------------------------------------------------ */
 
-  const aiScore = insights.data?.score ?? null
-  const scoreChange = insights.data?.score_change ?? 0
+const HM_STYLES = `
+.hm-main { display:flex; flex-direction:column; gap:22px; max-width:1520px; margin:0 auto; }
 
-  return (
-    <div className="space-y-6">
-      <Greeting />
+/* Header */
+.hm-head { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; flex-wrap:wrap; }
+.hm-crumb { font-size:12px; color:var(--ink-500); font-weight:500; margin-bottom:8px; }
+.hm-head h1 { font-size:30px; font-weight:700; color:var(--ink-950); letter-spacing:-0.025em; line-height:1.2; }
+.hm-wave { display:inline-block; animation:hm-wave 2.4s ease-in-out infinite; transform-origin:70% 70%; }
+@keyframes hm-wave { 0%,60%,100% { transform:rotate(0); } 10%,30%,50% { transform:rotate(14deg); } 20%,40% { transform:rotate(-8deg); } }
+.hm-head p { font-size:13.5px; color:var(--ink-600); max-width:560px; line-height:1.5; margin-top:6px; }
+.hm-head-r { display:flex; gap:10px; align-items:center; }
+.hm-seg { display:flex; background:var(--ink-100); border-radius:10px; padding:3px; }
+.hm-seg button { padding:7px 14px; font-size:12.5px; border-radius:7px; color:var(--ink-600); font-weight:500; }
+.hm-seg button.is-on { background:var(--surface); color:var(--ink-900); font-weight:600; box-shadow:var(--shadow-sm); }
 
-      <DoThisToday />
+/* KPI strip */
+.hm-kpi { display:grid; grid-template-columns:1.3fr 1fr 1fr 1fr; gap:14px; }
+@media (max-width:1024px) { .hm-kpi { grid-template-columns:1fr 1fr; } }
+@media (max-width:640px)  { .hm-kpi { grid-template-columns:1fr; } }
+.hm-kpi-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:20px 22px; display:flex; flex-direction:column; gap:8px; position:relative; overflow:hidden; }
+.hm-kpi--hero { background:linear-gradient(135deg, var(--purple-800), oklch(0.28 0.14 285)); color:#fff; border:none; flex-direction:row; align-items:center; gap:20px; padding:18px 22px; }
+.hm-kpi--hero .hm-kpi-k { color:rgba(255,255,255,.92); margin:0 0 6px; font-weight:600; }
+.hm-kpi--hero .hm-kpi-d { color:#fff; font-weight:600; }
+.hm-kpi--hero .hm-kpi-d.up { color:oklch(0.92 0.18 150); }
+.hm-kpi-hero-l { flex:1; }
+.hm-kpi-k { font-size:11.5px; color:var(--ink-500); font-weight:500; }
+.hm-kpi-v { font-size:28px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
+.hm-kpi-d { font-size:12px; font-weight:600; color:var(--ink-600); }
+.hm-kpi-d.up { color:oklch(0.5 0.15 155); }
+.hm-kpi-spark { display:flex; gap:3px; align-items:flex-end; height:34px; margin-top:auto; }
+.hm-kpi-spark > div { flex:1; background:var(--purple-200); border-radius:2px 2px 0 0; min-height:3px; }
+.hm-kpi-ring { position:relative; width:92px; height:92px; flex-shrink:0; }
+.hm-kpi-ring svg { width:100%; height:100%; }
+.hm-kpi-ring-c { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1; }
+.hm-kpi-ring-c .num { font-size:28px; font-weight:700; letter-spacing:-0.02em; }
+.hm-kpi-ring-c em { font-style:normal; font-size:11px; opacity:.85; font-weight:500; margin-top:3px; }
+.hm-kpi-ring-delta { position:absolute; bottom:-8px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:700; padding:2px 8px; border-radius:99px; background:rgba(255,255,255,.18); color:oklch(0.92 0.18 150); white-space:nowrap; }
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ContentPatterns segments={segments.data} />
-        <WhatsWorking breakdown={breakdown.data} sentiment={sentiment.data} />
-      </div>
+/* NBA banner */
+.hm-nba { background:linear-gradient(135deg, var(--purple-50), oklch(0.97 0.03 280)); border:1px solid var(--purple-200); border-radius:16px; padding:18px 22px; display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
+.hm-nba-l { display:flex; gap:14px; align-items:center; flex:1; min-width:0; }
+.hm-nba-av { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg, var(--purple-500), var(--purple-700)); color:#fff; display:grid; place-items:center; font-size:17px; font-weight:700; box-shadow:0 6px 18px -4px rgba(99,65,224,.5); flex-shrink:0; }
+.hm-nba-k { font-size:11px; font-weight:700; color:var(--purple-700); margin-bottom:4px; letter-spacing:0.02em; }
+.hm-nba-t { font-size:13.5px; color:var(--ink-900); line-height:1.55; font-weight:500; }
+.hm-nba-t strong { color:var(--ink-950); font-weight:700; }
+.hm-nba-btn { padding:10px 16px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:5px; flex-shrink:0; box-shadow:0 6px 16px -6px rgba(99,65,224,.5); }
+.hm-nba-btn:hover { background:var(--purple-700); }
 
-      <GrowthHealth
-        overview={overview.data}
-        sentiment={sentiment.data}
-        breakdown={breakdown.data}
-        aiScore={aiScore}
-        scoreChange={scoreChange}
-      />
+/* Actions for today */
+.hm-actions { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:22px; }
+.hm-actions-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:14px; flex-wrap:wrap; }
+.hm-actions-head h3 { font-size:15px; font-weight:700; color:var(--ink-950); letter-spacing:-0.005em; }
+.hm-actions-head p { font-size:12px; color:var(--ink-500); margin-top:3px; }
+.hm-actions-stats { display:flex; gap:14px; font-size:11.5px; color:var(--ink-600); font-weight:500; }
+.hm-actions-stats span { display:inline-flex; align-items:baseline; gap:4px; }
+.hm-actions-stats b { color:var(--ink-950); font-weight:700; font-size:14px; letter-spacing:-0.005em; }
+.hm-actions-empty { padding:36px; text-align:center; font-size:13px; color:var(--ink-500); border:1px dashed var(--line); border-radius:12px; }
 
-      <TopPostsTable />
-    </div>
-  )
-}
+.hm-actions-list { display:flex; flex-direction:column; gap:8px; }
+/* Layout: pri pill | body (flex grows) | meta (right aligned) — no separate
+   CTA column. Body text wraps; meta truncates with ellipsis. */
+.hm-act { display:grid; grid-template-columns:96px minmax(0,1fr) minmax(140px, 200px); gap:14px; align-items:center; padding:14px 16px; border-radius:12px; border:1px solid var(--line); background:var(--surface); transition:all .15s; }
+@media (max-width:768px) { .hm-act { grid-template-columns:1fr; gap:8px; } .hm-act-meta { padding-inline-start:0; border-inline-start:none; padding-top:8px; border-top:1px solid var(--line); } }
+.hm-act:hover { border-color:var(--purple-300); background:var(--ink-50); }
+.hm-act--urgent { border-color:oklch(0.88 0.06 30); background:oklch(0.99 0.01 30); }
+.hm-act--urgent:hover { border-color:oklch(0.75 0.13 30); background:oklch(0.97 0.03 30); }
+.hm-act-pri { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:99px; font-size:10.5px; font-weight:700; letter-spacing:0.01em; justify-self:start; white-space:nowrap; }
+.hm-act-pri-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+.hm-act--urgent .hm-act-pri-dot { animation:hm-pulse 1.6s ease-in-out infinite; }
+@keyframes hm-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.6; transform:scale(1.3); } }
+.hm-act-body { min-width:0; text-align:start; }
+.hm-act-title { font-size:13.5px; font-weight:600; color:var(--ink-950); line-height:1.45; margin-bottom:4px; }
+.hm-act-why { font-size:11.5px; color:var(--ink-600); line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.hm-act-src { font-weight:600; margin-inline-end:6px; }
+.hm-act-dot { color:var(--ink-300); margin-inline-end:6px; }
+.hm-act-meta { display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:4px; padding-inline-start:14px; border-inline-start:1px solid var(--line); min-width:0; }
+.hm-act-impact { font-size:11px; font-weight:600; color:oklch(0.5 0.15 155); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hm-act-time { font-size:10.5px; color:var(--ink-500); font-weight:500; white-space:nowrap; }
+/* Hidden CTA column kept for backwards compat — design now uses card-level click. */
+.hm-act-cta { display:none; }
+
+/* Bottom grid */
+.hm-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:flex-start; }
+@media (max-width:1024px) { .hm-grid { grid-template-columns:1fr; } }
+.hm-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:22px; }
+.hm-card-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:16px; }
+.hm-card-head h3 { font-size:15px; font-weight:700; color:var(--ink-950); margin-bottom:3px; letter-spacing:-0.005em; }
+.hm-card-head p { font-size:12px; color:var(--ink-500); }
+.hm-empty { font-size:13px; color:var(--ink-500); padding:24px; text-align:center; border:1px dashed var(--line); border-radius:12px; }
+
+/* Bullets */
+.hm-bullets { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px; }
+.hm-bullets li { display:flex; gap:12px; align-items:center; padding:10px 12px; border-radius:10px; font-size:13.5px; color:var(--ink-800); line-height:1.5; }
+.hm-bullets li:hover { background:var(--ink-50); }
+.hm-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.hm-dot.good { background:oklch(0.65 0.15 155); box-shadow:0 0 0 3px oklch(0.92 0.08 155); }
+.hm-dot.warn { background:oklch(0.75 0.15 75);  box-shadow:0 0 0 3px oklch(0.95 0.08 75); }
+.hm-dot.bad  { background:oklch(0.65 0.2 30);   box-shadow:0 0 0 3px oklch(0.93 0.08 30); }
+
+/* Health card */
+.hm-score { text-align:end; }
+.hm-score .num { font-size:26px; font-weight:700; color:var(--purple-700); letter-spacing:-0.015em; }
+.hm-score em { font-style:normal; font-size:11px; color:var(--ink-500); font-weight:500; }
+.hm-health { display:flex; flex-direction:column; gap:14px; }
+.hm-hr-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.hm-hr-k { font-size:13px; font-weight:600; color:var(--ink-900); }
+.hm-hr-v { font-size:13px; font-weight:700; letter-spacing:-0.005em; }
+.hm-hr-v.good { color:oklch(0.5 0.15 155); }
+.hm-hr-v.warn { color:oklch(0.55 0.15 60); }
+.hm-hr-v.bad  { color:oklch(0.6 0.2 30); }
+.hm-hr-track { height:7px; background:var(--ink-100); border-radius:99px; overflow:hidden; margin-bottom:6px; }
+.hm-hr-fill { height:100%; border-radius:99px; transition:width .6s cubic-bezier(.2,.8,.2,1); }
+.hm-hr-fill.good { background:oklch(0.65 0.15 155); }
+.hm-hr-fill.warn { background:oklch(0.72 0.16 75); }
+.hm-hr-fill.bad  { background:oklch(0.65 0.2 30); }
+.hm-hr-hint { font-size:11.5px; color:var(--ink-500); line-height:1.5; }
+
+/* RTL flip for chevrons */
+[dir="rtl"] .hm-act-cta svg,
+[dir="rtl"] .hm-nba-btn svg { transform:scaleX(-1); }
+`
+
+// Suppress unused-import warning for SegmentsData; the type is referenced
+// via `useSegments()` return type but TS strict mode flags the unused import.
+type _Unused = SegmentsData
+void (null as unknown as _Unused)

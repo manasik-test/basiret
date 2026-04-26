@@ -42,6 +42,7 @@ export interface SegmentCharacteristics {
   silhouette_score?: number
   post_ids?: string[]
   centroid?: Record<string, number>
+  persona_description?: string
 }
 
 export interface SegmentsData {

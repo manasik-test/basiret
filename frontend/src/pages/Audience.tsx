@@ -1,258 +1,254 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  RefreshCw, Image, Video, Layers, Sun, Sunrise, Sunset,
-  Sparkles, Lightbulb, Clock, Users,
-} from 'lucide-react'
-import {
-  useSegments, useRegenerateSegments, useAudienceInsights,
+  useSegments,
+  useRegenerateSegments,
+  useAudienceInsights,
 } from '../hooks/useAnalytics'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
-import type { SegmentCharacteristics } from '../api/analytics'
+import { Icon, I, TypeIcon, normalizeContentType } from '../components/redesign/icons'
+import type { SegmentCharacteristics, SegmentsData } from '../api/analytics'
 
-const contentTypeIcons: Record<string, React.ReactNode> = {
-  IMAGE: <Image className="w-4 h-4" />,
-  VIDEO: <Video className="w-4 h-4" />,
-  CAROUSEL_ALBUM: <Layers className="w-4 h-4" />,
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+const PALETTES = [
+  { bg: 'oklch(0.95 0.04 285)', fg: 'var(--purple-700)', solid: 'var(--purple-500)', emoji: '🎥' },
+  { bg: 'oklch(0.95 0.04 230)', fg: 'oklch(0.45 0.15 230)', solid: 'oklch(0.68 0.14 230)', emoji: '☀️' },
+  { bg: 'oklch(0.95 0.04 170)', fg: 'oklch(0.42 0.13 170)', solid: 'oklch(0.65 0.13 170)', emoji: '☕' },
+  { bg: 'oklch(0.95 0.04 50)', fg: 'oklch(0.48 0.14 45)', solid: 'oklch(0.72 0.14 55)', emoji: '📚' },
+  { bg: 'oklch(0.95 0.04 320)', fg: 'oklch(0.48 0.14 320)', solid: 'oklch(0.7 0.14 320)', emoji: '✨' },
+] as const
+
+function pickEmoji(contentType: string | undefined): string {
+  const t = normalizeContentType(contentType)
+  if (t === 'video') return '🎥'
+  if (t === 'carousel') return '📚'
+  return '📷'
 }
 
-const timeIcons: Record<string, React.ReactNode> = {
-  Morning: <Sunrise className="w-4 h-4" />,
-  Afternoon: <Sun className="w-4 h-4" />,
-  Evening: <Sunset className="w-4 h-4" />,
+function deriveName(c: SegmentCharacteristics | undefined, fallback: string): { name: string; persona: string } {
+  const desc = c?.persona_description?.trim()
+  if (!desc) {
+    return { name: fallback, persona: '' }
+  }
+  // Take the first sentence (or first 60 chars) as the name; rest is persona description.
+  const sentences = desc.split(/[.!؟]/).filter((s: string) => s.trim().length > 0)
+  if (sentences.length === 0) return { name: fallback, persona: desc }
+  const name = sentences[0]!.trim().slice(0, 60)
+  const rest = sentences.slice(1).join('. ').trim()
+  return {
+    name: name.length > 0 ? name : fallback,
+    persona: rest || desc,
+  }
 }
 
-const sentimentColors: Record<string, string> = {
-  positive: '#664FA1',
-  neutral: '#A5DDEC',
-  negative: '#BF499B',
-}
+const REGEN_COOLDOWN_SECONDS = 30
 
-/* ── AI hero — behaviour summary, what they want, best time ─────────────── */
+/* ------------------------------------------------------------------ */
+/* Hero                                                               */
+/* ------------------------------------------------------------------ */
 
-function PageHeader() {
+function AudHero({ segments }: { segments: SegmentsData | undefined }) {
   const { t } = useTranslation()
+  const insights = useAudienceInsights()
+  const totalSize = useMemo(
+    () => segments?.segments?.reduce((s, x) => s + x.size, 0) ?? 0,
+    [segments],
+  )
+
+  const headlineText = insights.data?.behavior_summary?.trim() || t('myAudiencePage.audHeroFallback')
+  // Split first sentence as headline, the rest as body.
+  const sentences = headlineText.split(/[.!؟]/).filter((s: string) => s.trim().length > 0)
+  const headline = sentences[0]?.trim() || headlineText
+  const body = sentences.slice(1).join('. ').trim()
+
+  const segs = segments?.segments ?? []
+
   return (
-    <p className="text-sm text-muted-foreground" dir="auto">
-      {t('myAudiencePage.question')}
-    </p>
+    <section className="aud-hero">
+      <div className="aud-hero-l">
+        <div className="aud-hero-k">{t('myAudiencePage.audHeroEyebrow')}</div>
+        <h2 dir="auto">{headline}</h2>
+        {body && <p dir="auto">{body}</p>}
+        <div className="aud-hero-acts">
+          <button className="aud-hero-btn primary">
+            <Icon path={I.wand} size={13} />
+            {t('myAudiencePage.audHeroCta1')}
+          </button>
+          <button className="aud-hero-btn ghost">{t('myAudiencePage.audHeroCta2')}</button>
+        </div>
+      </div>
+      <div className="aud-hero-r">
+        <div className="aud-hero-num">
+          <div className="num">{totalSize}</div>
+          <div>{t('myAudiencePage.audHeroTotalLabel')}</div>
+        </div>
+        {segs.length > 0 && (
+          <>
+            <div className="aud-hero-segs">
+              {segs.map((s, i) => {
+                const palette = PALETTES[i % PALETTES.length]
+                const pct = totalSize > 0 ? (s.size / totalSize) * 100 : 0
+                return (
+                  <div
+                    key={s.id}
+                    className="aud-hero-seg"
+                    style={{ width: `${pct}%`, background: palette.solid }}
+                    title={s.label}
+                  />
+                )
+              })}
+            </div>
+            <div className="aud-hero-legend">
+              {segs.map((s, i) => {
+                const palette = PALETTES[i % PALETTES.length]
+                const pct = totalSize > 0 ? Math.round((s.size / totalSize) * 100) : 0
+                return (
+                  <div key={s.id} className="aud-hero-l-i">
+                    <span style={{ background: palette.solid }} />
+                    <span className="num">{pct}%</span>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </section>
   )
 }
 
-function BehaviorSummary({ text }: { text: string }) {
-  const { t } = useTranslation()
-  const isEmpty = !text || text.length === 0
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-          <Sparkles className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold text-foreground">
-            {t('myAudiencePage.behaviorTitle')}
-          </h2>
-          <p className="text-[11px] text-muted-foreground">
-            {t('myAudiencePage.behaviorSubtitle')}
-          </p>
-        </div>
-      </div>
-      <p dir="auto" className="text-sm text-foreground/85 leading-relaxed">
-        {isEmpty ? t('myAudiencePage.behaviorFallback') : text}
-      </p>
-    </div>
-  )
+/* ------------------------------------------------------------------ */
+/* Persona card                                                       */
+/* ------------------------------------------------------------------ */
+
+interface PersonaCardProps {
+  index: number
+  size: number
+  pct: number
+  name: string
+  persona: string
+  contentType: 'video' | 'image' | 'carousel'
+  postingTime: string | undefined
+  avgEngagement: number
+  emoji: string
 }
 
-function WhatTheyWant({ items }: { items: { topic: string; reason: string }[] }) {
+function PersonaCard({
+  index,
+  size,
+  pct,
+  name,
+  persona,
+  contentType,
+  postingTime,
+  avgEngagement,
+  emoji,
+}: PersonaCardProps) {
   const { t } = useTranslation()
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl bg-cta/10 flex items-center justify-center">
-          <Lightbulb className="w-5 h-5 text-cta" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold text-foreground">
-            {t('myAudiencePage.wantsTitle')}
-          </h2>
-          <p className="text-[11px] text-muted-foreground">
-            {t('myAudiencePage.wantsSubtitle')}
-          </p>
-        </div>
-      </div>
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t('myAudiencePage.wantsEmpty')}</p>
-      ) : (
-        <ul className="space-y-2.5">
-          {items.map((item, i) => (
-            <li key={i} className="flex gap-3">
-              <span className="shrink-0 w-6 h-6 rounded-full bg-cta/15 text-cta flex items-center justify-center text-xs font-bold">
-                {i + 1}
-              </span>
-              <div className="min-w-0">
-                <p dir="auto" className="text-sm font-semibold text-foreground leading-snug">
-                  {item.topic}
-                </p>
-                <p dir="auto" className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                  {item.reason}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
+  const p = PALETTES[index % PALETTES.length]
+  const timeLabelMap: Record<string, string> = {
+    morning: t('myAudiencePage.morningLabel'),
+    afternoon: t('myAudiencePage.afternoonLabel'),
+    evening: t('myAudiencePage.eveningLabel'),
+  }
+  const timeKey = postingTime?.toLowerCase()
+  const timeLabel = timeKey && timeLabelMap[timeKey] ? timeLabelMap[timeKey] : postingTime || '—'
 
-function BestTime({ day, time, reason }: { day: string; time: string; reason: string }) {
-  const { t } = useTranslation()
-  const hasSlot = day && time
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl bg-accent/30 flex items-center justify-center">
-          <Clock className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold text-foreground">
-            {t('myAudiencePage.bestTimeTitle')}
-          </h2>
-          <p className="text-[11px] text-muted-foreground">
-            {t('myAudiencePage.bestTimeSubtitle')}
-          </p>
-        </div>
-      </div>
-
-      {hasSlot ? (
-        <>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-primary">{day}</span>
-            <span className="text-lg font-semibold text-foreground/70">{time}</span>
-          </div>
-          <p dir="auto" className="text-sm text-foreground/80 leading-relaxed">
-            {reason || t('myAudiencePage.bestTimeFallback')}
-          </p>
-        </>
-      ) : (
-        <p className="text-sm text-muted-foreground">{t('myAudiencePage.bestTimeEmpty')}</p>
-      )}
-    </div>
-  )
-}
-
-function AIHero() {
-  const { t } = useTranslation()
-  const { data, isLoading } = useAudienceInsights()
-
-  if (isLoading) {
-    return (
-      <div className="glass rounded-2xl p-8 text-center text-muted-foreground text-sm">
-        {t('myAudiencePage.loadingInsights')}
-      </div>
-    )
+  const contentTypeLabels = {
+    video: t('myPostsPage.videoLabel'),
+    image: t('myPostsPage.imageLabel'),
+    carousel: t('myPostsPage.carouselLabel'),
   }
 
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <BehaviorSummary text={data?.behavior_summary || ''} />
-      <WhatTheyWant items={data?.what_they_want || []} />
-      <BestTime
-        day={data?.best_time?.day || ''}
-        time={data?.best_time?.time || ''}
-        reason={data?.best_time?.reason || ''}
-      />
-    </div>
-  )
-}
-
-/* ── Segment cards (supporting evidence below) ──────────────────────────── */
-
-function SegmentCard({
-  label,
-  size,
-  characteristics,
-}: {
-  label: string
-  size: number
-  characteristics?: SegmentCharacteristics
-}) {
-  const { t } = useTranslation()
-  const ct = characteristics?.dominant_content_type || 'IMAGE'
-  const time = characteristics?.typical_posting_time || 'Morning'
-  const sent = characteristics?.dominant_sentiment || 'neutral'
-  const rawEng = Number(characteristics?.avg_engagement)
-  const avgEng = !isNaN(rawEng) ? rawEng.toFixed(1) : '—'
-  const timeKey = time.toLowerCase() as 'morning' | 'afternoon' | 'evening'
+  const engBucket =
+    avgEngagement >= 4
+      ? t('myAudiencePage.engagementHigh')
+      : avgEngagement >= 2
+        ? t('myAudiencePage.engagementMedium')
+        : t('myAudiencePage.engagementLow')
 
   return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="text-sm font-bold text-foreground leading-tight">{label}</h3>
-        <span className="shrink-0 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-          {size} {t('audience.segmentSize')}
-        </span>
+    <article
+      className="aud-card"
+      style={
+        {
+          ['--acc-bg' as string]: p.bg,
+          ['--acc-fg' as string]: p.fg,
+          ['--acc' as string]: p.solid,
+        } as React.CSSProperties
+      }
+    >
+      <div className="aud-card-top">
+        <div className="aud-avatar" style={{ background: p.bg, color: p.fg }}>
+          {emoji}
+        </div>
+        <div className="aud-card-t">
+          <div className="aud-card-n" dir="auto">
+            {name}
+          </div>
+          {persona && (
+            <div className="aud-card-p" dir="auto">
+              {persona}
+            </div>
+          )}
+        </div>
+        <div className="aud-card-size">
+          <div className="num">{size}</div>
+          <em>{pct}%</em>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex items-center gap-2 text-sm text-foreground/80">
-          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-            {contentTypeIcons[ct] || contentTypeIcons.IMAGE}
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">{t('audience.contentType')}</p>
-            <p className="text-xs font-semibold">
-              {t(`analytics.${ct === 'CAROUSEL_ALBUM' ? 'carousel' : ct.toLowerCase()}`)}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-foreground/80">
-          <div className="w-7 h-7 rounded-lg bg-accent/20 flex items-center justify-center text-primary">
-            {timeIcons[time] || timeIcons.Morning}
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">{t('audience.postingTime')}</p>
-            <p className="text-xs font-semibold">{t(`audience.${timeKey}`)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-foreground/80">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: `${sentimentColors[sent]}20` }}
-          >
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: sentimentColors[sent] }} />
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">{t('audience.sentiment')}</p>
-            <p className="text-xs font-semibold capitalize">{t(`dashboard.${sent}`)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-foreground/80">
-          <div className="w-7 h-7 rounded-lg bg-cta/10 flex items-center justify-center text-cta text-xs font-bold">
-            {avgEng}
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">{t('audience.avgEngagement')}</p>
+      {/* Content preference — backend gives only dominant_content_type, render
+        a single full bar of the dominant type. Future API could return an
+        actual {video, image, carousel} % breakdown. */}
+      <div className="aud-card-row">
+        <div className="aud-card-k">{t('myAudiencePage.prefersHeader')}</div>
+        <div className="aud-card-bars">
+          <div className="aud-pref">
+            <div className="aud-pref-lbl">
+              <TypeIcon type={contentType} size={11} /> {contentTypeLabels[contentType]}
+            </div>
+            <div className="aud-pref-bar">
+              <div style={{ width: '100%', background: `var(--${contentType})` }} />
+            </div>
+            <div className="num aud-pref-p">100%</div>
           </div>
         </div>
       </div>
-    </div>
+
+      <div className="aud-card-row aud-card-row--grid">
+        <div>
+          <div className="aud-card-k">{t('myAudiencePage.bestTimeHeader')}</div>
+          <div className="aud-card-v">{timeLabel}</div>
+        </div>
+        <div>
+          <div className="aud-card-k">{t('myAudiencePage.engagementHeader')}</div>
+          <div className="aud-card-v">{engBucket}</div>
+        </div>
+      </div>
+
+      <button className="aud-card-cta">
+        <Icon path={I.wand} size={12} />
+        {t('myAudiencePage.createForCta', { name: name.split(/[—\-]/)[0]?.trim() || name })}
+      </button>
+    </article>
   )
 }
 
-// Cooldown guards against the segment-regeneration race condition: each
-// regenerate kicks off a Celery task that deletes + reinserts segment rows
-// without a lock, so rapid clicks interleave and produce duplicates. 30s is
-// well past the typical task duration (<1s) plus a comfortable margin.
-const REGEN_COOLDOWN_SECONDS = 30
+/* ------------------------------------------------------------------ */
+/* Page                                                               */
+/* ------------------------------------------------------------------ */
 
 function AudienceContent() {
   const { t } = useTranslation()
   const segments = useSegments()
   const regenerate = useRegenerateSegments()
   const [cooldownLeft, setCooldownLeft] = useState(0)
+  const [range, setRange] = useState<'7d' | '30d' | '90d'>('30d')
 
   useEffect(() => {
     if (cooldownLeft <= 0) return
@@ -270,61 +266,88 @@ function AudienceContent() {
 
   const buttonDisabled = regenerate.isPending || cooldownLeft > 0
 
+  const segs = segments.data?.segments ?? []
+  const totalSize = segs.reduce((s, x) => s + x.size, 0) || 1
+
+  // Sort by size desc, take all (or up to 6 for visual cleanliness).
+  const sorted = useMemo(
+    () => [...segs].sort((a, b) => b.size - a.size).slice(0, 6),
+    [segs],
+  )
+
   return (
-    <div className="space-y-6">
-      <PageHeader />
+    <div className="rd-canvas">
+      <div className="aud-main">
+        <header className="aud-head">
+          <div>
+            <h1 dir="auto">{t('myAudiencePage.headerTitle')}</h1>
+            <p dir="auto">{t('myAudiencePage.headerSubtitle')}</p>
+          </div>
+          <div className="aud-seg">
+            {(['7d', '30d', '90d'] as const).map((r) => (
+              <button key={r} className={range === r ? 'is-on' : ''} onClick={() => setRange(r)}>
+                {t(`home.dateRange.${r}` as const)}
+              </button>
+            ))}
+          </div>
+        </header>
 
-      {/* AI hero */}
-      <div className="flex items-center gap-2 mb-1">
-        <Sparkles className="w-4 h-4 text-cta" />
-        <h2 className="text-sm font-semibold text-foreground/70 uppercase tracking-wider">
-          {t('myAudiencePage.heroLabel')}
-        </h2>
-      </div>
-      <AIHero />
+        <AudHero segments={segments.data} />
 
-      {/* Supporting evidence: segment detail cards */}
-      <div className="flex items-center justify-between mt-2">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-foreground/70 uppercase tracking-wider">
-            {t('myAudiencePage.segmentsLabel')}
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {segments.data ? `· ${segments.data.segment_count}` : ''}
-          </span>
-        </div>
-        <button
-          onClick={handleRegenerate}
-          disabled={buttonDisabled}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title={cooldownLeft > 0 ? t('audience.regenerateCooldown', { seconds: cooldownLeft }) : undefined}
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${regenerate.isPending ? 'animate-spin' : ''}`} />
-          {regenerate.isPending
-            ? t('audience.regenerating')
-            : cooldownLeft > 0
-            ? t('audience.regenerateCooldown', { seconds: cooldownLeft })
-            : t('audience.regenerate')}
-        </button>
-      </div>
-
-      {segments.data && segments.data.segments.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {segments.data.segments.map((seg) => (
-            <SegmentCard
-              key={seg.id}
-              label={seg.label}
-              size={seg.size}
-              characteristics={seg.characteristics}
+        <div className="aud-sec-head">
+          <div>
+            <h3>{t('myAudiencePage.personasTitle')}</h3>
+            <span className="aud-sec-s">{t('myAudiencePage.personasSortedBySize')}</span>
+          </div>
+          <button onClick={handleRegenerate} disabled={buttonDisabled} className="aud-regen-btn">
+            <Icon
+              path={
+                <>
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M21 3v5h-5" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                  <path d="M3 21v-5h5" />
+                </>
+              }
+              size={12}
+              className={regenerate.isPending ? 'aud-spin' : undefined}
             />
-          ))}
+            {regenerate.isPending
+              ? t('myAudiencePage.regeneratingLabel')
+              : cooldownLeft > 0
+                ? t('myAudiencePage.regenerateCooldownLabel', { seconds: cooldownLeft })
+                : t('myAudiencePage.regenerateCta')}
+          </button>
         </div>
-      ) : (
-        <div className="glass rounded-2xl p-12 text-center">
-          <p className="text-muted-foreground">{t('audience.noSegments')}</p>
-        </div>
-      )}
+
+        {sorted.length > 0 ? (
+          <section className="aud-grid">
+            {sorted.map((seg, i) => {
+              const c = seg.characteristics
+              const { name, persona } = deriveName(c, seg.label)
+              const pct = Math.round((seg.size / totalSize) * 100)
+              const contentType = normalizeContentType(c?.dominant_content_type)
+              return (
+                <PersonaCard
+                  key={seg.id}
+                  index={i}
+                  size={seg.size}
+                  pct={pct}
+                  name={name}
+                  persona={persona}
+                  contentType={contentType}
+                  postingTime={c?.typical_posting_time}
+                  avgEngagement={Number(c?.avg_engagement ?? 0)}
+                  emoji={pickEmoji(c?.dominant_content_type)}
+                />
+              )
+            })}
+          </section>
+        ) : (
+          <div className="aud-empty">{t('myAudiencePage.noSegments')}</div>
+        )}
+      </div>
+      <style>{AUD_STYLES}</style>
     </div>
   )
 }
@@ -339,3 +362,80 @@ export default function Audience() {
     </LockedFeature>
   )
 }
+
+/* ------------------------------------------------------------------ */
+/* Styles                                                             */
+/* ------------------------------------------------------------------ */
+
+const AUD_STYLES = `
+.aud-main { display:flex; flex-direction:column; gap:22px; max-width:1480px; margin:0 auto; }
+.aud-head { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; flex-wrap:wrap; }
+.aud-head h1 { font-size:26px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; margin-bottom:3px; }
+.aud-head p { font-size:12.5px; color:var(--ink-500); }
+.aud-seg { display:flex; background:var(--ink-100); border-radius:10px; padding:3px; }
+.aud-seg button { padding:7px 14px; font-size:12.5px; border-radius:7px; color:var(--ink-600); font-weight:500; }
+.aud-seg button.is-on { background:var(--surface); color:var(--ink-900); font-weight:600; box-shadow:var(--shadow-sm); }
+
+/* Hero */
+.aud-hero { display:grid; grid-template-columns:1.3fr 1fr; gap:28px; background:linear-gradient(135deg, var(--purple-50), oklch(0.97 0.03 280)); border:1px solid var(--purple-200); border-radius:20px; padding:26px 30px; align-items:center; }
+@media (max-width:1024px) { .aud-hero { grid-template-columns:1fr; gap:18px; } }
+.aud-hero-k { font-size:11px; font-weight:700; color:var(--purple-700); letter-spacing:0.04em; text-transform:uppercase; margin-bottom:10px; }
+.aud-hero h2 { font-size:22px; font-weight:700; color:var(--ink-950); margin-bottom:10px; letter-spacing:-0.015em; line-height:1.35; }
+.aud-hero p { font-size:13.5px; color:var(--ink-700); line-height:1.7; margin-bottom:16px; max-width:540px; }
+.aud-hero-acts { display:flex; gap:8px; flex-wrap:wrap; }
+.aud-hero-btn { padding:9px 14px; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:5px; }
+.aud-hero-btn.primary { background:var(--purple-600); color:#fff; }
+.aud-hero-btn.primary:hover { background:var(--purple-700); }
+.aud-hero-btn.ghost { background:transparent; color:var(--purple-800); }
+.aud-hero-r { background:var(--surface); border-radius:14px; padding:18px; }
+.aud-hero-num { text-align:start; margin-bottom:14px; }
+.aud-hero-num .num { font-size:28px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
+.aud-hero-num > div:last-child { font-size:11.5px; color:var(--ink-500); font-weight:500; margin-top:4px; }
+.aud-hero-segs { display:flex; gap:3px; height:14px; margin-bottom:10px; border-radius:4px; overflow:hidden; }
+.aud-hero-seg { border-radius:3px; transition:opacity .15s; }
+.aud-hero-seg:hover { opacity:.8; }
+.aud-hero-legend { display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; }
+.aud-hero-l-i { display:flex; gap:5px; align-items:center; font-size:11px; color:var(--ink-600); font-weight:500; }
+.aud-hero-l-i span:first-child { width:8px; height:8px; border-radius:2px; }
+
+/* Section header */
+.aud-sec-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:6px; flex-wrap:wrap; }
+.aud-sec-head h3 { font-size:16px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; }
+.aud-sec-s { font-size:12px; color:var(--ink-500); font-weight:500; margin-inline-start:8px; }
+.aud-regen-btn { display:inline-flex; align-items:center; gap:7px; padding:8px 14px; background:var(--surface); border:1px solid var(--line); border-radius:9px; font-size:12.5px; font-weight:500; color:var(--ink-700); }
+.aud-regen-btn:hover:not(:disabled) { border-color:var(--line-strong); background:var(--ink-50); }
+.aud-regen-btn:disabled { opacity:.6; cursor:not-allowed; }
+.aud-spin { animation:aud-spin 1s linear infinite; }
+@keyframes aud-spin { to { transform:rotate(360deg); } }
+
+.aud-empty { padding:48px; text-align:center; color:var(--ink-500); font-size:13px; background:var(--surface); border:1px dashed var(--line); border-radius:18px; }
+
+/* Cards grid */
+.aud-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:16px; }
+@media (max-width:768px) { .aud-grid { grid-template-columns:1fr; } }
+.aud-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:22px; display:flex; flex-direction:column; gap:16px; position:relative; overflow:hidden; }
+.aud-card::before { content:''; position:absolute; top:0; inset-inline-start:0; height:3px; width:100%; background:var(--acc); }
+.aud-card-top { display:flex; gap:14px; align-items:center; }
+.aud-avatar { width:52px; height:52px; border-radius:14px; display:grid; place-items:center; font-size:22px; flex-shrink:0; }
+.aud-card-t { flex:1; min-width:0; }
+.aud-card-n { font-size:15px; font-weight:700; color:var(--ink-950); margin-bottom:2px; letter-spacing:-0.005em; }
+.aud-card-p { font-size:12px; color:var(--ink-600); line-height:1.45; }
+.aud-card-size { text-align:center; flex-shrink:0; padding-inline-start:12px; border-inline-start:1px solid var(--line); }
+.aud-card-size .num { font-size:24px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
+.aud-card-size em { font-style:normal; font-size:11px; color:var(--ink-500); font-weight:500; display:block; margin-top:4px; }
+
+.aud-card-row { display:flex; flex-direction:column; gap:8px; }
+.aud-card-row--grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.aud-card-k { font-size:11px; font-weight:600; color:var(--ink-500); letter-spacing:0.02em; }
+.aud-card-v { font-size:13.5px; font-weight:600; color:var(--ink-950); display:flex; align-items:center; gap:8px; }
+
+.aud-card-bars { display:flex; flex-direction:column; gap:6px; }
+.aud-pref { display:grid; grid-template-columns:90px 1fr 40px; align-items:center; gap:10px; font-size:11.5px; color:var(--ink-700); }
+.aud-pref-lbl { display:inline-flex; align-items:center; gap:5px; font-weight:500; }
+.aud-pref-bar { height:6px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
+.aud-pref-bar > div { height:100%; border-radius:99px; transition:width .5s; }
+.aud-pref-p { font-weight:700; color:var(--ink-900); text-align:start; letter-spacing:-0.005em; }
+
+.aud-card-cta { padding:11px; background:var(--ink-900); color:#fff; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:6px; margin-top:auto; }
+.aud-card-cta:hover { background:var(--ink-800); }
+`

@@ -1,574 +1,473 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Sparkles, TrendingUp, AlertTriangle, ArrowRight, Image, Video, Layers, Film,
-  Wand2, Check, Copy, ExternalLink, Loader2, ScanText, ChevronDown, ChevronUp,
-  Languages, Hash,
-} from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import {
-  usePostsBreakdown, usePostsInsights, useGenerateCaption, useAccounts,
-  useHashtagPerformance,
+  usePostsBreakdown,
+  usePostsInsights,
+  useGenerateCaption,
+  useAccounts,
 } from '../hooks/useAnalytics'
-import TopPostsTable from '../components/dashboard/TopPostsTable'
+import { Icon, I, TypeIcon, TypePill, normalizeContentType } from '../components/redesign/icons'
 
-const typeLabels: Record<string, string> = {
-  image: 'Image',
-  video: 'Video',
-  carousel: 'Carousel',
-  reel: 'Reel',
-  story: 'Story',
-  text: 'Text',
-  unknown: 'Other',
-}
+/* ------------------------------------------------------------------ */
+/* Header                                                             */
+/* ------------------------------------------------------------------ */
 
-const typeIcons: Record<string, React.ReactNode> = {
-  image: <Image className="w-4 h-4" />,
-  video: <Video className="w-4 h-4" />,
-  carousel: <Layers className="w-4 h-4" />,
-  reel: <Film className="w-4 h-4" />,
-}
-
-/* ── AI hero: What worked + What to change ──────────────────────────────── */
-
-function PageHeader() {
+function Header({
+  range,
+  setRange,
+}: {
+  range: '7d' | '30d' | '90d'
+  setRange: (r: '7d' | '30d' | '90d') => void
+}) {
   const { t } = useTranslation()
   return (
-    <div>
-      <p className="text-sm text-muted-foreground" dir="auto">
-        {t('myPostsPage.question')}
-      </p>
-    </div>
+    <header className="mp-head">
+      <div>
+        <div className="mp-crumb">
+          <span>{t('myPostsPage.breadcrumbDashboard')}</span>
+          <Icon path={I.chevL} size={10} className="mp-crumb-arrow" />
+          <span>{t('myPostsPage.breadcrumbCurrent')}</span>
+        </div>
+        <div className="mp-titlerow">
+          <h1 dir="auto">{t('myPostsPage.headerTitle')}</h1>
+          <span className="mp-badge">
+            <span className="mp-dot" />
+            {t('myPostsPage.last30days')}
+          </span>
+        </div>
+        <p className="mp-sub" dir="auto">
+          {t('myPostsPage.question')}
+        </p>
+      </div>
+
+      <div className="mp-head-act">
+        <div className="mp-range">
+          {(['7d', '30d', '90d'] as const).map((r) => {
+            const labelKey = `myPostsPage.rangeShort${r === '7d' ? '7d' : r === '30d' ? '30d' : '90d'}`
+            return (
+              <button key={r} className={range === r ? 'is-on' : ''} onClick={() => setRange(r)}>
+                {t(labelKey)}
+              </button>
+            )
+          })}
+        </div>
+        <button className="mp-export">
+          <Icon path={I.pencil} size={13} />
+          {t('myPostsPage.exportReport')}
+        </button>
+      </div>
+    </header>
   )
 }
 
-function AIHero() {
+/* ------------------------------------------------------------------ */
+/* Two-card hero                                                      */
+/* ------------------------------------------------------------------ */
+
+function TwoCardHero() {
   const { t, i18n } = useTranslation()
   const { data, isLoading } = usePostsInsights()
   const { data: accounts } = useAccounts()
   const generate = useGenerateCaption()
   const [generated, setGenerated] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [ocrOpen, setOcrOpen] = useState(false)
   const accountId = accounts?.[0]?.id
 
   if (isLoading) {
-    return (
-      <div className="glass rounded-2xl p-8 text-center text-muted-foreground text-sm">
-        {t('myPostsPage.loadingInsights')}
-      </div>
-    )
+    return <div className="mp-card mp-loading">{t('myPostsPage.loadingInsights')}</div>
   }
 
   const best = data?.best_post
-  const why = (data?.why_it_worked || '').trim()
-  const pattern = (data?.low_performers_pattern || '').trim()
-  const change = (data?.what_to_change || '').trim()
+  const why = (data?.why_it_worked || '').trim() || t('myPostsPage.whyFallback')
+  const pattern = (data?.low_performers_pattern || '').trim() || t('myPostsPage.changeFallback')
+  const change = (data?.what_to_change || '').trim() || t('myPostsPage.changeFallback')
+
+  const captionLang: 'en' | 'ar' = i18n.language?.startsWith('ar') ? 'ar' : 'en'
 
   function onGenerateCaption() {
     if (!best) return
     setGenerated(null)
     setCopied(false)
-    const lang: 'en' | 'ar' = i18n.language?.startsWith('ar') ? 'ar' : 'en'
     generate.mutate(
-      { post_id: best.id, content_type: best.content_type, language: lang, account_id: accountId },
+      { post_id: best.id, content_type: best.content_type, language: captionLang, account_id: accountId },
       { onSuccess: (res) => setGenerated(res.caption || '') },
     )
   }
 
   function copyCaption() {
     if (!generated) return
-    navigator.clipboard.writeText(generated)
+    void navigator.clipboard.writeText(generated)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  const bestType = normalizeContentType(best?.content_type)
+  const typeLabelMap: Record<typeof bestType, string> = {
+    video: t('myPostsPage.videoLabel'),
+    image: t('myPostsPage.imageLabel'),
+    carousel: t('myPostsPage.carouselLabel'),
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* ── What worked ── */}
-      <div className="glass rounded-2xl p-5 flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center">
-            <TrendingUp className="w-5 h-5 text-emerald-600" />
+    <div className="mp-grid">
+      {/* WARN — What to change */}
+      <article className="mp-card mp-card--warn">
+        <div className="mp-card-head">
+          <div className="mp-card-icon mp-card-icon--warn">
+            <Icon path={I.warn} size={16} />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-foreground">
-              {t('myPostsPage.whatWorked')}
-            </h2>
-            <p className="text-[11px] text-muted-foreground">
-              {t('myPostsPage.whatWorkedSubtitle')}
-            </p>
+            <h3>{t('myPostsPage.whatToChange')}</h3>
+            <div className="mp-card-sub">{t('myPostsPage.whatToChangeSubtitle')}</div>
+          </div>
+        </div>
+        <div className="mp-quote mp-quote--warn">
+          <div className="mp-quote-label">{t('myPostsPage.patternInLowPerformers')}</div>
+          <p dir="auto">{pattern}</p>
+        </div>
+        <div className="mp-quote mp-quote--tip">
+          <div className="mp-quote-label">{t('myPostsPage.whatToDo')}</div>
+          <p dir="auto">{change}</p>
+        </div>
+      </article>
+
+      {/* GOOD — What worked */}
+      <article className="mp-card mp-card--good">
+        <div className="mp-card-head">
+          <div className="mp-card-icon mp-card-icon--good">
+            <Icon path={I.trend} size={16} />
+          </div>
+          <div>
+            <h3>{t('myPostsPage.whatWorked')}</h3>
+            <div className="mp-card-sub">{t('myPostsPage.whatWorkedSubtitle')}</div>
           </div>
         </div>
 
         {best ? (
-          <div className="space-y-3">
-            <div className="rounded-xl bg-white/40 p-3 border border-emerald-100">
-              <div className="flex items-center gap-2 text-xs text-foreground/70">
-                <span className="text-emerald-700">{typeIcons[best.content_type] || typeIcons.image}</span>
-                <span className="font-semibold capitalize">
-                  {typeLabels[best.content_type] || best.content_type}
+          <>
+            <div className="mp-post-preview">
+              <div className="mp-post-meta">
+                <TypePill type={bestType} label={typeLabelMap[bestType]} size="sm" />
+                <span className="mp-post-stat num">
+                  <Icon path={I.heart} size={11} /> {best.likes} {t('myPostsPage.likesUnit')}
                 </span>
-                <span className="text-muted-foreground">·</span>
-                <span>{best.likes} {t('dashboard.likes').toLowerCase()}</span>
-                <span className="text-muted-foreground">·</span>
-                <span>{best.comments} {t('dashboard.comments').toLowerCase()}</span>
+                <span className="mp-post-stat num">
+                  {best.comments} {t('myPostsPage.commentsUnit')}
+                </span>
               </div>
-              {best.caption ? (
-                <p dir="auto" className="text-sm text-foreground/85 mt-2 line-clamp-2 leading-relaxed">
-                  {best.caption}
-                </p>
-              ) : null}
-              {best.ocr_text ? (
-                <div className="mt-2">
-                  <button
-                    type="button"
-                    onClick={() => setOcrOpen((v) => !v)}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 text-primary text-[11px] font-semibold hover:bg-primary/15 transition-colors"
-                  >
-                    <ScanText className="w-3.5 h-3.5" />
-                    {t('myPostsPage.ocrBadge')}
-                    {ocrOpen ? (
-                      <ChevronUp className="w-3 h-3" />
-                    ) : (
-                      <ChevronDown className="w-3 h-3" />
-                    )}
-                  </button>
-                  {ocrOpen ? (
-                    <p
-                      dir="auto"
-                      className="mt-2 text-xs text-foreground/75 leading-relaxed bg-white/50 border border-primary/10 rounded-lg p-2 whitespace-pre-wrap"
-                    >
-                      {best.ocr_text}
-                    </p>
-                  ) : null}
+              <div className="mp-post-body" dir="auto">
+                {best.caption}
+              </div>
+              {best.ocr_text && (
+                <div className="mp-post-ocr" dir="auto">
+                  {t('myPostsPage.ocrBadge')}: <span>{best.ocr_text}</span>
                 </div>
-              ) : null}
+              )}
             </div>
 
-            <p dir="auto" className="text-sm text-foreground/85 leading-relaxed">
-              {why || t('myPostsPage.whyFallback')}
-            </p>
+            <div className="mp-quote mp-quote--good">
+              <div className="mp-quote-label">{t('myPostsPage.winnerReason')}</div>
+              <p dir="auto">{why}</p>
+            </div>
 
-            {/* Generate similar caption */}
-            <div className="space-y-2">
-              <button
-                onClick={onGenerateCaption}
-                disabled={generate.isPending}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cta text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
-              >
-                {generate.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Wand2 className="w-4 h-4" />
-                )}
-                {generate.isPending
-                  ? t('myPostsPage.generating')
-                  : t('myPostsPage.generateSimilarCaption')}
-              </button>
+            <button className="mp-cta" onClick={onGenerateCaption} disabled={generate.isPending}>
+              <Icon path={I.wand} size={14} />
+              {generate.isPending
+                ? t('myPostsPage.generating')
+                : t('myPostsPage.generateSimilarCaption')}
+            </button>
 
-              {generated ? (
-                <div className="rounded-xl bg-cta/5 border border-cta/20 p-3 flex flex-col gap-2">
-                  <p
-                    dir="auto"
-                    className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap"
-                  >
-                    {generated}
-                  </p>
-                  <button
-                    onClick={copyCaption}
-                    className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {generated && (
+              <div className="mp-cap-block">
+                <div className="mp-cap-head">
+                  <span>
+                    {t('myPostsPage.suggestedCaptionLabel')} (
+                    {captionLang === 'ar'
+                      ? t('myPostsPage.captionLanguageAR')
+                      : t('myPostsPage.captionLanguageEN')}
+                    )
+                  </span>
+                  <button className="mp-cap-lang" onClick={copyCaption}>
+                    <Icon path={I.copy} size={10} />
                     {copied ? t('myPostsPage.copied') : t('myPostsPage.copyCaption')}
                   </button>
                 </div>
-              ) : null}
-
-              {best.permalink ? (
-                <a
-                  href={best.permalink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  {t('myPostsPage.openOnInstagram')} <ExternalLink className="w-3 h-3" />
-                </a>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('myPostsPage.bestEmpty')}</p>
-        )}
-      </div>
-
-      {/* ── What to change ── */}
-      <div className="glass rounded-2xl p-5 flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center">
-            <AlertTriangle className="w-5 h-5 text-amber-600" />
-          </div>
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              {t('myPostsPage.whatToChange')}
-            </h2>
-            <p className="text-[11px] text-muted-foreground">
-              {t('myPostsPage.whatToChangeSubtitle')}
-            </p>
-          </div>
-        </div>
-
-        {pattern || change ? (
-          <div className="space-y-3">
-            {pattern ? (
-              <div className="rounded-xl bg-amber-50/60 p-3 border border-amber-100">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">
-                  {t('myPostsPage.patternLabel')}
-                </p>
-                <p dir="auto" className="text-sm text-foreground/85 mt-1 leading-relaxed">
-                  {pattern}
-                </p>
+                <div className="mp-cap-text" dir={captionLang === 'ar' ? 'rtl' : 'ltr'}>
+                  {generated}
+                </div>
+                {best.permalink && (
+                  <a
+                    className="mp-cap-share"
+                    href={best.permalink}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span>{t('myPostsPage.openOnInstagram')}</span>
+                    <Icon path={I.share} size={11} />
+                  </a>
+                )}
               </div>
-            ) : null}
-            {change ? (
-              <div className="rounded-xl bg-primary/5 p-3 border border-primary/15">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-primary">
-                  {t('myPostsPage.actionLabel')}
-                </p>
-                <p
-                  dir="auto"
-                  className="text-sm text-foreground/90 mt-1 leading-relaxed font-medium"
-                >
-                  {change}
-                </p>
-              </div>
-            ) : null}
-          </div>
+            )}
+          </>
         ) : (
-          <p className="text-sm text-muted-foreground">{t('myPostsPage.changeFallback')}</p>
+          <div className="mp-empty" dir="auto">
+            {t('myPostsPage.bestEmpty')}
+          </div>
         )}
-      </div>
+      </article>
     </div>
   )
 }
 
-/* ── Content type bar chart (supporting evidence) ───────────────────────── */
+/* ------------------------------------------------------------------ */
+/* Engagement-by-type chart                                           */
+/* ------------------------------------------------------------------ */
 
-function ContentTypeChart() {
+interface ChartRow {
+  type: 'video' | 'image' | 'carousel'
+  engagement: number
+  posts: number
+}
+
+function EngagementChart({ rows }: { rows: ChartRow[] }) {
+  const { t } = useTranslation()
+  const labels = {
+    video: t('myPostsPage.videoLabel'),
+    image: t('myPostsPage.imageLabel'),
+    carousel: t('myPostsPage.carouselLabel'),
+  }
+  const colors = {
+    video: 'var(--video)',
+    image: 'var(--image)',
+    carousel: 'var(--carousel)',
+  }
+
+  const max = Math.max(...rows.map((r) => r.engagement), 0.01)
+
+  return (
+    <div className="mp-chart">
+      {rows.map((d, i) => {
+        const pct = (d.engagement / max) * 100
+        return (
+          <div key={i} className="mp-bar-row">
+            <div className="mp-bar-label">
+              <TypeIcon type={d.type} size={13} />
+              <span>{labels[d.type]}</span>
+            </div>
+            <div className="mp-bar-track" dir="ltr">
+              <div
+                className="mp-bar-fill"
+                style={{
+                  width: `${pct}%`,
+                  background: `linear-gradient(to right, ${colors[d.type]}, color-mix(in oklch, ${colors[d.type]} 70%, white))`,
+                }}
+              />
+              <span className="mp-bar-val num">{d.engagement.toFixed(1)}%</span>
+            </div>
+            <div className="mp-bar-posts num">
+              {d.posts} {t('myPostsPage.postUnit')}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChartCard() {
   const { t } = useTranslation()
   const { data } = usePostsBreakdown()
 
-  if (!data || data.by_type.length === 0) return null
+  const rows: ChartRow[] = useMemo(() => {
+    if (!data?.by_type) return []
+    return [...data.by_type]
+      .map((b) => ({
+        type: normalizeContentType(b.content_type),
+        engagement: (b.avg_likes || 0) + (b.avg_comments || 0),
+        posts: b.count,
+      }))
+      // Collapse duplicates from normalisation (e.g. CAROUSEL_ALBUM + CAROUSEL).
+      .reduce<ChartRow[]>((acc, row) => {
+        const existing = acc.find((r) => r.type === row.type)
+        if (existing) {
+          existing.engagement = Math.max(existing.engagement, row.engagement)
+          existing.posts += row.posts
+        } else {
+          acc.push(row)
+        }
+        return acc
+      }, [])
+      .sort((a, b) => b.engagement - a.engagement)
+  }, [data])
 
-  const chartData = data.by_type.map((item) => ({
-    name: typeLabels[item.content_type] || item.content_type,
-    [t('dashboard.likes')]: item.avg_likes,
-    [t('dashboard.comments')]: item.avg_comments,
-    count: item.count,
-  }))
-
-  return (
-    <div className="glass rounded-2xl p-6">
-      <h2 className="text-lg font-bold text-foreground mb-1">{t('myPostsPage.evidenceTitle')}</h2>
-      <p className="text-xs text-muted-foreground mb-4">
-        {t('myPostsPage.evidenceSubtitle')}
-      </p>
-      <div dir="ltr" className="w-full h-[280px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(102,79,161,0.08)" />
-            <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#6B7280' }} />
-            <YAxis tick={{ fontSize: 12, fill: '#6B7280' }} />
-            <Tooltip
-              contentStyle={{
-                background: 'rgba(255,255,255,0.9)',
-                backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '12px',
-                fontSize: '12px',
-              }}
-            />
-            <Legend />
-            <Bar dataKey={t('dashboard.likes')} fill="#664FA1" radius={[4, 4, 0, 0]} />
-            <Bar dataKey={t('dashboard.comments')} fill="#A5DDEC" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="flex flex-wrap gap-3 mt-4">
-        {data.by_type.map((item) => (
-          <div key={item.content_type} className="flex items-center gap-2 glass rounded-lg px-3 py-2">
-            <div className="text-primary">
-              {typeIcons[item.content_type] || <Image className="w-4 h-4" />}
-            </div>
-            <span className="text-xs font-medium text-foreground">
-              {typeLabels[item.content_type] || item.content_type}
-            </span>
-            <span className="text-xs text-muted-foreground">({item.count})</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ── Language breakdown card ────────────────────────────────────────────── */
-
-function LanguageBreakdown() {
-  const { t } = useTranslation()
-  const { data } = usePostsBreakdown()
-  const rows = (data?.by_language ?? []).filter((r) => r.language !== 'unknown' || r.count > 0)
-  const total = rows.reduce((s, r) => s + r.count, 0)
-
-  if (!data || total === 0) return null
-
-  const ar = rows.find((r) => r.language === 'ar')
-  const en = rows.find((r) => r.language === 'en')
-  const pctAr = ar ? Math.round((ar.count / total) * 100) : 0
-  const pctEn = en ? Math.round((en.count / total) * 100) : 0
-
-  // Which language wins on avg engagement?
-  const ranked = [...rows]
-    .filter((r) => r.count > 0)
-    .sort((a, b) => b.avg_engagement - a.avg_engagement)
-  const winner = ranked[0]
-  const winnerLabel =
-    winner?.language === 'ar'
-      ? t('myPostsPage.languageArabic')
-      : winner?.language === 'en'
-      ? t('myPostsPage.languageEnglish')
-      : t('myPostsPage.languageUnknown')
-
-  return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-          <Languages className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold text-foreground">
-            {t('myPostsPage.languageTitle')}
-          </h2>
-          <p className="text-[11px] text-muted-foreground">
-            {t('myPostsPage.languageSubtitle')}
-          </p>
-        </div>
-      </div>
-
-      {/* Stacked bar: AR vs EN share */}
-      <div dir="ltr" className="w-full h-3 rounded-full overflow-hidden bg-muted flex">
-        <div
-          className="bg-primary h-full"
-          style={{ width: `${pctAr}%` }}
-          title={`${t('myPostsPage.languageArabic')}: ${pctAr}%`}
-        />
-        <div
-          className="bg-accent h-full"
-          style={{ width: `${pctEn}%` }}
-          title={`${t('myPostsPage.languageEnglish')}: ${pctEn}%`}
-        />
-      </div>
-
-      {/* Per-language stat rows */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {ar && ar.count > 0 ? (
-          <div className="rounded-xl bg-primary/5 border border-primary/15 p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold text-primary">
-                {t('myPostsPage.languageArabic')}
-              </span>
-              <span className="text-xs font-bold text-foreground tabular-nums">
-                {pctAr}% · {ar.count}
-              </span>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {t('myPostsPage.languageAvgEng', { value: ar.avg_engagement })}
-            </p>
-          </div>
-        ) : null}
-        {en && en.count > 0 ? (
-          <div className="rounded-xl bg-accent/20 border border-accent/40 p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold text-primary">
-                {t('myPostsPage.languageEnglish')}
-              </span>
-              <span className="text-xs font-bold text-foreground tabular-nums">
-                {pctEn}% · {en.count}
-              </span>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {t('myPostsPage.languageAvgEng', { value: en.avg_engagement })}
-            </p>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Winner callout */}
-      {winner && ranked.length > 1 && winner.avg_engagement > 0 ? (
-        <div className="rounded-xl bg-emerald-50/60 border border-emerald-100 p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
-            {t('myPostsPage.languageInsight')}
-          </p>
-          <p dir="auto" className="text-sm text-foreground/85 mt-1 leading-relaxed">
-            {t('myPostsPage.languageWinner', {
-              language: winnerLabel,
-              value: winner.avg_engagement,
-            })}
-          </p>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/* ── Hashtag performance card ──────────────────────────────────────────── */
-
-function HashtagPerformance() {
-  const { t } = useTranslation()
-  const { data, isLoading } = useHashtagPerformance(30)
-  const [expanded, setExpanded] = useState(false)
-
-  if (isLoading) return null
-  if (!data || data.hashtags.length === 0) {
+  if (rows.length === 0) {
     return (
-      <div className="glass rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-1">
-          <Hash className="w-5 h-5 text-primary" />
-          <h2 className="text-lg font-bold text-foreground">
-            {t('myPostsPage.hashtagsTitle')}
-          </h2>
-        </div>
-        <p className="text-xs text-muted-foreground mb-4">
-          {t('myPostsPage.hashtagsSubtitle')}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {t('myPostsPage.hashtagsEmpty')}
-        </p>
-      </div>
+      <section className="mp-chart-card">
+        <div className="mp-empty">{t('myPostsPage.bestEmpty')}</div>
+      </section>
     )
   }
 
-  const visible = expanded ? data.hashtags : data.hashtags.slice(0, 10)
-  const canToggle = data.hashtags.length > 10
-
   return (
-    <div className="glass rounded-2xl p-6">
-      <div className="flex items-center gap-2 mb-1">
-        <Hash className="w-5 h-5 text-primary" />
-        <h2 className="text-lg font-bold text-foreground">
-          {t('myPostsPage.hashtagsTitle')}
-        </h2>
+    <section className="mp-chart-card">
+      <div className="mp-chart-head">
+        <div>
+          <h2 className="mp-chart-title">{t('myPostsPage.engagementByType')}</h2>
+          <p className="mp-chart-sub">{t('myPostsPage.engagementByTypeSubtitle')}</p>
+        </div>
+        <div className="mp-chart-legend">
+          {rows.map((r) => {
+            const colors = {
+              video: 'var(--video)',
+              image: 'var(--image)',
+              carousel: 'var(--carousel)',
+            }
+            const labels = {
+              video: t('myPostsPage.videoLabel'),
+              image: t('myPostsPage.imageLabel'),
+              carousel: t('myPostsPage.carouselLabel'),
+            }
+            return (
+              <span key={r.type} className="mp-leg">
+                <span className="mp-leg-dot" style={{ background: colors[r.type] }} />
+                {labels[r.type]} <span className="mp-leg-n num">{r.posts}</span>
+              </span>
+            )
+          })}
+        </div>
       </div>
-      <p className="text-xs text-muted-foreground mb-4">
-        {t('myPostsPage.hashtagsSubtitle')}
-      </p>
-
-      <div dir="ltr" className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-primary/10">
-              <th className="text-left py-2 px-2 font-semibold">
-                {t('myPostsPage.hashtagCol')}
-              </th>
-              <th className="text-right py-2 px-2 font-semibold">
-                {t('myPostsPage.usesCol')}
-              </th>
-              <th className="text-right py-2 px-2 font-semibold">
-                {t('myPostsPage.avgEngagementCol')}
-              </th>
-              <th className="text-right py-2 px-2 font-semibold">
-                {t('myPostsPage.vsBaselineCol')}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((h, idx) => {
-              const highlight = idx < 3
-              const positive = h.avg_engagement_delta > 0
-              const zero = h.avg_engagement_delta === 0
-              return (
-                <tr
-                  key={h.hashtag}
-                  className={`border-b border-primary/5 ${
-                    highlight ? 'bg-primary/5' : ''
-                  }`}
-                >
-                  <td className="py-2 px-2 font-medium text-foreground">
-                    #{h.hashtag}
-                  </td>
-                  <td className="py-2 px-2 text-right text-foreground/80 tabular-nums">
-                    {h.uses}
-                  </td>
-                  <td className="py-2 px-2 text-right text-foreground/80 tabular-nums">
-                    {h.avg_engagement}
-                  </td>
-                  <td className="py-2 px-2 text-right">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${
-                        zero
-                          ? 'bg-slate-100 text-slate-600'
-                          : positive
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-rose-50 text-rose-700'
-                      }`}
-                    >
-                      {positive && '+'}
-                      {h.avg_engagement_delta}
-                    </span>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {canToggle ? (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-        >
-          {expanded ? t('myPostsPage.showLess') : t('myPostsPage.showAll')}
-          {expanded ? (
-            <ChevronUp className="w-3 h-3" />
-          ) : (
-            <ChevronDown className="w-3 h-3" />
-          )}
-        </button>
-      ) : null}
-    </div>
+      <EngagementChart rows={rows} />
+    </section>
   )
 }
 
-/* ── Page ──────────────────────────────────────────────────────────────── */
+/* ------------------------------------------------------------------ */
+/* Page                                                               */
+/* ------------------------------------------------------------------ */
 
-export default function Analytics() {
+function SupportingDataDivider() {
   const { t } = useTranslation()
   return (
-    <div className="space-y-6">
-      <PageHeader />
-
-      {/* AI hero — actions before charts */}
-      <div className="flex items-center gap-2 mb-1">
-        <Sparkles className="w-4 h-4 text-cta" />
-        <h2 className="text-sm font-semibold text-foreground/70 uppercase tracking-wider">
-          {t('myPostsPage.aiHeroLabel')}
-        </h2>
-      </div>
-      <AIHero />
-
-      {/* Supporting evidence: chart + table */}
-      <div className="flex items-center gap-2 mt-2">
-        <ArrowRight className="w-4 h-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold text-foreground/70 uppercase tracking-wider">
-          {t('myPostsPage.evidenceLabel')}
-        </h2>
-      </div>
-      <ContentTypeChart />
-      <HashtagPerformance />
-      <LanguageBreakdown />
-      <TopPostsTable />
+    <div className="mp-data-divider">
+      <span className="mp-data-label">
+        <Icon path={I.bars} size={12} />
+        {t('myPostsPage.supportingDataLabel')}
+      </span>
+      <div className="mp-data-line" />
     </div>
   )
 }
+
+export default function Analytics() {
+  const [range, setRange] = useState<'7d' | '30d' | '90d'>('30d')
+
+  return (
+    <div className="rd-canvas">
+      <div className="mp-main">
+        <Header range={range} setRange={setRange} />
+        <TwoCardHero />
+        <SupportingDataDivider />
+        <ChartCard />
+      </div>
+      <style>{MP_STYLES}</style>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Styles                                                             */
+/* ------------------------------------------------------------------ */
+
+const MP_STYLES = `
+.mp-main { display:flex; flex-direction:column; gap:22px; max-width:1480px; margin:0 auto; }
+
+.mp-head { display:flex; justify-content:space-between; align-items:flex-end; gap:24px; flex-wrap:wrap; }
+.mp-crumb { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-500); margin-bottom:10px; font-weight:500; }
+.mp-crumb-arrow { color:var(--ink-300); }
+.mp-titlerow { display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap; }
+.mp-titlerow h1 { font-size:30px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1.15; }
+.mp-badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:99px; background:var(--purple-50); color:var(--purple-700); font-size:12px; font-weight:600; }
+.mp-dot { width:6px; height:6px; border-radius:50%; background:var(--purple-500); box-shadow:0 0 0 3px rgba(124,92,239,.2); }
+.mp-sub { font-size:13.5px; color:var(--ink-500); max-width:560px; line-height:1.55; }
+
+.mp-head-act { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.mp-range { display:flex; background:var(--ink-100); border-radius:10px; padding:3px; }
+.mp-range button { padding:7px 14px; font-size:12.5px; font-weight:500; border-radius:7px; color:var(--ink-600); }
+.mp-range button.is-on { background:var(--surface); color:var(--ink-900); box-shadow:var(--shadow-sm); font-weight:600; }
+.mp-export { display:flex; align-items:center; gap:7px; padding:10px 16px; background:var(--surface); border:1px solid var(--line); border-radius:10px; font-size:13px; font-weight:500; color:var(--ink-800); }
+.mp-export:hover { border-color:var(--line-strong); }
+
+.mp-loading { padding:48px; text-align:center; color:var(--ink-500); font-size:13px; background:var(--surface); border:1px solid var(--line); border-radius:18px; }
+.mp-empty { padding:32px; text-align:center; color:var(--ink-500); font-size:13px; }
+
+/* CARDS */
+.mp-grid { display:grid; grid-template-columns:1fr 1.1fr; gap:18px; }
+@media (max-width:1024px) { .mp-grid { grid-template-columns:1fr; } }
+.mp-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:24px; display:flex; flex-direction:column; gap:16px; position:relative; overflow:hidden; }
+.mp-card::before { content:''; position:absolute; top:0; inset-inline:0; height:3px; }
+.mp-card--good::before { background:linear-gradient(90deg, oklch(0.7 0.16 155), oklch(0.6 0.18 160)); }
+.mp-card--warn::before { background:linear-gradient(90deg, oklch(0.75 0.12 85), oklch(0.7 0.14 55)); }
+
+.mp-card-head { display:flex; gap:12px; align-items:center; }
+.mp-card-icon { width:36px; height:36px; border-radius:10px; display:grid; place-items:center; flex-shrink:0; }
+.mp-card-icon--good { background:oklch(0.95 0.05 155); color:oklch(0.45 0.15 155); }
+.mp-card-icon--warn { background:oklch(0.96 0.05 85); color:oklch(0.55 0.15 60); }
+.mp-card-head h3 { font-size:17px; font-weight:700; color:var(--ink-950); margin-bottom:3px; letter-spacing:-0.01em; }
+.mp-card-sub { font-size:12px; color:var(--ink-500); font-weight:500; }
+
+.mp-quote { padding:14px 16px; border-radius:12px; font-size:13.5px; line-height:1.7; color:var(--ink-800); }
+.mp-quote-label { font-size:10.5px; font-weight:700; letter-spacing:0.02em; margin-bottom:6px; }
+.mp-quote--good { background:oklch(0.97 0.025 155); }
+.mp-quote--good .mp-quote-label { color:oklch(0.45 0.15 155); }
+.mp-quote--warn { background:oklch(0.97 0.025 85); }
+.mp-quote--warn .mp-quote-label { color:oklch(0.55 0.15 60); }
+.mp-quote--tip { background:var(--ink-50); }
+.mp-quote--tip .mp-quote-label { color:var(--ink-700); }
+
+.mp-post-preview { background:var(--ink-50); border:1px solid var(--line); border-radius:12px; padding:14px; }
+.mp-post-meta { display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap; }
+.mp-post-stat { font-size:11px; color:var(--ink-500); font-weight:500; display:inline-flex; align-items:center; gap:4px; }
+.mp-post-body { font-size:13.5px; color:var(--ink-900); line-height:1.7; font-weight:500; margin-bottom:8px; }
+.mp-post-ocr { margin-top:6px; padding:8px 10px; background:var(--surface); border-radius:8px; font-size:12px; color:var(--ink-600); }
+.mp-post-ocr span { color:var(--ink-800); font-weight:500; }
+
+.mp-cta { display:flex; align-items:center; justify-content:center; gap:8px; padding:12px; width:100%; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13.5px; font-weight:600; box-shadow:0 6px 16px -6px rgba(99,65,224,.55); transition:background 0.12s, transform 0.12s; }
+.mp-cta:hover:not(:disabled) { background:var(--purple-700); transform:translateY(-1px); }
+.mp-cta:disabled { opacity:.7; cursor:not-allowed; }
+
+.mp-cap-block { background:var(--purple-50); border:1px solid var(--purple-200); border-radius:12px; padding:14px; }
+.mp-cap-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:11px; font-weight:700; color:var(--purple-800); }
+.mp-cap-lang { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; color:var(--purple-700); padding:3px 8px; border-radius:6px; }
+.mp-cap-lang:hover { background:var(--purple-100); }
+.mp-cap-text { font-size:13.5px; color:var(--ink-900); line-height:1.65; font-weight:500; }
+.mp-cap-share { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; color:var(--purple-700); margin-top:10px; padding:4px 0; }
+.mp-cap-share:hover { color:var(--purple-900); }
+
+/* Data divider */
+.mp-data-divider { display:flex; align-items:center; gap:14px; margin-top:10px; }
+.mp-data-label { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:600; color:var(--ink-600); }
+.mp-data-line { flex:1; height:1px; background:var(--line); }
+
+/* Chart card */
+.mp-chart-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:24px 28px 28px; }
+.mp-chart-head { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; margin-bottom:20px; flex-wrap:wrap; }
+.mp-chart-title { font-size:18px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; margin-bottom:4px; }
+.mp-chart-sub { font-size:12.5px; color:var(--ink-500); }
+.mp-chart-legend { display:flex; gap:18px; flex-wrap:wrap; }
+.mp-leg { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-700); font-weight:500; }
+.mp-leg-dot { width:10px; height:10px; border-radius:3px; }
+.mp-leg-n { color:var(--ink-900); font-weight:700; }
+
+.mp-chart { display:flex; flex-direction:column; gap:14px; }
+.mp-bar-row { display:grid; grid-template-columns:100px 1fr 90px; align-items:center; gap:16px; }
+.mp-bar-label { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--ink-800); }
+.mp-bar-label svg { color:var(--ink-600); }
+.mp-bar-track { position:relative; height:32px; background:var(--ink-50); border-radius:10px; overflow:hidden; }
+.mp-bar-fill { position:absolute; inset:0 auto 0 0; height:100%; border-radius:10px; transition:width 0.4s cubic-bezier(.2,.8,.2,1); }
+.mp-bar-val { position:absolute; inset-inline-start:12px; top:50%; transform:translateY(-50%); font-size:12.5px; font-weight:700; color:var(--ink-900); letter-spacing:-0.01em; }
+.mp-bar-posts { font-size:11.5px; color:var(--ink-500); font-weight:500; text-align:start; }
+
+[dir="rtl"] .mp-cta svg,
+[dir="rtl"] .mp-crumb-arrow,
+[dir="rtl"] .mp-cap-share svg { transform:scaleX(-1); }
+`

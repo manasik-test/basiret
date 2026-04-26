@@ -1,6 +1,5 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Swords, TrendingUp } from 'lucide-react'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
@@ -10,13 +9,14 @@ import Analytics from './pages/Analytics'
 import Audience from './pages/Audience'
 import Recommendations from './pages/Recommendations'
 import Sentiment from './pages/Sentiment'
+import Competitors from './pages/Competitors'
+import Trends from './pages/Trends'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
-import ComingSoon from './pages/ComingSoon'
 import AskBasiretRedirect from './pages/AskBasiretRedirect'
 import MyGoals from './pages/MyGoals'
 import { useLanguageCacheInvalidation } from './hooks/useAnalytics'
@@ -144,9 +144,7 @@ export default function App() {
             path="/competitors"
             element={
               <ProtectedRoute>
-                <AppLayout>
-                  <ComingSoon titleKey="nav.competitors" questionKey="comingSoon.competitorsQ" icon={Swords} />
-                </AppLayout>
+                <AppLayout><Competitors /></AppLayout>
               </ProtectedRoute>
             }
           />
@@ -162,9 +160,7 @@ export default function App() {
             path="/trends"
             element={
               <ProtectedRoute>
-                <AppLayout>
-                  <ComingSoon titleKey="nav.trends" questionKey="comingSoon.trendsQ" icon={TrendingUp} />
-                </AppLayout>
+                <AppLayout><Trends /></AppLayout>
               </ProtectedRoute>
             }
           />
