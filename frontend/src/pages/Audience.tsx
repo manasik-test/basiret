@@ -30,11 +30,21 @@ function pickEmoji(contentType: string | undefined): string {
 }
 
 function deriveName(c: SegmentCharacteristics | undefined, fallback: string): { name: string; persona: string } {
+  // Prefer the new structured fields populated by the updated Gemini persona
+  // prompt — name + tagline are short, designed to fit the card hierarchy.
+  const structuredName = c?.persona_name?.trim()
+  const structuredTagline = c?.persona_tagline?.trim()
+  if (structuredName) {
+    return { name: structuredName, persona: structuredTagline || c?.persona_description || '' }
+  }
+
+  // Backwards compat: older personas stored the whole prose in
+  // `persona_description`. Take the first sentence as the name and the rest
+  // as the description body.
   const desc = c?.persona_description?.trim()
   if (!desc) {
     return { name: fallback, persona: '' }
   }
-  // Take the first sentence (or first 60 chars) as the name; rest is persona description.
   const sentences = desc.split(/[.!؟]/).filter((s: string) => s.trim().length > 0)
   if (sentences.length === 0) return { name: fallback, persona: desc }
   const name = sentences[0]!.trim().slice(0, 60)
@@ -135,6 +145,31 @@ interface PersonaCardProps {
   postingTime: string | undefined
   avgEngagement: number
   emoji: string
+  contentTypeBreakdown: { video: number; image: number; carousel: number }
+  topTopics: string[]
+  bestDayHour: { day: string; hour: number } | null | undefined
+}
+
+// Format a "Tuesday 4pm" style chip from a {day, hour} object, localised.
+function formatBestDayHour(
+  v: { day: string; hour: number } | null | undefined,
+  isAr: boolean,
+): string {
+  if (!v) return ''
+  const dayMap: Record<string, { en: string; ar: string }> = {
+    Monday: { en: 'Mon', ar: 'الإثنين' },
+    Tuesday: { en: 'Tue', ar: 'الثلاثاء' },
+    Wednesday: { en: 'Wed', ar: 'الأربعاء' },
+    Thursday: { en: 'Thu', ar: 'الخميس' },
+    Friday: { en: 'Fri', ar: 'الجمعة' },
+    Saturday: { en: 'Sat', ar: 'السبت' },
+    Sunday: { en: 'Sun', ar: 'الأحد' },
+  }
+  const d = dayMap[v.day]?.[isAr ? 'ar' : 'en'] ?? v.day
+  const h = v.hour
+  const hour12 = ((h + 11) % 12) + 1
+  const suffix = h < 12 ? (isAr ? 'ص' : 'am') : isAr ? 'م' : 'pm'
+  return `${d} ${hour12}${suffix}`
 }
 
 function PersonaCard({
@@ -143,12 +178,14 @@ function PersonaCard({
   pct,
   name,
   persona,
-  contentType,
   postingTime,
   avgEngagement,
   emoji,
+  contentTypeBreakdown,
+  topTopics,
+  bestDayHour,
 }: PersonaCardProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const p = PALETTES[index % PALETTES.length]
   const timeLabelMap: Record<string, string> = {
     morning: t('myAudiencePage.morningLabel'),
@@ -156,7 +193,11 @@ function PersonaCard({
     evening: t('myAudiencePage.eveningLabel'),
   }
   const timeKey = postingTime?.toLowerCase()
-  const timeLabel = timeKey && timeLabelMap[timeKey] ? timeLabelMap[timeKey] : postingTime || '—'
+  const fallbackTimeLabel = timeKey && timeLabelMap[timeKey] ? timeLabelMap[timeKey] : postingTime || '—'
+  const isAr = i18n.language?.startsWith('ar')
+  // Prefer the day+hour chip from the new computed field; fall back to the
+  // broad bucket label when it's missing (e.g. older segment rows).
+  const bestTimeLabel = formatBestDayHour(bestDayHour, !!isAr) || fallbackTimeLabel
 
   const contentTypeLabels = {
     video: t('myPostsPage.videoLabel'),
@@ -170,6 +211,12 @@ function PersonaCard({
       : avgEngagement >= 2
         ? t('myAudiencePage.engagementMedium')
         : t('myAudiencePage.engagementLow')
+
+  // Sort the breakdown so the dominant type appears first — matches the
+  // design's "yiprefer" ordering.
+  const breakdownEntries = (['video', 'image', 'carousel'] as const)
+    .map((k) => ({ type: k, pct: contentTypeBreakdown[k] || 0 }))
+    .sort((a, b) => b.pct - a.pct)
 
   return (
     <article
@@ -202,34 +249,50 @@ function PersonaCard({
         </div>
       </div>
 
-      {/* Content preference — backend gives only dominant_content_type, render
-        a single full bar of the dominant type. Future API could return an
-        actual {video, image, carousel} % breakdown. */}
+      {/* Real content-type breakdown from segmentation.py:_compute_segment_extras */}
       <div className="aud-card-row">
         <div className="aud-card-k">{t('myAudiencePage.prefersHeader')}</div>
         <div className="aud-card-bars">
-          <div className="aud-pref">
-            <div className="aud-pref-lbl">
-              <TypeIcon type={contentType} size={11} /> {contentTypeLabels[contentType]}
+          {breakdownEntries.map((entry) => (
+            <div key={entry.type} className="aud-pref">
+              <div className="aud-pref-lbl">
+                <TypeIcon type={entry.type} size={11} /> {contentTypeLabels[entry.type]}
+              </div>
+              <div className="aud-pref-bar">
+                <div
+                  style={{
+                    width: `${entry.pct}%`,
+                    background: `var(--${entry.type})`,
+                  }}
+                />
+              </div>
+              <div className="num aud-pref-p">{entry.pct}%</div>
             </div>
-            <div className="aud-pref-bar">
-              <div style={{ width: '100%', background: `var(--${contentType})` }} />
-            </div>
-            <div className="num aud-pref-p">100%</div>
-          </div>
+          ))}
         </div>
       </div>
 
       <div className="aud-card-row aud-card-row--grid">
         <div>
           <div className="aud-card-k">{t('myAudiencePage.bestTimeHeader')}</div>
-          <div className="aud-card-v">{timeLabel}</div>
+          <div className="aud-card-v">{bestTimeLabel}</div>
         </div>
         <div>
           <div className="aud-card-k">{t('myAudiencePage.engagementHeader')}</div>
           <div className="aud-card-v">{engBucket}</div>
         </div>
       </div>
+
+      {topTopics.length > 0 && (
+        <div className="aud-card-row">
+          <div className="aud-card-k">{t('myAudiencePage.topicsHeader')}</div>
+          <div className="aud-topics">
+            {topTopics.slice(0, 3).map((topic) => (
+              <span key={topic} dir="auto">{topic}</span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <button className="aud-card-cta">
         <Icon path={I.wand} size={12} />
@@ -327,6 +390,11 @@ function AudienceContent() {
               const { name, persona } = deriveName(c, seg.label)
               const pct = Math.round((seg.size / totalSize) * 100)
               const contentType = normalizeContentType(c?.dominant_content_type)
+              // avg_engagement may be a number (legacy) or an object {likes,comments,engagement_rate}.
+              const rawEng = c?.avg_engagement
+              const avgEng = typeof rawEng === 'number'
+                ? rawEng
+                : (rawEng?.likes ?? 0) + (rawEng?.comments ?? 0)
               return (
                 <PersonaCard
                   key={seg.id}
@@ -337,8 +405,11 @@ function AudienceContent() {
                   persona={persona}
                   contentType={contentType}
                   postingTime={c?.typical_posting_time}
-                  avgEngagement={Number(c?.avg_engagement ?? 0)}
+                  avgEngagement={avgEng}
                   emoji={pickEmoji(c?.dominant_content_type)}
+                  contentTypeBreakdown={c?.content_type_breakdown ?? { video: 0, image: 0, carousel: 0 }}
+                  topTopics={c?.top_topics ?? []}
+                  bestDayHour={c?.best_day_hour ?? null}
                 />
               )
             })}
@@ -435,6 +506,9 @@ const AUD_STYLES = `
 .aud-pref-bar { height:6px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
 .aud-pref-bar > div { height:100%; border-radius:99px; transition:width .5s; }
 .aud-pref-p { font-weight:700; color:var(--ink-900); text-align:start; letter-spacing:-0.005em; }
+
+.aud-topics { display:flex; flex-wrap:wrap; gap:6px; }
+.aud-topics span { padding:4px 10px; background:var(--acc-bg); color:var(--acc-fg); border-radius:99px; font-size:11.5px; font-weight:500; }
 
 .aud-card-cta { padding:11px; background:var(--ink-900); color:#fff; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:6px; margin-top:auto; }
 .aud-card-cta:hover { background:var(--ink-800); }

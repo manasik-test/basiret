@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Icon, I } from '../components/redesign/icons'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
+import { useCompetitorLeaderboard, useCompetitorTopPosts } from '../hooks/useAnalytics'
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                          */
@@ -126,8 +127,22 @@ const C_TAG = {
 function CompetitorsContent() {
   const { t } = useTranslation()
   const [range, setRange] = useState<'today' | '7d' | '30d'>('7d')
+  const leaderboard = useCompetitorLeaderboard()
+  const topPosts = useCompetitorTopPosts()
 
   const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+  const me = {
+    handle: '@you',
+    name: t('competitorsPage.youLabel'),
+    avatar: 'Y',
+    followers: '12.4K',
+    growth: '+2.1%',
+    engagement: '9.6%',
+    cadence: '4/week',
+    isMe: true,
+  }
+  const competitors = leaderboard.data?.competitors ?? []
+  const topPostsList = topPosts.data?.posts ?? []
 
   return (
     <div className="rd-canvas">
@@ -178,6 +193,86 @@ function CompetitorsContent() {
             </div>
           </div>
         </section>
+
+        {/* Leaderboard — you vs competitors on the four KPI columns */}
+        <section className="cmp-card">
+          <div className="cmp-card-head">
+            <div>
+              <h3>{t('competitorsPage.leaderboardTitle')}</h3>
+              <p>{t('competitorsPage.leaderboardSubtitle')}</p>
+            </div>
+          </div>
+          <div className="cmp-board">
+            <div className="cmp-board-h">
+              <span>{t('competitorsPage.colAccount')}</span>
+              <span>{t('competitorsPage.colFollowers')}</span>
+              <span>{t('competitorsPage.colGrowth')}</span>
+              <span>{t('competitorsPage.colEngagement')}</span>
+              <span>{t('competitorsPage.colCadence')}</span>
+            </div>
+            {[me, ...competitors].map((row, i) => {
+              const isMe = (row as { isMe?: boolean }).isMe
+              return (
+                <div key={`${row.handle}-${i}`} className={`cmp-board-r ${isMe ? 'is-me' : ''}`}>
+                  <div className="cmp-board-acc">
+                    <span className="cmp-board-rank num">{i + 1}</span>
+                    <span className="cmp-av">{row.avatar}</span>
+                    <div>
+                      <div className="cmp-board-n">
+                        {row.name}
+                        {isMe && <span className="cmp-me">{t('competitorsPage.youBadge')}</span>}
+                      </div>
+                      <div className="cmp-board-h2">{row.handle}</div>
+                    </div>
+                  </div>
+                  <span className="cmp-board-num num">{row.followers}</span>
+                  <span className="cmp-board-up num">{row.growth}</span>
+                  <span className="cmp-board-eng num">{row.engagement}</span>
+                  <span className="cmp-board-cad num">{row.cadence}</span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        {/* Top posts grid — 4 cards of best-performing competitor posts */}
+        {topPostsList.length > 0 && (
+          <section className="cmp-card">
+            <div className="cmp-card-head">
+              <div>
+                <h3>{t('competitorsPage.topPostsTitle')}</h3>
+                <p>{t('competitorsPage.topPostsSubtitle')}</p>
+              </div>
+            </div>
+            <div className="cmp-top">
+              {topPostsList.map((p, i) => (
+                <article key={i} className="cmp-top-c">
+                  <div
+                    className="cmp-top-thumb"
+                    style={{
+                      background: i % 2 ? 'oklch(0.75 0.12 60)' : 'oklch(0.7 0.15 30)',
+                    }}
+                  >
+                    <span className="cmp-top-fmt">
+                      {t(`competitorsPage.kind${p.format.charAt(0).toUpperCase()}${p.format.slice(1)}` as never)}
+                    </span>
+                    <span className="cmp-top-eng">{p.engagement_pct}</span>
+                  </div>
+                  <div className="cmp-top-meta">
+                    <div className="cmp-top-tag">
+                      {t(`competitorsPage.topTag.${p.tag_key}` as never)}
+                    </div>
+                    <div className="cmp-top-who">{p.who}</div>
+                    <div className="cmp-top-m num">{p.metric}</div>
+                  </div>
+                  <button className="cmp-top-btn">
+                    {t('competitorsPage.actionGenerate')}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="cmp-grid">
           <div className="cmp-col">
@@ -367,6 +462,40 @@ const CMP_STYLES = `
 .cmp-hero-stat-k { font-size:10.5px; color:var(--ink-500); font-weight:500; grid-row:1; grid-column:1; }
 .cmp-hero-stat-v { font-size:16px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; line-height:1; grid-row:1 / span 2; grid-column:2; }
 .cmp-hero-stat-d { font-size:10.5px; color:var(--ink-600); font-weight:500; grid-row:2; grid-column:1; }
+
+/* Leaderboard */
+.cmp-board { display:flex; flex-direction:column; gap:1px; background:var(--line); border-radius:12px; overflow:hidden; }
+.cmp-board-h, .cmp-board-r { display:grid; grid-template-columns:2fr .9fr .8fr .9fr 1fr; gap:14px; padding:11px 14px; align-items:center; background:var(--surface); }
+@media (max-width:768px) { .cmp-board-h, .cmp-board-r { grid-template-columns:2fr 1fr 1fr; } .cmp-board-h > :nth-child(n+4), .cmp-board-r > :nth-child(n+4) { display:none; } }
+.cmp-board-h { background:var(--ink-50); font-size:11px; color:var(--ink-500); font-weight:600; text-transform:uppercase; letter-spacing:0.03em; }
+.cmp-board-r { font-size:12.5px; }
+.cmp-board-r:hover { background:var(--ink-50); }
+.cmp-board-r.is-me { background:var(--purple-50); }
+.cmp-board-r.is-me:hover { background:oklch(0.96 0.04 285); }
+.cmp-board-acc { display:flex; align-items:center; gap:10px; min-width:0; }
+.cmp-board-rank { color:var(--ink-400); font-size:11px; font-weight:600; min-width:14px; }
+.cmp-board-n { font-weight:600; color:var(--ink-950); font-size:12.5px; display:flex; align-items:center; gap:6px; }
+.cmp-board-h2 { font-size:11px; color:var(--ink-500); }
+.cmp-me { display:inline-block; font-size:9.5px; padding:1px 6px; border-radius:99px; background:var(--purple-200); color:var(--purple-800); font-weight:700; }
+.cmp-board-num { color:var(--ink-900); font-weight:600; }
+.cmp-board-up { color:oklch(0.5 0.15 155); font-weight:600; }
+.cmp-board-eng { color:var(--ink-950); font-weight:700; }
+.cmp-board-cad { color:var(--ink-700); font-size:11.5px; }
+.cmp-av { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; color:#fff; font-weight:700; font-size:11px; flex-shrink:0; background:var(--purple-500); }
+
+/* Top posts grid */
+.cmp-top { display:grid; grid-template-columns:repeat(2, 1fr); gap:10px; }
+@media (min-width:1280px) { .cmp-top { grid-template-columns:repeat(4, 1fr); } }
+.cmp-top-c { display:flex; flex-direction:column; gap:8px; padding:10px; border-radius:12px; border:1px solid var(--line); background:var(--surface); }
+.cmp-top-thumb { aspect-ratio:1.4; border-radius:10px; display:flex; justify-content:space-between; align-items:flex-start; padding:8px; }
+.cmp-top-fmt { font-size:10px; padding:3px 8px; background:rgba(0,0,0,.45); color:#fff; border-radius:99px; font-weight:700; }
+.cmp-top-eng { font-size:11px; padding:3px 8px; background:#fff; color:oklch(0.5 0.15 155); border-radius:99px; font-weight:700; }
+.cmp-top-meta { padding:0 4px; }
+.cmp-top-tag { font-size:11px; color:var(--ink-500); font-weight:500; }
+.cmp-top-who { font-size:12.5px; font-weight:600; color:var(--ink-900); margin:2px 0; }
+.cmp-top-m { font-size:11px; color:var(--ink-700); font-weight:600; }
+.cmp-top-btn { padding:8px; border-radius:8px; font-size:11.5px; font-weight:600; background:var(--ink-50); color:var(--ink-800); border:1px solid var(--line); }
+.cmp-top-btn:hover { background:var(--purple-50); color:var(--purple-700); border-color:var(--purple-200); }
 
 /* Cards */
 .cmp-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:20px 22px; }

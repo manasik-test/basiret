@@ -216,50 +216,62 @@ def _generate_persona_descriptions(
     segments_data: list[dict],
     account_id: str | None = None,
     language: str = "en",
-) -> list[str]:
-    """Call the personas provider (Gemini) to generate content-pattern
-    descriptions for each K-means cluster.
+) -> list[dict]:
+    """Call the personas provider (Gemini) to generate persona objects per cluster.
 
-    These describe how the creator's *content* performs across format/time
-    buckets, not audience personas. Each description must begin with the
-    language-appropriate equivalent of 'Content posted in the <time> performs
-    like this:' so the reader sees immediately that the cluster is a content
-    pattern, not a person.
+    Returns a list of dicts: ``{"name": ..., "tagline": ..., "description": ...}``
+    one per cluster, in cluster_id order. The "name" is a short culturally
+    appropriate human handle + role (e.g. "سالم — هاوي الفيديو" /
+    "Salim — Video Lover"); the "tagline" is one sentence; the "description"
+    is 2-3 sentences explaining the content/timing pattern.
 
-    AI failures (quota / unavailable / malformed) collapse to empty strings —
+    AI failures (quota / unavailable / malformed) collapse to empty fields —
     the cluster job still produces all its DB rows, just without prose.
     """
     lang_label = "Arabic" if language == "ar" else "English"
     if language == "ar":
-        opener_rule = (
-            "Every description MUST start verbatim with the Arabic phrase: "
-            "'المحتوى المنشور في فترة <time> يحقق هذا الأداء:' where <time> is the Arabic "
-            "translation of the typical_posting_time value (morning=الصباح, afternoon=الظهيرة, "
-            "evening=المساء, night=الليل). "
+        name_rule = (
+            "The 'name' MUST follow the format 'الاسم — الدور' — an Arabic given "
+            "name (سالم/ليلى/خالد/نورة/مها/أحمد/فاطمة/يوسف…) followed by an em-dash and "
+            "a 2-4 word role tagline. Do NOT use Latin names. "
+        )
+        desc_rule = (
+            "The 'description' MUST start with: 'المحتوى المنشور في فترة <time> يحقق "
+            "هذا الأداء:' where <time> is the Arabic translation of typical_posting_time "
+            "(morning=الصباح, afternoon=الظهيرة, evening=المساء, night=الليل). "
         )
     else:
-        opener_rule = (
-            "Every description MUST start verbatim with: "
-            "'Content posted in the <time> performs like this:' where <time> is the lowercase "
-            "typical_posting_time value provided (morning/afternoon/evening/night). "
+        name_rule = (
+            "The 'name' MUST follow the format 'Given Name — Role Tagline' — pick a "
+            "common given name (Sam/Layla/Khalid/Noura/Maha/Ahmad/Fatima/Yusuf…) "
+            "followed by an em-dash and a 2-4 word role tagline. "
+        )
+        desc_rule = (
+            "The 'description' MUST start with: "
+            "'Content posted in the <time> performs like this:' where <time> is the "
+            "lowercase typical_posting_time value (morning/afternoon/evening/night). "
         )
 
     sys_prompt = (
         "You are a content-performance analyst. Given K-means clusters of a creator's "
-        "own posts (NOT audience segments), write a short content-pattern description "
-        "(2-3 sentences) for each cluster. "
-        + opener_rule +
-        "After that sentence opener, describe what the content format looks like, how it "
-        "engages, and a concrete takeaway for the creator. Focus on content and timing "
-        "patterns — do NOT describe hypothetical audience members ('this user...', "
-        "'they are...'). Respond ONLY in valid JSON: an object with key 'descriptions' "
-        "whose value is an array of strings, one description per cluster. "
-        "No preamble, no markdown. "
-        f"Respond ENTIRELY in {lang_label}. Every description string MUST be in {lang_label} "
+        "own posts (NOT audience segments), produce a persona object per cluster — "
+        "give the cluster a memorable identity that helps the creator visualize the "
+        "type of content+timing pattern it represents. "
+        + name_rule
+        + "The 'tagline' MUST be one short sentence (≤12 words) capturing the content "
+        "vibe (e.g. 'Short videos that land in the afternoon'). "
+        + desc_rule
+        + "After the description's mandatory opener, give 1-2 more sentences about how "
+        "the content engages and one concrete takeaway. Do NOT describe hypothetical "
+        "audience members — describe the content pattern. "
+        "Respond ONLY in valid JSON: an object with key 'personas' whose value is an "
+        "array of objects, each with keys 'name', 'tagline', 'description', one per "
+        "cluster in input order. No preamble, no markdown. "
+        f"Respond ENTIRELY in {lang_label}. Every string value MUST be in {lang_label} "
         "— do not switch languages even if the input data is in another language."
     )
 
-    prompt = "Generate content-pattern descriptions for these clusters:\n\n"
+    prompt = "Generate personas for these clusters:\n\n"
     for i, seg in enumerate(segments_data):
         prompt += (
             f"Cluster {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
@@ -269,6 +281,8 @@ def _generate_persona_descriptions(
             f"avg likes: {seg['avg_likes']}, avg comments: {seg['avg_comments']}\n"
         )
 
+    empty = [{"name": "", "tagline": "", "description": ""} for _ in segments_data]
+
     try:
         parsed = get_provider("personas").generate_json(
             sys_prompt, prompt, temperature=0.5,
@@ -276,19 +290,133 @@ def _generate_persona_descriptions(
         )
     except AIProviderError as exc:
         logger.warning(
-            "Persona description generation failed (%s) — descriptions will be empty",
+            "Persona generation failed (%s) — personas will be empty",
             exc.__class__.__name__,
         )
-        return ["" for _ in segments_data]
+        return empty
 
-    # The provider wraps bare arrays into {"items": [...]} so check both shapes.
-    descriptions = parsed.get("descriptions") or parsed.get("items") or []
-    if not isinstance(descriptions, list):
-        logger.warning("Persona response wasn't a list: %s", type(descriptions).__name__)
-        return ["" for _ in segments_data]
-    if len(descriptions) < len(segments_data):
-        descriptions = list(descriptions) + [""] * (len(segments_data) - len(descriptions))
-    return [str(d) if d else "" for d in descriptions[: len(segments_data)]]
+    raw = parsed.get("personas") or parsed.get("items") or parsed.get("descriptions") or []
+    if not isinstance(raw, list):
+        logger.warning("Persona response wasn't a list: %s", type(raw).__name__)
+        return empty
+
+    out: list[dict] = []
+    for i in range(len(segments_data)):
+        if i >= len(raw):
+            out.append({"name": "", "tagline": "", "description": ""})
+            continue
+        item = raw[i]
+        if isinstance(item, str):
+            # Backwards compat: old shape returned bare descriptions.
+            out.append({"name": "", "tagline": "", "description": item})
+        elif isinstance(item, dict):
+            out.append({
+                "name": str(item.get("name", "") or ""),
+                "tagline": str(item.get("tagline", "") or ""),
+                "description": str(item.get("description", "") or ""),
+            })
+        else:
+            out.append({"name": "", "tagline": "", "description": ""})
+    return out
+
+
+def _compute_segment_extras(db, cluster_post_ids: list):
+    """Compute the new per-segment characteristics that aren't derivable from
+    the centroid alone: actual content-type breakdown, top topics, and the
+    best-performing day-of-week + hour combo for posts in this cluster.
+
+    Returns a dict with keys: content_type_breakdown, top_topics, best_day_hour.
+    Empty cluster → safe defaults.
+    """
+    if not cluster_post_ids:
+        return {
+            "content_type_breakdown": {"video": 0, "image": 0, "carousel": 0},
+            "top_topics": [],
+            "best_day_hour": None,
+        }
+
+    # 1. Content-type breakdown from the actual post rows.
+    type_rows = (
+        db.query(Post.content_type, func.count(Post.id).label("n"))
+        .filter(Post.id.in_(cluster_post_ids))
+        .group_by(Post.content_type)
+        .all()
+    )
+    total = sum(r.n for r in type_rows) or 1
+    by_type = {"video": 0, "image": 0, "carousel": 0}
+    for r in type_rows:
+        ct = (str(r.content_type).lower() if r.content_type else "")
+        if "video" in ct or "reel" in ct:
+            by_type["video"] += r.n
+        elif "carousel" in ct or "album" in ct:
+            by_type["carousel"] += r.n
+        else:
+            by_type["image"] += r.n
+    breakdown = {k: round(100.0 * v / total) for k, v in by_type.items()}
+    # Force the percentages to sum to exactly 100 by absorbing rounding into the largest bucket.
+    diff = 100 - sum(breakdown.values())
+    if diff != 0:
+        winner = max(breakdown.keys(), key=lambda k: breakdown[k])
+        breakdown[winner] += diff
+
+    # 2. Top topics — flatten analysis_result.topics across cluster posts.
+    topic_rows = (
+        db.query(AnalysisResult.topics)
+        .filter(AnalysisResult.post_id.in_(cluster_post_ids))
+        .filter(AnalysisResult.topics.isnot(None))
+        .all()
+    )
+    topic_counts: dict[str, int] = {}
+    for (topics,) in topic_rows:
+        if not isinstance(topics, list):
+            continue
+        for t in topics:
+            if not t:
+                continue
+            key = str(t).strip()
+            if not key:
+                continue
+            topic_counts[key] = topic_counts.get(key, 0) + 1
+    top_topics = [
+        t for t, _ in sorted(topic_counts.items(), key=lambda kv: kv[1], reverse=True)
+    ][:3]
+
+    # 3. Best day-of-week × hour bucket — pick the (DOW, hour) combo with the
+    # highest avg engagement_rate among cluster posts. Day labels match the
+    # frontend's localised set (Monday/.../Sunday).
+    perf_rows = (
+        db.query(
+            Post.posted_at,
+            EngagementMetric.likes,
+            EngagementMetric.comments,
+        )
+        .join(EngagementMetric, EngagementMetric.post_id == Post.id)
+        .filter(Post.id.in_(cluster_post_ids))
+        .filter(Post.posted_at.isnot(None))
+        .all()
+    )
+
+    bucket_totals: dict[tuple[int, int], list[int]] = {}
+    for posted_at, likes, comments in perf_rows:
+        if posted_at is None:
+            continue
+        key = (posted_at.weekday(), posted_at.hour)  # weekday(): Mon=0..Sun=6
+        bucket_totals.setdefault(key, []).append((likes or 0) + (comments or 0))
+
+    best_day_hour = None
+    if bucket_totals:
+        best_key = max(
+            bucket_totals.keys(),
+            key=lambda k: sum(bucket_totals[k]) / max(1, len(bucket_totals[k])),
+        )
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        best_day_hour = {"day": day_names[best_key[0]], "hour": int(best_key[1])}
+
+    return {
+        "content_type_breakdown": breakdown,
+        "top_topics": top_topics,
+        "best_day_hour": best_day_hour,
+    }
 
 
 def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, silhouette, language: str = "en"):
@@ -326,8 +454,8 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
             "avg_comments": round(float(centroid[1]), 2),
         })
 
-    # Get AI persona descriptions (best-effort — empty strings on AI failure)
-    persona_descriptions = _generate_persona_descriptions(
+    # Get AI personas (best-effort — empty fields on AI failure)
+    personas = _generate_persona_descriptions(
         segments_data, account_id=str(social_account_id), language=language,
     )
 
@@ -335,6 +463,10 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
         mask = labels_arr == cluster_id
         cluster_post_ids = [post_ids[i] for i in range(len(post_ids)) if mask[i]]
         centroid = centroids[cluster_id]
+        extras = _compute_segment_extras(db, cluster_post_ids)
+        persona = personas[cluster_id] if cluster_id < len(personas) else {
+            "name": "", "tagline": "", "description": "",
+        }
 
         segment = AudienceSegment(
             social_account_id=social_account_id,
@@ -357,7 +489,14 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
                 },
                 "dominant_sentiment": segments_data[cluster_id]["dominant_sentiment"],
                 "typical_posting_time": segments_data[cluster_id]["typical_posting_time"],
-                "persona_description": persona_descriptions[cluster_id] if cluster_id < len(persona_descriptions) else "",
+                # Structured persona (preferred — name + tagline + description).
+                "persona_name": persona["name"],
+                "persona_tagline": persona["tagline"],
+                "persona_description": persona["description"],
+                # New computed fields surfacing on the redesigned audience cards.
+                "content_type_breakdown": extras["content_type_breakdown"],
+                "top_topics": extras["top_topics"],
+                "best_day_hour": extras["best_day_hour"],
             },
         )
         db.add(segment)

@@ -35,7 +35,7 @@ export interface SocialAccount {
 }
 
 export interface SegmentCharacteristics {
-  avg_engagement?: number
+  avg_engagement?: number | { likes?: number; comments?: number; engagement_rate?: number }
   dominant_content_type?: string
   dominant_sentiment?: string
   typical_posting_time?: string
@@ -43,6 +43,11 @@ export interface SegmentCharacteristics {
   post_ids?: string[]
   centroid?: Record<string, number>
   persona_description?: string
+  persona_name?: string
+  persona_tagline?: string
+  content_type_breakdown?: { video: number; image: number; carousel: number }
+  top_topics?: string[]
+  best_day_hour?: { day: string; hour: number } | null
 }
 
 export interface SegmentsData {
@@ -183,6 +188,78 @@ export async function fetchSentimentTimeline(): Promise<SentimentTimelineData> {
   return res.data
 }
 
+export interface EngagementTimelineEntry {
+  date: string
+  likes: number
+  comments: number
+  reach: number
+  engagement: number
+  posts: number
+}
+
+export interface EngagementTimelineData {
+  timeline: EngagementTimelineEntry[]
+}
+
+export async function fetchEngagementTimeline(days = 30): Promise<EngagementTimelineData> {
+  const res = await api.get<unknown, ApiResponse<EngagementTimelineData>>(
+    `/analytics/engagement/timeline?days=${days}`,
+  )
+  return res.data
+}
+
+// Market intelligence (Competitors + Trends pages). Mock-backed today; flips
+// to live RapidAPI data when RAPIDAPI_KEY is set on the backend.
+
+export interface CompetitorRow {
+  handle: string
+  name: string
+  avatar: string
+  followers: string
+  growth: string
+  engagement: string
+  cadence: string
+  mix: { video: number; image: number; carousel: number }
+  sentiment: number
+}
+
+export interface CompetitorTopPost {
+  who: string
+  format: string
+  metric: string
+  engagement_pct: string
+  tag_key: string
+}
+
+export interface HashtagTrend {
+  tag: string
+  volume: number
+  momentum: string
+  phase: 'rising' | 'peaking' | 'fading' | 'steady'
+  days: number
+}
+
+export async function fetchCompetitorLeaderboard(): Promise<{ competitors: CompetitorRow[] }> {
+  const res = await api.get<unknown, ApiResponse<{ competitors: CompetitorRow[] }>>(
+    '/competitors/leaderboard',
+  )
+  return res.data
+}
+
+export async function fetchCompetitorTopPosts(): Promise<{ posts: CompetitorTopPost[] }> {
+  const res = await api.get<unknown, ApiResponse<{ posts: CompetitorTopPost[] }>>(
+    '/competitors/top-posts',
+  )
+  return res.data
+}
+
+export async function fetchHashtagTrends(): Promise<{ hashtags: HashtagTrend[] }> {
+  const res = await api.get<unknown, ApiResponse<{ hashtags: HashtagTrend[] }>>(
+    '/trends/hashtags',
+  )
+  return res.data
+}
+
 export async function regenerateSegments(
   socialAccountId: string,
   language: 'en' | 'ar' = 'en',
@@ -270,6 +347,8 @@ export interface CommentSentimentEntry {
   sentiment: 'positive' | 'neutral' | 'negative' | null
   sentiment_score: number | null
   language: 'en' | 'ar' | 'unknown' | null
+  post_caption?: string
+  post_permalink?: string | null
 }
 
 export interface CommentsAnalyticsData {
@@ -299,6 +378,9 @@ export interface NeedsAttentionPost {
   caption: string
   permalink: string | null
   negative_count: number
+  pos_count?: number
+  neu_count?: number
+  neg_count?: number
 }
 
 export interface SampleComment {

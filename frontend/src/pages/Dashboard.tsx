@@ -7,6 +7,7 @@ import {
   useSegments,
   usePostsBreakdown,
   useInsights,
+  useEngagementTimeline,
 } from '../hooks/useAnalytics'
 import type {
   PostsBreakdownData,
@@ -14,6 +15,7 @@ import type {
   OverviewData,
   InsightAction,
   SegmentsData,
+  EngagementTimelineEntry,
 } from '../api/analytics'
 import { Icon, I } from '../components/redesign/icons'
 
@@ -69,27 +71,31 @@ function priorityToBucket(p: 'high' | 'medium' | 'low'): ActionPriority {
   return 'week'
 }
 
-// Compress posting_dates to N evenly-spaced sparkline buckets covering the last
-// 30 days. Used for the 3 KPI sparklines on the home page.
-function sparkBuckets(
-  dates: PostsBreakdownData['posting_dates'] | undefined,
+// Compress an EngagementTimelineEntry stream to N evenly-spaced sparkline
+// buckets, using a custom field (engagement / reach / posts) to pull the
+// numeric value. The backend returns one entry per day for the last 30
+// days; we collapse to 12 buckets so each sparkline bar averages ~2.5 days.
+function sparkFromTimeline(
+  entries: EngagementTimelineEntry[] | undefined,
+  field: 'engagement' | 'reach' | 'posts',
   bucketCount = 12,
-  scale = 1,
 ): number[] {
-  if (!dates || dates.length === 0) {
+  if (!entries || entries.length === 0) {
     return Array.from({ length: bucketCount }, () => 0)
   }
-  const now = Date.now()
-  const start = now - 30 * 24 * 60 * 60 * 1000
-  const bucketSize = (now - start) / bucketCount
-  const out = Array<number>(bucketCount).fill(0)
-  for (const d of dates) {
-    const ts = new Date(d.date).getTime()
-    if (ts < start || ts > now) continue
-    const idx = Math.min(bucketCount - 1, Math.floor((ts - start) / bucketSize))
-    out[idx] += d.count
+  const sliced = entries.slice(-bucketCount * 3)
+  if (sliced.length <= bucketCount) {
+    return [...Array(bucketCount - sliced.length).fill(0), ...sliced.map((e) => e[field])]
   }
-  return out.map((v) => v * scale)
+  const buckets = Array<number>(bucketCount).fill(0)
+  const counts = Array<number>(bucketCount).fill(0)
+  const ratio = sliced.length / bucketCount
+  for (let i = 0; i < sliced.length; i++) {
+    const idx = Math.min(bucketCount - 1, Math.floor(i / ratio))
+    buckets[idx] += sliced[i][field]
+    counts[idx] += 1
+  }
+  return buckets.map((sum, i) => (counts[i] > 0 ? Math.round(sum / counts[i]) : 0))
 }
 
 function maxOr1(arr: number[]): number {
@@ -194,6 +200,7 @@ function KpiStrip({
   overview,
   sentiment,
   breakdown,
+  timeline,
   insightScore,
   insightChange,
   consistencyValue,
@@ -204,6 +211,7 @@ function KpiStrip({
   overview: OverviewData | undefined
   sentiment: SentimentData | undefined
   breakdown: PostsBreakdownData | undefined
+  timeline: EngagementTimelineEntry[] | undefined
   insightScore: number | null
   insightChange: number
   consistencyValue: number
@@ -217,15 +225,24 @@ function KpiStrip({
   const score =
     insightScore ?? Math.round(((consistencyValue + audienceFitValue + varietyValue + igPerfValue) / 4) * 100)
 
-  const totalEng = overview?.total_engagement ?? (sentiment?.positive ?? 0) + (sentiment?.neutral ?? 0) + (sentiment?.negative ?? 0)
-  const reach = overview ? Math.round(overview.total_engagement * 5) : 0
-  const postsThisMonth = breakdown?.posting_dates?.reduce((s, d) => s + d.count, 0) ?? overview?.total_posts ?? 0
+  // Prefer the engagement timeline (real per-day totals) over the breakdown's
+  // posting-dates aggregate. Falls back to overview totals when the timeline
+  // hasn't loaded yet.
+  const totalEng = timeline?.length
+    ? timeline.reduce((s, e) => s + e.engagement, 0)
+    : overview?.total_engagement ?? (sentiment?.positive ?? 0) + (sentiment?.neutral ?? 0) + (sentiment?.negative ?? 0)
+  const totalReach = timeline?.length
+    ? timeline.reduce((s, e) => s + e.reach, 0)
+    : overview
+      ? Math.round(overview.total_engagement * 5)
+      : 0
+  const postsThisMonth = timeline?.length
+    ? timeline.reduce((s, e) => s + e.posts, 0)
+    : breakdown?.posting_dates?.reduce((s, d) => s + d.count, 0) ?? overview?.total_posts ?? 0
 
-  // Sparkline buckets
-  const dates = breakdown?.posting_dates
-  const engBuckets = sparkBuckets(dates, 12, overview?.avg_engagement_per_post || 1)
-  const reachBuckets = sparkBuckets(dates, 12, 5)
-  const postBuckets = sparkBuckets(dates, 12, 1)
+  const engBuckets = sparkFromTimeline(timeline, 'engagement')
+  const reachBuckets = sparkFromTimeline(timeline, 'reach')
+  const postBuckets = sparkFromTimeline(timeline, 'posts')
 
   return (
     <section className="hm-kpi">
@@ -254,7 +271,7 @@ function KpiStrip({
       </div>
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.reach')}</div>
-        <div className="hm-kpi-v num">{formatCount(reach)}</div>
+        <div className="hm-kpi-v num">{formatCount(totalReach)}</div>
         <Sparkline values={reachBuckets} />
       </div>
       <div className="hm-kpi-card">
@@ -360,6 +377,7 @@ function ActionsList({ actions }: { actions: ActionVm[] }) {
                   <div className="hm-act-title" dir="auto">{a.title}</div>
                   <div className="hm-act-why" dir="auto">
                     <span className="hm-act-src" style={{ color: meta.fg }}>
+                      <Icon path={meta.iconPath} size={11} />
                       {t(`home.actions.sources.${a.source}` as const)}
                     </span>
                     {a.why && (
@@ -374,6 +392,10 @@ function ActionsList({ actions }: { actions: ActionVm[] }) {
                   {a.impact && <span className="hm-act-impact" title={a.impact}>{a.impact}</span>}
                   {a.time && <span className="hm-act-time num">⏱ {a.time}</span>}
                 </div>
+                <button className="hm-act-cta">
+                  {t('home.actions.openCta')}
+                  <Icon path={I.chevL} size={11} />
+                </button>
               </article>
             )
           })}
@@ -582,6 +604,8 @@ export default function Dashboard() {
   const breakdown = usePostsBreakdown()
   const insights = useInsights()
   const [range, setRange] = useState<'7d' | '30d' | '90d'>('30d')
+  const timelineDays = range === '7d' ? 7 : range === '90d' ? 90 : 30
+  const timeline = useEngagementTimeline(timelineDays)
   const { t, i18n } = useTranslation()
 
   // Derived values used both by the bottom panel AND by the KPI fallback score.
@@ -669,6 +693,7 @@ export default function Dashboard() {
           overview={overview.data}
           sentiment={sentiment.data}
           breakdown={breakdown.data}
+          timeline={timeline.data?.timeline}
           insightScore={insightScore}
           insightChange={insightChange}
           consistencyValue={consistency}
@@ -765,10 +790,9 @@ const HM_STYLES = `
 .hm-actions-empty { padding:36px; text-align:center; font-size:13px; color:var(--ink-500); border:1px dashed var(--line); border-radius:12px; }
 
 .hm-actions-list { display:flex; flex-direction:column; gap:8px; }
-/* Layout: pri pill | body (flex grows) | meta (right aligned) — no separate
-   CTA column. Body text wraps; meta truncates with ellipsis. */
-.hm-act { display:grid; grid-template-columns:96px minmax(0,1fr) minmax(140px, 200px); gap:14px; align-items:center; padding:14px 16px; border-radius:12px; border:1px solid var(--line); background:var(--surface); transition:all .15s; }
-@media (max-width:768px) { .hm-act { grid-template-columns:1fr; gap:8px; } .hm-act-meta { padding-inline-start:0; border-inline-start:none; padding-top:8px; border-top:1px solid var(--line); } }
+/* Layout: pri pill | body (flex grows) | meta (truncated) | CTA. */
+.hm-act { display:grid; grid-template-columns:96px minmax(0,1fr) minmax(120px, 160px) auto; gap:14px; align-items:center; padding:14px 16px; border-radius:12px; border:1px solid var(--line); background:var(--surface); transition:all .15s; }
+@media (max-width:900px) { .hm-act { grid-template-columns:1fr; gap:8px; } .hm-act-meta { padding-inline-start:0; border-inline-start:none; padding-top:8px; border-top:1px solid var(--line); } }
 .hm-act:hover { border-color:var(--purple-300); background:var(--ink-50); }
 .hm-act--urgent { border-color:oklch(0.88 0.06 30); background:oklch(0.99 0.01 30); }
 .hm-act--urgent:hover { border-color:oklch(0.75 0.13 30); background:oklch(0.97 0.03 30); }
@@ -779,13 +803,16 @@ const HM_STYLES = `
 .hm-act-body { min-width:0; text-align:start; }
 .hm-act-title { font-size:13.5px; font-weight:600; color:var(--ink-950); line-height:1.45; margin-bottom:4px; }
 .hm-act-why { font-size:11.5px; color:var(--ink-600); line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.hm-act-src { font-weight:600; margin-inline-end:6px; }
+.hm-act-src { font-weight:600; margin-inline-end:6px; display:inline-flex; align-items:center; gap:4px; }
+.hm-act-src svg { flex-shrink:0; }
 .hm-act-dot { color:var(--ink-300); margin-inline-end:6px; }
 .hm-act-meta { display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:4px; padding-inline-start:14px; border-inline-start:1px solid var(--line); min-width:0; }
 .hm-act-impact { font-size:11px; font-weight:600; color:oklch(0.5 0.15 155); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .hm-act-time { font-size:10.5px; color:var(--ink-500); font-weight:500; white-space:nowrap; }
-/* Hidden CTA column kept for backwards compat — design now uses card-level click. */
-.hm-act-cta { display:none; }
+.hm-act-cta { padding:9px 14px; border-radius:9px; background:var(--ink-900); color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; }
+.hm-act-cta:hover { background:var(--purple-700); }
+.hm-act--urgent .hm-act-cta { background:oklch(0.55 0.17 30); }
+.hm-act--urgent .hm-act-cta:hover { background:oklch(0.48 0.18 30); }
 
 /* Bottom grid */
 .hm-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:flex-start; }

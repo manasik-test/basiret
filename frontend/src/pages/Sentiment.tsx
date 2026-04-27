@@ -292,58 +292,69 @@ function TriageList({
 
 function WeekTrend({ timeline }: { timeline: SentimentTimelineEntry[] | undefined }) {
   const { t, i18n } = useTranslation()
-  // Take last 7 entries; if fewer, show what we have.
   const data = (timeline ?? []).slice(-7)
+  const totalRows = data.reduce(
+    (s, d) => s + d.positive + d.neutral + d.negative,
+    0,
+  )
+  const isEmpty = data.length === 0 || totalRows === 0
 
-  // If no timeline data, show empty bars labelled by weekday.
-  const empty = data.length === 0
-  const days = empty
-    ? Array.from({ length: 7 }, (_, i) => {
+  const days = data.length > 0
+    ? data
+    : Array.from({ length: 7 }, (_, i) => {
         const d = new Date()
         d.setDate(d.getDate() - (6 - i))
         return { date: d.toISOString().slice(0, 10), positive: 0, neutral: 0, negative: 0 }
       })
-    : data
 
-  const dayLabels = days.map((d) => {
-    return new Date(d.date).toLocaleDateString(i18n.language?.startsWith('ar') ? 'ar-EG' : 'en-US', {
+  const dayLabels = days.map((d) =>
+    new Date(d.date).toLocaleDateString(i18n.language?.startsWith('ar') ? 'ar-EG' : 'en-US', {
       weekday: 'short',
-    })
-  })
+    }),
+  )
 
   return (
     <section className="snt-mini">
       <h3>{t('sentimentPage.weekTrend')}</h3>
       <p className="snt-mini-s">{t('sentimentPage.weekTrendSubtitle')}</p>
-      <div className="snt-trend">
-        {days.map((d, i) => {
-          const total = d.positive + d.neutral + d.negative || 1
-          const pos = (d.positive / total) * 100
-          const neu = (d.neutral / total) * 100
-          const neg = (d.negative / total) * 100
-          return (
-            <div key={d.date} className="snt-trend-c">
-              <div className="snt-trend-stack">
-                <div style={{ height: `${pos}%`, background: MOOD.pos.solid }} />
-                <div style={{ height: `${neu}%`, background: MOOD.neu.solid }} />
-                <div style={{ height: `${neg}%`, background: MOOD.neg.solid }} />
-              </div>
-              <div className="snt-trend-l">{dayLabels[i]}</div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="snt-trend-leg">
-        <span>
-          <i style={{ background: MOOD.pos.solid }} /> {t('sentimentPage.moodPositive')}
-        </span>
-        <span>
-          <i style={{ background: MOOD.neu.solid }} /> {t('sentimentPage.moodNeutral')}
-        </span>
-        <span>
-          <i style={{ background: MOOD.neg.solid }} /> {t('sentimentPage.moodNegative')}
-        </span>
-      </div>
+
+      {isEmpty ? (
+        <div className="snt-mini-empty" dir="auto">
+          {t('sentimentPage.weekTrendEmpty')}
+        </div>
+      ) : (
+        <>
+          <div className="snt-trend">
+            {days.map((d, i) => {
+              const total = d.positive + d.neutral + d.negative || 1
+              const pos = (d.positive / total) * 100
+              const neu = (d.neutral / total) * 100
+              const neg = (d.negative / total) * 100
+              return (
+                <div key={d.date} className="snt-trend-c">
+                  <div className="snt-trend-stack">
+                    <div style={{ height: `${pos}%`, background: MOOD.pos.solid }} />
+                    <div style={{ height: `${neu}%`, background: MOOD.neu.solid }} />
+                    <div style={{ height: `${neg}%`, background: MOOD.neg.solid }} />
+                  </div>
+                  <div className="snt-trend-l">{dayLabels[i]}</div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="snt-trend-leg">
+            <span>
+              <i style={{ background: MOOD.pos.solid }} /> {t('sentimentPage.moodPositive')}
+            </span>
+            <span>
+              <i style={{ background: MOOD.neu.solid }} /> {t('sentimentPage.moodNeutral')}
+            </span>
+            <span>
+              <i style={{ background: MOOD.neg.solid }} /> {t('sentimentPage.moodNegative')}
+            </span>
+          </div>
+        </>
+      )}
     </section>
   )
 }
@@ -391,12 +402,25 @@ function DrivingPosts({ posts }: { posts: NeedsAttentionPost[] | undefined }) {
       ) : (
         <div className="snt-drv">
           {list.map((p) => {
-            // We don't have per-post sentiment breakdown — use the negative_count
-            // and approximate the bar accordingly.
-            const total = Math.max(p.negative_count, 5)
-            const negPct = Math.round((p.negative_count / total) * 100)
-            const posPct = Math.max(0, 100 - negPct - 20)
-            const neuPct = Math.max(0, 100 - posPct - negPct)
+            // Backend now returns full pos/neu/neg counts. Older payloads only
+            // include negative_count → fall back to the same approximation we
+            // shipped before.
+            const hasReal =
+              typeof p.pos_count === 'number' &&
+              typeof p.neu_count === 'number' &&
+              typeof p.neg_count === 'number'
+            let posPct: number, neuPct: number, negPct: number
+            if (hasReal) {
+              const tot = (p.pos_count! + p.neu_count! + p.neg_count!) || 1
+              posPct = Math.round((p.pos_count! / tot) * 100)
+              negPct = Math.round((p.neg_count! / tot) * 100)
+              neuPct = Math.max(0, 100 - posPct - negPct)
+            } else {
+              const total = Math.max(p.negative_count, 5)
+              negPct = Math.round((p.negative_count / total) * 100)
+              posPct = Math.max(0, 100 - negPct - 20)
+              neuPct = Math.max(0, 100 - posPct - negPct)
+            }
             const caption = p.caption || t('sentimentPage.noCaption')
             return (
               <div key={p.post_id} className="snt-drv-row">
@@ -465,24 +489,31 @@ function SentimentContent() {
   }, [summary.data])
 
   // Build the comment view-models. Prioritize negative + recent.
+  // Comment captions now come from the per-comment `post_caption` field
+  // (added to /analytics/comments) for ALL comments, not just the
+  // needs_attention ones. Falls back to the captionByPostId map for legacy
+  // payloads that don't include it.
   const items: CommentVm[] = useMemo(() => {
     const list = comments.data?.comments ?? []
     const vms = list
       .filter((c) => !!c.text)
       .slice(0, 50) // cap for perf — backend already returns ≤200
-      .map<CommentVm>((c) => ({
-        id: c.id,
-        postId: c.post_id,
-        authorUsername: c.author_username,
-        text: c.text || '',
-        language: c.language,
-        createdAt: c.created_at,
-        mood: moodFromSentiment(c.sentiment),
-        urgency: urgencyOf(c),
-        postCaption: captionByPostId.get(c.post_id)?.caption ?? '',
-        postPermalink: captionByPostId.get(c.post_id)?.permalink ?? null,
-        responseTemplate: replyByPostId.get(c.post_id) ?? null,
-      }))
+      .map<CommentVm>((c) => {
+        const fallbackPost = captionByPostId.get(c.post_id)
+        return {
+          id: c.id,
+          postId: c.post_id,
+          authorUsername: c.author_username,
+          text: c.text || '',
+          language: c.language,
+          createdAt: c.created_at,
+          mood: moodFromSentiment(c.sentiment),
+          urgency: urgencyOf(c),
+          postCaption: c.post_caption || fallbackPost?.caption || '',
+          postPermalink: c.post_permalink ?? fallbackPost?.permalink ?? null,
+          responseTemplate: replyByPostId.get(c.post_id) ?? null,
+        }
+      })
     // Sort: high urgency first, then recency.
     const ord = { high: 0, mid: 1, low: 2 } as const
     return vms.sort((a, b) => {

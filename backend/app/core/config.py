@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # users can fire many small follow-up questions in quick succession.
     AI_ASK_DAILY_LIMIT_PER_ACCOUNT: int = 20
 
+    # RapidAPI — used by the competitor and trends services to fetch real
+    # public-profile and hashtag-trend data. When unset, those endpoints fall
+    # back to the bundled mock dataset.
+    RAPIDAPI_KEY: str = ""
+    RAPIDAPI_INSTAGRAM_HOST: str = "instagram-scraper-api2.p.rapidapi.com"
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

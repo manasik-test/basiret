@@ -10,6 +10,7 @@ from app.api.v1.admin import router as admin_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.ai_pages import router as ai_pages_router
 from app.api.v1.goals import router as goals_router
+from app.api.v1.market import router as market_router
 
 app = FastAPI(
     title="BASIRET API",
@@ -35,6 +36,7 @@ app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(ai_pages_router, prefix="/api/v1/ai-pages", tags=["ai-pages"])
 app.include_router(goals_router, prefix="/api/v1/goals", tags=["goals"])
+app.include_router(market_router, prefix="/api/v1", tags=["market"])
 
 
 @app.get("/")

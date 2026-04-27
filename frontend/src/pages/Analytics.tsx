@@ -64,11 +64,26 @@ function Header({
 /* Two-card hero                                                      */
 /* ------------------------------------------------------------------ */
 
+// Split a generated caption on the first hashtag. Anything before the first
+// `#` becomes the body; everything from the `#` onward becomes the tag tail
+// rendered as a separate purple-toned line. Captions with no hashtags
+// degrade to body-only.
+function splitCaption(raw: string): { body: string; tags: string } {
+  if (!raw) return { body: '', tags: '' }
+  const idx = raw.indexOf('#')
+  if (idx < 0) return { body: raw.trim(), tags: '' }
+  return { body: raw.slice(0, idx).trim(), tags: raw.slice(idx).trim() }
+}
+
 function TwoCardHero() {
   const { t, i18n } = useTranslation()
   const { data, isLoading } = usePostsInsights()
   const { data: accounts } = useAccounts()
   const generate = useGenerateCaption()
+  // Caption language is independent of UI language so users can A/B between
+  // an English version and an Arabic version without changing their UI locale.
+  const initialLang: 'en' | 'ar' = i18n.language?.startsWith('ar') ? 'ar' : 'en'
+  const [captionLang, setCaptionLang] = useState<'en' | 'ar'>(initialLang)
   const [generated, setGenerated] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const accountId = accounts?.[0]?.id
@@ -82,16 +97,20 @@ function TwoCardHero() {
   const pattern = (data?.low_performers_pattern || '').trim() || t('myPostsPage.changeFallback')
   const change = (data?.what_to_change || '').trim() || t('myPostsPage.changeFallback')
 
-  const captionLang: 'en' | 'ar' = i18n.language?.startsWith('ar') ? 'ar' : 'en'
-
-  function onGenerateCaption() {
+  function onGenerateCaption(lang: 'en' | 'ar' = captionLang) {
     if (!best) return
-    setGenerated(null)
     setCopied(false)
     generate.mutate(
-      { post_id: best.id, content_type: best.content_type, language: captionLang, account_id: accountId },
+      { post_id: best.id, content_type: best.content_type, language: lang, account_id: accountId },
       { onSuccess: (res) => setGenerated(res.caption || '') },
     )
+  }
+
+  function switchLang(next: 'en' | 'ar') {
+    if (next === captionLang) return
+    setCaptionLang(next)
+    setGenerated(null) // hide the stale caption while the new one streams in
+    if (best) onGenerateCaption(next)
   }
 
   function copyCaption() {
@@ -100,6 +119,8 @@ function TwoCardHero() {
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
+
+  const captionParts = splitCaption(generated || '')
 
   const bestType = normalizeContentType(best?.content_type)
   const typeLabelMap: Record<typeof bestType, string> = {
@@ -170,7 +191,7 @@ function TwoCardHero() {
               <p dir="auto">{why}</p>
             </div>
 
-            <button className="mp-cta" onClick={onGenerateCaption} disabled={generate.isPending}>
+            <button className="mp-cta" onClick={() => onGenerateCaption()} disabled={generate.isPending}>
               <Icon path={I.wand} size={14} />
               {generate.isPending
                 ? t('myPostsPage.generating')
@@ -181,20 +202,37 @@ function TwoCardHero() {
               <div className="mp-cap-block">
                 <div className="mp-cap-head">
                   <span>
-                    {t('myPostsPage.suggestedCaptionLabel')} (
-                    {captionLang === 'ar'
-                      ? t('myPostsPage.captionLanguageAR')
-                      : t('myPostsPage.captionLanguageEN')}
-                    )
+                    {t('myPostsPage.suggestedCaptionLabel')}
                   </span>
-                  <button className="mp-cap-lang" onClick={copyCaption}>
-                    <Icon path={I.copy} size={10} />
-                    {copied ? t('myPostsPage.copied') : t('myPostsPage.copyCaption')}
-                  </button>
+                  <div className="mp-cap-actions">
+                    <div className="mp-cap-langtoggle" role="tablist">
+                      <button
+                        className={captionLang === 'en' ? 'is-on' : ''}
+                        onClick={() => switchLang('en')}
+                      >
+                        {t('myPostsPage.captionLanguageEN')}
+                      </button>
+                      <button
+                        className={captionLang === 'ar' ? 'is-on' : ''}
+                        onClick={() => switchLang('ar')}
+                      >
+                        {t('myPostsPage.captionLanguageAR')}
+                      </button>
+                    </div>
+                    <button className="mp-cap-lang" onClick={copyCaption}>
+                      <Icon path={I.copy} size={10} />
+                      {copied ? t('myPostsPage.copied') : t('myPostsPage.copyCaption')}
+                    </button>
+                  </div>
                 </div>
                 <div className="mp-cap-text" dir={captionLang === 'ar' ? 'rtl' : 'ltr'}>
-                  {generated}
+                  {captionParts.body}
                 </div>
+                {captionParts.tags && (
+                  <div className="mp-cap-tags" dir={captionLang === 'ar' ? 'rtl' : 'ltr'}>
+                    {captionParts.tags}
+                  </div>
+                )}
                 {best.permalink && (
                   <a
                     className="mp-cap-share"
@@ -280,24 +318,37 @@ function ChartCard() {
 
   const rows: ChartRow[] = useMemo(() => {
     if (!data?.by_type) return []
-    return [...data.by_type]
+    const merged = [...data.by_type]
       .map((b) => ({
         type: normalizeContentType(b.content_type),
-        engagement: (b.avg_likes || 0) + (b.avg_comments || 0),
+        rawEngagement: (b.avg_likes || 0) + (b.avg_comments || 0),
         posts: b.count,
       }))
-      // Collapse duplicates from normalisation (e.g. CAROUSEL_ALBUM + CAROUSEL).
-      .reduce<ChartRow[]>((acc, row) => {
-        const existing = acc.find((r) => r.type === row.type)
-        if (existing) {
-          existing.engagement = Math.max(existing.engagement, row.engagement)
-          existing.posts += row.posts
-        } else {
-          acc.push(row)
-        }
-        return acc
-      }, [])
-      .sort((a, b) => b.engagement - a.engagement)
+      .reduce<{ type: 'video' | 'image' | 'carousel'; rawEngagement: number; posts: number }[]>(
+        (acc, row) => {
+          const existing = acc.find((r) => r.type === row.type)
+          if (existing) {
+            existing.rawEngagement = Math.max(existing.rawEngagement, row.rawEngagement)
+            existing.posts += row.posts
+          } else {
+            acc.push(row)
+          }
+          return acc
+        },
+        [],
+      )
+      .sort((a, b) => b.rawEngagement - a.rawEngagement)
+
+    // Normalize raw engagement totals to a percentage scale relative to the
+    // top performer. Top row = 100%, the rest scaled proportionally. Reads
+    // cleanly in the UI ("Video: 100%, Carousel: 67%, Image: 41%") regardless
+    // of the absolute likes+comments magnitude.
+    const top = Math.max(1, ...merged.map((r) => r.rawEngagement))
+    return merged.map((r) => ({
+      type: r.type,
+      engagement: Math.round((r.rawEngagement / top) * 100 * 10) / 10,
+      posts: r.posts,
+    }))
   }, [data])
 
   if (rows.length === 0) {
@@ -436,10 +487,15 @@ const MP_STYLES = `
 .mp-cta:disabled { opacity:.7; cursor:not-allowed; }
 
 .mp-cap-block { background:var(--purple-50); border:1px solid var(--purple-200); border-radius:12px; padding:14px; }
-.mp-cap-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:11px; font-weight:700; color:var(--purple-800); }
+.mp-cap-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:11px; font-weight:700; color:var(--purple-800); gap:10px; flex-wrap:wrap; }
+.mp-cap-actions { display:flex; align-items:center; gap:6px; }
+.mp-cap-langtoggle { display:flex; background:var(--surface); border:1px solid var(--purple-200); border-radius:7px; padding:2px; }
+.mp-cap-langtoggle button { padding:3px 9px; font-size:11px; font-weight:500; border-radius:5px; color:var(--purple-700); }
+.mp-cap-langtoggle button.is-on { background:var(--purple-600); color:#fff; font-weight:600; }
 .mp-cap-lang { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; color:var(--purple-700); padding:3px 8px; border-radius:6px; }
 .mp-cap-lang:hover { background:var(--purple-100); }
 .mp-cap-text { font-size:13.5px; color:var(--ink-900); line-height:1.65; font-weight:500; }
+.mp-cap-tags { margin-top:8px; font-size:12.5px; color:var(--purple-700); font-weight:500; line-height:1.6; word-break:break-word; }
 .mp-cap-share { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; color:var(--purple-700); margin-top:10px; padding:4px 0; }
 .mp-cap-share:hover { color:var(--purple-900); }
 

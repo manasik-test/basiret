@@ -612,8 +612,11 @@ def comments_analytics(
             AnalysisResult.sentiment,
             AnalysisResult.sentiment_score,
             AnalysisResult.language_detected,
+            Post.caption.label("post_caption"),
+            Post.raw_data.label("post_raw"),
         )
         .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
+        .join(Post, Post.id == Comment.post_id)
         .filter(Comment.post_id.in_(db.query(post_ids_subq.c.id)))
     )
 
@@ -647,8 +650,10 @@ def comments_analytics(
             "sentiment": sentiment,
             "sentiment_score": float(score) if score is not None else None,
             "language": language,
+            "post_caption": (post_caption or "")[:200],
+            "post_permalink": (post_raw or {}).get("permalink") if post_raw else None,
         }
-        for (c, sentiment, score, language) in feed_rows
+        for (c, sentiment, score, language, post_caption, post_raw) in feed_rows
     ]
 
     return {
@@ -760,6 +765,9 @@ def sentiment_summary(
     )
 
     # ── Needs attention: posts with >2 negative comments (all-time window) ─
+    # Two-pass so we can return per-bucket sentiment counts without complicating
+    # the GROUP BY. Pass 1 picks the candidate post IDs; pass 2 fetches the
+    # full sentiment breakdown for those posts.
     attention_rows = (
         db.query(
             Post.id,
@@ -778,16 +786,38 @@ def sentiment_summary(
         .limit(10)
         .all()
     )
-    needs_attention = [
-        {
+    attention_post_ids = [row.id for row in attention_rows]
+    breakdown_by_post: dict[str, dict[str, int]] = {}
+    if attention_post_ids:
+        breakdown_rows = (
+            db.query(
+                Comment.post_id,
+                AnalysisResult.sentiment,
+                func.count(AnalysisResult.id).label("c"),
+            )
+            .join(AnalysisResult, AnalysisResult.comment_id == Comment.id)
+            .filter(Comment.post_id.in_(attention_post_ids))
+            .group_by(Comment.post_id, AnalysisResult.sentiment)
+            .all()
+        )
+        for pid, sentiment, c in breakdown_rows:
+            d = breakdown_by_post.setdefault(str(pid), {"positive": 0, "neutral": 0, "negative": 0})
+            if sentiment in d:
+                d[sentiment] = c
+
+    needs_attention = []
+    for row in attention_rows:
+        b = breakdown_by_post.get(str(row.id), {"positive": 0, "neutral": 0, "negative": 0})
+        needs_attention.append({
             "post_id": str(row.id),
             "platform_post_id": row.platform_post_id,
             "caption": (row.caption or "")[:280],
             "permalink": (row.raw_data or {}).get("permalink") if row.raw_data else None,
             "negative_count": row.neg_count,
-        }
-        for row in attention_rows
-    ]
+            "pos_count": b["positive"],
+            "neu_count": b["neutral"],
+            "neg_count": b["negative"],
+        })
 
     # ── Samples: one per sentiment, most recent first ─────────────────
     def _sample(sentiment: str) -> dict | None:
@@ -911,6 +941,82 @@ def sentiment_timeline(
     timeline = [
         {"date": d, **counts} for d, counts in by_date.items()
     ]
+
+    return {
+        "success": True,
+        "data": {"timeline": timeline},
+    }
+
+
+@router.get("/engagement/timeline")
+def engagement_timeline(
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Daily totals of likes + comments + reach for the last `days` days,
+    scoped to the user's organization. Powers the redesigned Home dashboard
+    sparklines on the KPI cards.
+
+    Response shape:
+    ``{ "timeline": [{"date": "YYYY-MM-DD", "likes": N, "comments": N,
+    "reach": N, "engagement": N, "posts": N}, ...] }``
+    """
+    days = max(1, min(int(days), 90))
+    account_ids = [
+        a.id for a in db.query(SocialAccount.id).filter(
+            SocialAccount.organization_id == user.organization_id,
+        ).all()
+    ]
+
+    if not account_ids:
+        return {"success": True, "data": {"timeline": []}}
+
+    rows = (
+        db.query(
+            cast(Post.posted_at, Date).label("date"),
+            func.coalesce(func.sum(EngagementMetric.likes), 0).label("likes"),
+            func.coalesce(func.sum(EngagementMetric.comments), 0).label("comments"),
+            func.coalesce(func.sum(EngagementMetric.reach), 0).label("reach"),
+            func.count(func.distinct(Post.id)).label("posts"),
+        )
+        .join(EngagementMetric, EngagementMetric.post_id == Post.id, isouter=True)
+        .filter(Post.social_account_id.in_(account_ids))
+        .filter(Post.posted_at.isnot(None))
+        .group_by(cast(Post.posted_at, Date))
+        .order_by(cast(Post.posted_at, Date))
+        .all()
+    )
+
+    today = datetime.utcnow().date()
+    cutoff = today - timedelta(days=days)
+    by_date: dict[str, dict[str, int]] = {}
+    for row in rows:
+        if row.date is None or row.date < cutoff:
+            continue
+        d = str(row.date)
+        likes = int(row.likes or 0)
+        comments = int(row.comments or 0)
+        reach = int(row.reach or 0)
+        by_date[d] = {
+            "likes": likes,
+            "comments": comments,
+            "reach": reach,
+            "engagement": likes + comments,
+            "posts": int(row.posts or 0),
+        }
+
+    # Pad missing dates with zeros so the frontend can render a stable timeline.
+    timeline = []
+    for i in range(days, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        if d in by_date:
+            timeline.append({"date": d, **by_date[d]})
+        else:
+            timeline.append({
+                "date": d, "likes": 0, "comments": 0, "reach": 0,
+                "engagement": 0, "posts": 0,
+            })
 
     return {
         "success": True,

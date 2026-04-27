@@ -8,6 +8,8 @@ import {
   fetchCommentsAnalytics, fetchSentimentSummary,
   fetchPostsInsights, generateCaption, fetchAudienceInsights, fetchContentPlan, fetchSentimentResponses,
   fetchRecommendationFeedback, submitRecommendationFeedback,
+  fetchEngagementTimeline,
+  fetchCompetitorLeaderboard, fetchCompetitorTopPosts, fetchHashtagTrends,
   type GenerateCaptionRequest, type RecFeedback,
 } from '../api/analytics'
 
@@ -123,6 +125,38 @@ export function useSentimentTimeline() {
     queryKey: ['analytics', 'sentiment-timeline'],
     queryFn: fetchSentimentTimeline,
     staleTime: 60_000,
+  })
+}
+
+export function useEngagementTimeline(days = 30) {
+  return useQuery({
+    queryKey: ['analytics', 'engagement-timeline', days],
+    queryFn: () => fetchEngagementTimeline(days),
+    staleTime: 60_000,
+  })
+}
+
+export function useCompetitorLeaderboard() {
+  return useQuery({
+    queryKey: ['market', 'competitors-leaderboard'],
+    queryFn: fetchCompetitorLeaderboard,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useCompetitorTopPosts() {
+  return useQuery({
+    queryKey: ['market', 'competitors-top-posts'],
+    queryFn: fetchCompetitorTopPosts,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useHashtagTrends() {
+  return useQuery({
+    queryKey: ['market', 'hashtag-trends'],
+    queryFn: fetchHashtagTrends,
+    staleTime: 5 * 60_000,
   })
 }
 
