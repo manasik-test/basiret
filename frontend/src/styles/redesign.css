@@ -342,7 +342,11 @@
   margin: 0;
   color: inherit;
 }
-.rd-canvas button {
+/* Button reset wrapped in :where() so its specificity is (0,0,0) — named
+ * button classes (.hm-act-cta, .bsr-btn-*, .hm-nba-btn) always win.
+ * Without :where() the reset's `.rd-canvas button` selector is (0,1,1),
+ * which beats single-class button rules and silently strips their bg/padding. */
+:where(.rd-canvas button) {
   font-family: inherit;
   cursor: pointer;
   border: none;
