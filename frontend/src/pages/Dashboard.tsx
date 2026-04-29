@@ -362,7 +362,7 @@ function NBABanner({ insight, summary }: { insight: InsightAction | null; summar
       </div>
       <button className="hm-nba-btn">
         {t('home.nba.cta')}
-        <Icon path={I.chevL} size={12} />
+        <Icon path={I.chevR} size={12} />
       </button>
     </section>
   )
@@ -447,7 +447,7 @@ function ActionsList({ actions, isAr }: { actions: ActionVm[]; isAr: boolean }) 
                 </div>
                 <button className="hm-act-cta">
                   {t('home.actions.openCta')}
-                  <Icon path={I.chevL} size={11} />
+                  <Icon path={I.chevR} size={11} />
                 </button>
               </article>
             )
@@ -831,11 +831,11 @@ const HM_STYLES = `
 /* NBA banner */
 .hm-nba { background:linear-gradient(135deg, var(--purple-50), oklch(0.97 0.03 280)); border:1px solid var(--purple-200); border-radius:16px; padding:18px 22px; display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
 .hm-nba-l { display:flex; gap:14px; align-items:center; flex:1; min-width:0; }
-.hm-nba-av { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg, var(--purple-500), var(--purple-700)); color:#fff; display:grid; place-items:center; font-size:17px; font-weight:700; box-shadow:0 6px 18px -4px rgba(102, 79, 161, .5); flex-shrink:0; }
+.hm-nba-av { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg, var(--purple-500), var(--purple-700)); color:#fff; display:grid; place-items:center; font-size:17px; font-weight:700; box-shadow:0 6px 18px -4px rgba(99, 65, 224, .5); flex-shrink:0; }
 .hm-nba-k { font-size:11px; font-weight:700; color:var(--purple-700); margin-bottom:4px; letter-spacing:0.02em; }
 .hm-nba-t { font-size:13.5px; color:var(--ink-900); line-height:1.55; font-weight:500; }
 .hm-nba-t strong { color:var(--ink-950); font-weight:700; }
-.hm-nba-btn { padding:10px 16px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:5px; flex-shrink:0; box-shadow:0 6px 16px -6px rgba(102, 79, 161, .5); }
+.hm-nba-btn { padding:10px 16px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:5px; flex-shrink:0; box-shadow:0 6px 16px -6px rgba(99, 65, 224, .5); }
 .hm-nba-btn:hover { background:var(--purple-700); }
 
 /* Actions for today */

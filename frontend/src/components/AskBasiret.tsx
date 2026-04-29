@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Plus, X, Send, Sparkles, Trash2 } from 'lucide-react'
+import { X, Send, Sparkles, Trash2 } from 'lucide-react'
 import { useAskBasiret } from '../contexts/AskBasiretContext'
 import { askBasiret, type AskHistoryTurn } from '../api/analytics'
 import { cn } from '../lib/utils'
@@ -359,39 +359,54 @@ export default function AskBasiretFab() {
 
   return (
     <>
-      {/* Sliding panel — bottom-left corner, anchored to the FAB */}
+      {/* Sliding panel — anchored to the FAB on the trailing edge (LEFT in RTL,
+          RIGHT in LTR) per design's `inset-inline-end:28px` spec. */}
       <div
         aria-hidden={!isOpen}
         className={cn(
-          'fixed z-50 bottom-24 start-6 w-[calc(100vw-3rem)] max-w-[420px] h-[580px] max-h-[calc(100vh-8rem)]',
+          'fixed z-50 bottom-24 end-7 w-[calc(100vw-3rem)] max-w-[420px] h-[580px] max-h-[calc(100vh-8rem)]',
           'glass-strong rounded-2xl shadow-2xl border border-white/40 overflow-hidden',
-          'transition-all duration-200 ease-out origin-bottom-left',
+          'transition-all duration-200 ease-out origin-bottom-end',
           isOpen
             ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
             : 'opacity-0 translate-y-4 scale-95 pointer-events-none',
         )}
       >
-        {/* Mount the inner conversation only when open so its state resets
-            cleanly when the user closes/reopens — matches the spec's
-            "no persistence between page navigations" rule. */}
         {isOpen && <PanelInner />}
       </div>
 
-      {/* FAB — bottom-left, "+" rotates to "×" when open */}
+      {/* FAB — trailing corner with purple gradient + pulse ring + saturated
+          indigo halo. Matches AskFab.jsx (.mpg-fab) verbatim: 58×58, gradient
+          from purple-500 → purple-700, shadow rgba(99,65,224,.55). */}
       <button
         onClick={toggle}
         aria-label={isOpen ? t('askBasiret.close') : t('askBasiret.open')}
         title={isOpen ? t('askBasiret.close') : t('askBasiret.open')}
+        style={{
+          background: isOpen
+            ? 'var(--purple-700)'
+            : 'linear-gradient(135deg, var(--purple-500), var(--purple-700))',
+          boxShadow: '0 12px 32px -8px rgba(99, 65, 224, 0.55), 0 4px 12px -2px rgba(0, 0, 0, 0.1)',
+        }}
         className={cn(
-          'fixed z-50 bottom-6 start-6 w-14 h-14 rounded-full bg-primary text-primary-foreground',
-          'shadow-lg hover:shadow-xl flex items-center justify-center transition-all duration-200',
+          'fixed z-50 bottom-7 end-7 w-[58px] h-[58px] rounded-full text-white',
+          'flex items-center justify-center transition-transform duration-200',
           'hover:scale-105 active:scale-95',
         )}
       >
+        {/* Pulse ring — only animates when closed. Soft purple halo at -6px
+            inset, scales 0.9 → 1.6 with opacity fade per design keyframe. */}
+        {!isOpen && (
+          <span
+            aria-hidden="true"
+            style={{ background: 'var(--purple-500)' }}
+            className="absolute -inset-1.5 rounded-full opacity-25 animate-ping"
+          />
+        )}
         {isOpen ? (
-          <X className="w-6 h-6 transition-transform" />
+          <X className="w-6 h-6 relative" />
         ) : (
-          <Plus className="w-6 h-6 transition-transform" />
+          <Sparkles className="w-6 h-6 relative" />
         )}
       </button>
     </>
