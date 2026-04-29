@@ -5,7 +5,7 @@ export default function EnterprisePage() {
   return (
     <ProductPage
       icon={Building2}
-      accent="#664FA1"
+      accent="#5433c2"
       eyebrow={{ en: "For enterprise", ar: "للمؤسسات" }}
       title={{
         en: "Social intelligence at enterprise scale",

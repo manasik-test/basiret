@@ -226,7 +226,7 @@ function DesktopDropdown({
                     className="flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-[#F5F3FF] group"
                   >
                     {Icon && (
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#664FA1]/10 text-[#664FA1] transition-colors group-hover:bg-[#664FA1]/15">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#5433c2]/10 text-[#5433c2] transition-colors group-hover:bg-[#5433c2]/15">
                         <Icon className="size-4" />
                       </span>
                     )}
@@ -236,7 +236,7 @@ function DesktopDropdown({
                           {t(item.en, item.ar)}
                         </span>
                         {item.soon && (
-                          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#664FA1] bg-[#664FA1]/10 px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5433c2] bg-[#5433c2]/10 px-1.5 py-0.5 rounded">
                             {t("Soon", "قريباً")}
                           </span>
                         )}
@@ -297,10 +297,10 @@ function MobileAccordion({
                     onClick={onItemClick}
                     className="flex items-center gap-3 rounded-lg px-2 py-2 text-sm text-gray-600 transition-colors hover:bg-[#F5F3FF]"
                   >
-                    {Icon && <Icon className="size-4 text-[#664FA1]" />}
+                    {Icon && <Icon className="size-4 text-[#5433c2]" />}
                     <span>{t(item.en, item.ar)}</span>
                     {item.soon && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[#664FA1] bg-[#664FA1]/10 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[#5433c2] bg-[#5433c2]/10 px-1.5 py-0.5 rounded">
                         {t("Soon", "قريباً")}
                       </span>
                     )}
@@ -355,7 +355,7 @@ export function Navbar() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center gap-2 group">
           <span className="text-xl font-bold text-[#484848] transition-colors">
-            Basiret <span className="text-[#664FA1] group-hover:text-[#5A4590] transition-colors">|</span>{" "}
+            Basiret <span className="text-[#5433c2] group-hover:text-[#4527a8] transition-colors">|</span>{" "}
             <span className="font-tajawal">بصيرة</span>
           </span>
         </Link>
@@ -393,7 +393,7 @@ export function Navbar() {
             {t("Log in", "تسجيل الدخول")}
           </Link>
           <Link to="/register">
-            <Button className="bg-[#664FA1] text-white font-semibold hover:bg-[#5A4590] transition-all duration-200 cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]">
+            <Button className="bg-[#5433c2] text-white font-semibold hover:bg-[#4527a8] transition-all duration-200 cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]">
               {t("Start free", "ابدأ مجاناً")}
             </Button>
           </Link>
@@ -448,7 +448,7 @@ export function Navbar() {
                   {lang === "en" ? "عربي" : "EN"}
                 </button>
                 <Link to="/register" onClick={() => setMobileOpen(false)} className="ml-auto">
-                  <Button className="bg-[#664FA1] text-white font-semibold hover:bg-[#5A4590] cursor-pointer">
+                  <Button className="bg-[#5433c2] text-white font-semibold hover:bg-[#4527a8] cursor-pointer">
                     {t("Start free", "ابدأ مجاناً")}
                   </Button>
                 </Link>

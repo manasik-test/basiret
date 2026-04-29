@@ -3,7 +3,7 @@ import { useSentiment } from '../../hooks/useAnalytics'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 
 const COLORS = {
-  positive: '#664FA1',
+  positive: '#5433c2',
   neutral: '#A5DDEC',
   negative: '#BF499B',
 }
@@ -54,7 +54,7 @@ export default function SentimentDonut() {
               contentStyle={{
                 background: 'rgba(255,255,255,0.9)',
                 backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(102,79,161,0.15)',
+                border: '1px solid rgba(84,51,194,0.15)',
                 borderRadius: '0.75rem',
               }}
             />

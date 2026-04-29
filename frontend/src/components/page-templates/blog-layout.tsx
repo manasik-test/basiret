@@ -21,7 +21,7 @@ export function BlogIndex({ posts }: { posts: BlogPostMeta[] }) {
     <main dir={dir} className="pt-16">
       <section className="bg-gradient-to-b from-[#F5F3FF] to-white py-16 sm:py-24">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 text-center">
-          <span className="mb-4 inline-block text-xs font-semibold uppercase tracking-[0.2em] text-[#664FA1]">
+          <span className="mb-4 inline-block text-xs font-semibold uppercase tracking-[0.2em] text-[#5433c2]">
             {t("The Basiret Blog", "مدونة بصيرة")}
           </span>
           <h1 className="mb-5 text-4xl font-bold leading-[1.1] tracking-tight text-[#484848] sm:text-5xl md:text-6xl">
@@ -49,7 +49,7 @@ export function BlogIndex({ posts }: { posts: BlogPostMeta[] }) {
               >
                 <Link
                   to={`/blog/${post.slug}`}
-                  className="group block overflow-hidden rounded-2xl border border-gray-200 bg-white transition-all hover:border-[#664FA1]/40 hover:shadow-lg"
+                  className="group block overflow-hidden rounded-2xl border border-gray-200 bg-white transition-all hover:border-[#5433c2]/40 hover:shadow-lg"
                 >
                   <div className="aspect-[16/9] overflow-hidden bg-gray-100">
                     <img
@@ -60,7 +60,7 @@ export function BlogIndex({ posts }: { posts: BlogPostMeta[] }) {
                   </div>
                   <div className="p-6">
                     <div className="mb-3 flex items-center gap-3 text-xs text-gray-500">
-                      <span className="rounded-full bg-[#664FA1]/10 px-2.5 py-0.5 font-semibold text-[#664FA1]">
+                      <span className="rounded-full bg-[#5433c2]/10 px-2.5 py-0.5 font-semibold text-[#5433c2]">
                         {tr(post.category)}
                       </span>
                       <span className="flex items-center gap-1">
@@ -72,13 +72,13 @@ export function BlogIndex({ posts }: { posts: BlogPostMeta[] }) {
                         {tr(post.readingTime)}
                       </span>
                     </div>
-                    <h2 className="mb-2 text-xl font-bold text-[#484848] group-hover:text-[#664FA1] transition-colors">
+                    <h2 className="mb-2 text-xl font-bold text-[#484848] group-hover:text-[#5433c2] transition-colors">
                       {tr(post.title)}
                     </h2>
                     <p className="text-sm text-gray-600 leading-relaxed line-clamp-2">
                       {tr(post.excerpt)}
                     </p>
-                    <div className="mt-4 flex items-center gap-1 text-sm font-semibold text-[#664FA1]">
+                    <div className="mt-4 flex items-center gap-1 text-sm font-semibold text-[#5433c2]">
                       {t("Read more", "اقرأ المزيد")}
                       <ArrowRight className="size-3.5 rtl:rotate-180 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
                     </div>
@@ -106,13 +106,13 @@ export function BlogPost({ title, excerpt, date, readingTime, cover, category, b
       <article className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
         <Link
           to="/blog"
-          className="mb-8 inline-flex items-center gap-1 text-sm text-[#664FA1] hover:text-[#5A4590]"
+          className="mb-8 inline-flex items-center gap-1 text-sm text-[#5433c2] hover:text-[#4527a8]"
         >
           <ArrowRight className="size-3.5 rotate-180 rtl:rotate-0" />
           {t("Back to blog", "العودة إلى المدونة")}
         </Link>
         <div className="mb-6 flex items-center gap-3 text-xs text-gray-500">
-          <span className="rounded-full bg-[#664FA1]/10 px-2.5 py-0.5 font-semibold text-[#664FA1]">
+          <span className="rounded-full bg-[#5433c2]/10 px-2.5 py-0.5 font-semibold text-[#5433c2]">
             {tr(category)}
           </span>
           <span className="flex items-center gap-1">

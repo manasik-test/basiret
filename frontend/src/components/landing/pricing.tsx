@@ -192,7 +192,7 @@ export function Pricing() {
               )}
               <span className="relative z-10">
                 {t("Yearly", "سنوي")}
-                <span className="ml-1.5 text-xs text-[#664FA1] font-semibold">{t("Save 17%", "وفّر 17%")}</span>
+                <span className="ml-1.5 text-xs text-[#5433c2] font-semibold">{t("Save 17%", "وفّر 17%")}</span>
               </span>
             </button>
           </div>
@@ -215,22 +215,22 @@ export function Pricing() {
                 whileHover={{
                   scale: 1.02,
                   boxShadow: p
-                    ? "0 30px 80px -20px rgba(102, 79, 161, 0.25)"
+                    ? "0 30px 80px -20px rgba(84, 51, 194, 0.25)"
                     : "0 25px 60px -15px rgba(0, 0, 0, 0.08)",
                   transition: { type: "spring", stiffness: 400, damping: 17 },
                 }}
                 className={`relative overflow-hidden rounded-2xl p-6 cursor-default sm:p-8 ${
                   p
-                    ? "border-2 border-[#664FA1] bg-white shadow-lg"
+                    ? "border-2 border-[#5433c2] bg-white shadow-lg"
                     : "border border-gray-200 bg-white"
                 }`}
               >
                 {p && (
-                  <div className="absolute -top-px left-0 right-0 h-1 bg-gradient-to-r from-[#664FA1] via-[#BF499B] to-[#664FA1]" />
+                  <div className="absolute -top-px left-0 right-0 h-1 bg-gradient-to-r from-[#5433c2] via-[#BF499B] to-[#5433c2]" />
                 )}
                 {p && (
                   <div className="mb-4">
-                    <Badge className="bg-[#664FA1]/10 text-[#664FA1] font-semibold hover:bg-[#664FA1]/15 border-[#664FA1]/20 px-3 py-0.5 cursor-default">
+                    <Badge className="bg-[#5433c2]/10 text-[#5433c2] font-semibold hover:bg-[#5433c2]/15 border-[#5433c2]/20 px-3 py-0.5 cursor-default">
                       {t("Most Popular", "الأكثر شعبية")}
                     </Badge>
                   </div>
@@ -268,7 +268,7 @@ export function Pricing() {
                   {(t(plan.en.features.join("|||"), plan.ar.features.join("|||"))).split("|||").map(
                     (feature, j) => (
                       <li key={j} className="flex items-start gap-3 text-sm">
-                        <Check className="mt-0.5 size-4 shrink-0 text-[#664FA1]" />
+                        <Check className="mt-0.5 size-4 shrink-0 text-[#5433c2]" />
                         <span className="text-gray-600">{feature}</span>
                       </li>
                     )
@@ -279,7 +279,7 @@ export function Pricing() {
                     <Button
                       className={`w-full h-11 cursor-pointer transition-all duration-200 ${
                         p
-                          ? "bg-[#664FA1] text-white font-semibold hover:bg-[#5A4590] shadow-lg shadow-[#664FA1]/25"
+                          ? "bg-[#5433c2] text-white font-semibold hover:bg-[#4527a8] shadow-lg shadow-[#5433c2]/25"
                           : "bg-[#F5F3FF] text-[#484848] font-semibold border border-gray-200 hover:bg-gray-100"
                       }`}
                     >

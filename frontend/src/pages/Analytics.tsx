@@ -482,7 +482,7 @@ const MP_STYLES = `
 .mp-post-ocr { margin-top:6px; padding:8px 10px; background:var(--surface); border-radius:8px; font-size:12px; color:var(--ink-600); }
 .mp-post-ocr span { color:var(--ink-800); font-weight:500; }
 
-.mp-cta { display:flex; align-items:center; justify-content:center; gap:8px; padding:12px; width:100%; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13.5px; font-weight:600; box-shadow:0 6px 16px -6px rgba(102, 79, 161, .55); transition:background 0.12s, transform 0.12s; }
+.mp-cta { display:flex; align-items:center; justify-content:center; gap:8px; padding:12px; width:100%; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13.5px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84, 51, 194, .55); transition:background 0.12s, transform 0.12s; }
 .mp-cta:hover:not(:disabled) { background:var(--purple-700); transform:translateY(-1px); }
 .mp-cta:disabled { opacity:.7; cursor:not-allowed; }
 

@@ -49,7 +49,7 @@ const DeletionStatusPage = lazy(() => import('./pages/marketing/DeletionStatus')
 function MarketingFallback() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
-      <div className="size-8 rounded-full border-2 border-[#664FA1]/20 border-t-[#664FA1] animate-spin" />
+      <div className="size-8 rounded-full border-2 border-[#5433c2]/20 border-t-[#5433c2] animate-spin" />
     </div>
   )
 }

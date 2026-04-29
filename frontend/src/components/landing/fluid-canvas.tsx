@@ -50,7 +50,7 @@ export function FluidCanvas() {
         bloom: false,
         sunrays: false,
         hover: true,
-        colorPalette: ["#664FA1", "#BF499B", "#A5DDEC", "#484848"],
+        colorPalette: ["#5433c2", "#BF499B", "#A5DDEC", "#484848"],
       });
       sim.start();
       simRef.current = sim;

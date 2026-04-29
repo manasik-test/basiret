@@ -5,7 +5,7 @@ export default function SmallBusinessPage() {
   return (
     <ProductPage
       icon={Store}
-      accent="#664FA1"
+      accent="#5433c2"
       eyebrow={{ en: "For small businesses", ar: "للشركات الصغيرة" }}
       title={{
         en: "Grow your business without hiring a marketing team",

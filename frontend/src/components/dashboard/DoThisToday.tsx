@@ -13,7 +13,7 @@ import type { InsightAction, RecFeedback } from '../../api/analytics'
 
 const priorityConfig: Record<string, { color: string; bg: string; icon: React.ReactNode; label: string }> = {
   high: { color: '#BF499B', bg: '#BF499B20', icon: <AlertTriangle className="w-3.5 h-3.5" />, label: 'High' },
-  medium: { color: '#664FA1', bg: '#664FA120', icon: <Zap className="w-3.5 h-3.5" />, label: 'Medium' },
+  medium: { color: '#5433c2', bg: '#5433c220', icon: <Zap className="w-3.5 h-3.5" />, label: 'Medium' },
   low: { color: '#A5DDEC', bg: '#A5DDEC40', icon: <Clock className="w-3.5 h-3.5" />, label: 'Low' },
 }
 
@@ -138,7 +138,7 @@ function DoThisTodayContent() {
               className="h-full rounded-full transition-all duration-500"
               style={{
                 width: `${insight.score}%`,
-                backgroundColor: insight.score >= 70 ? '#664FA1' : insight.score >= 40 ? '#A5DDEC' : '#BF499B',
+                backgroundColor: insight.score >= 70 ? '#5433c2' : insight.score >= 40 ? '#A5DDEC' : '#BF499B',
               }}
             />
           </div>

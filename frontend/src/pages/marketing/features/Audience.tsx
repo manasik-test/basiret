@@ -5,7 +5,7 @@ export default function AudiencePage() {
   return (
     <ProductPage
       icon={Users}
-      accent="#664FA1"
+      accent="#5433c2"
       eyebrow={{ en: "Audience Insights", ar: "رؤى الجمهور" }}
       title={{
         en: "Know exactly who's watching you",

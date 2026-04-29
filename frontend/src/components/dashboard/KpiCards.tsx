@@ -54,7 +54,7 @@ export default function KpiCards() {
         title={t('dashboard.totalReach')}
         value={totalReach}
         icon={<Eye className="w-6 h-6" />}
-        color="#664FA1"
+        color="#5433c2"
       />
       <KpiCard
         title={t('dashboard.avgEngagement')}
@@ -72,7 +72,7 @@ export default function KpiCards() {
         title={t('dashboard.activeSegments')}
         value={activeSegments}
         icon={<Users className="w-6 h-6" />}
-        color="#664FA1"
+        color="#5433c2"
       />
     </div>
   )

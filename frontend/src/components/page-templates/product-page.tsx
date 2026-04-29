@@ -35,7 +35,7 @@ export function ProductPage({
   subtitle,
   bullets,
   icon: Icon,
-  accent = "#664FA1",
+  accent = "#5433c2",
   heroImage,
   heroImageAlt,
   steps,
@@ -56,7 +56,7 @@ export function ProductPage({
           className="pointer-events-none absolute inset-0 opacity-40"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(102,79,161,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(102,79,161,0.04) 1px, transparent 1px)",
+              "linear-gradient(rgba(84,51,194,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(84,51,194,0.04) 1px, transparent 1px)",
             backgroundSize: "56px 56px",
           }}
         />
@@ -145,7 +145,7 @@ export function ProductPage({
                   className="absolute -inset-4 rounded-3xl opacity-40 blur-2xl"
                   style={{ backgroundColor: `${accent}40` }}
                 />
-                <div className="relative aspect-[4/3] overflow-hidden rounded-3xl border border-white/50 shadow-[0_30px_80px_-20px_rgba(102,79,161,0.25)]">
+                <div className="relative aspect-[4/3] overflow-hidden rounded-3xl border border-white/50 shadow-[0_30px_80px_-20px_rgba(84,51,194,0.25)]">
                   <img
                     src={heroImage}
                     alt={heroImageAlt ? tr(heroImageAlt) : ""}

@@ -1,24 +1,24 @@
 /* Basiret Design System v1.0 — canonical token sheet.
  *
- * Mirrors `Basiretdashoards/colors_and_type.css` from the design handoff:
- * brand purple anchored on #664FA1, pink anchored on #BF499B, sky on #A5DDEC.
- * Imported once at app boot (main.tsx). Page-level <style> blocks reference
- * these tokens by var() name so swapping a token value here cascades.
+ * Brand purple anchored on #5433c2 (saturated indigo, picked off the
+ * design inspector), pink on #BF499B, sky on #A5DDEC. Imported once
+ * at app boot (main.tsx). Page-level <style> blocks reference these
+ * tokens by var() name so swapping a value here cascades.
  */
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  /* ── Brand purple — primary (anchored on #664FA1) ───────────── */
-  --purple-50:  #f4f1fa;
-  --purple-100: #e8e1f4;
-  --purple-200: #d2c5e9;
-  --purple-300: #b09ad6;
-  --purple-400: #8c70bf;
-  --purple-500: #7559b0;
-  --purple-600: #664FA1;
-  --purple-700: #543f88;
-  --purple-800: #41306b;
-  --purple-900: #2c2049;
+  /* ── Brand purple — primary (anchored on #5433c2) ───────────── */
+  --purple-50:  #f1edfb;
+  --purple-100: #e3daf7;
+  --purple-200: #c8b4ee;
+  --purple-300: #a98be3;
+  --purple-400: #8763d4;
+  --purple-500: #6b48ce;
+  --purple-600: #5433c2;
+  --purple-700: #4527a8;
+  --purple-800: #341d7f;
+  --purple-900: #221353;
 
   /* ── Brand pink — secondary (anchored on #BF499B) ──────────── */
   --pink-50:    #fbf2f8;
@@ -40,7 +40,7 @@
   --sky-600:    #3e8ca3;
 
   /* Brand gradient — used on the logo lockup and hero accents. */
-  --brand-gradient: linear-gradient(135deg, #664FA1 0%, #BF499B 100%);
+  --brand-gradient: linear-gradient(135deg, #5433c2 0%, #BF499B 100%);
 
   /* Off-white — alternative to `--surface` when warmer feel is needed. */
   --off-white: #faf8f5;

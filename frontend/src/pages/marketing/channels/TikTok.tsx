@@ -5,7 +5,7 @@ export default function TikTokChannelPage() {
   return (
     <ProductPage
       icon={Music2}
-      accent="#664FA1"
+      accent="#5433c2"
       eyebrow={{ en: "Basiret for TikTok", ar: "بصيرة لتيك توك" }}
       title={{
         en: "Crack the TikTok algorithm",

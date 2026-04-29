@@ -51,22 +51,22 @@ export default function EngagementChart() {
           <AreaChart data={trendData}>
             <defs>
               <linearGradient id="likesGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#664FA1" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#664FA1" stopOpacity={0} />
+                <stop offset="5%" stopColor="#5433c2" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#5433c2" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="commentsGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#A5DDEC" stopOpacity={0.3} />
                 <stop offset="95%" stopColor="#A5DDEC" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(102,79,161,0.1)" />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(84,51,194,0.1)" />
             <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#6B7280' }} />
             <YAxis tick={{ fontSize: 12, fill: '#6B7280' }} />
             <Tooltip
               contentStyle={{
                 background: 'rgba(255,255,255,0.9)',
                 backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(102,79,161,0.15)',
+                border: '1px solid rgba(84,51,194,0.15)',
                 borderRadius: '0.75rem',
               }}
             />
@@ -74,7 +74,7 @@ export default function EngagementChart() {
               type="monotone"
               dataKey="likes"
               name={t('dashboard.likes')}
-              stroke="#664FA1"
+              stroke="#5433c2"
               strokeWidth={2}
               fill="url(#likesGrad)"
             />

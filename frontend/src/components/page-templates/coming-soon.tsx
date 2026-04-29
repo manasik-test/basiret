@@ -31,7 +31,7 @@ export function MarketingComingSoon({ eyebrow, title, subtitle, icon: Icon = Spa
           className="pointer-events-none absolute inset-0 opacity-30"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 20% 20%, rgba(102,79,161,0.15) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(191,73,155,0.1) 0%, transparent 40%)",
+              "radial-gradient(circle at 20% 20%, rgba(84,51,194,0.15) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(191,73,155,0.1) 0%, transparent 40%)",
           }}
         />
         <div className="relative mx-auto max-w-2xl px-4 sm:px-6 text-center">
@@ -40,10 +40,10 @@ export function MarketingComingSoon({ eyebrow, title, subtitle, icon: Icon = Spa
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: "spring", stiffness: 100, damping: 15 }}
           >
-            <div className="mx-auto mb-6 flex size-16 items-center justify-center rounded-2xl bg-[#664FA1]/10 text-[#664FA1]">
+            <div className="mx-auto mb-6 flex size-16 items-center justify-center rounded-2xl bg-[#5433c2]/10 text-[#5433c2]">
               <Icon className="size-7" />
             </div>
-            <span className="mb-4 inline-block rounded-full bg-[#664FA1]/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-[#664FA1]">
+            <span className="mb-4 inline-block rounded-full bg-[#5433c2]/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-[#5433c2]">
               {tr(eyebrow)}
             </span>
             <h1 className="mb-5 text-4xl font-bold leading-[1.1] tracking-tight text-[#484848] sm:text-5xl md:text-6xl">
@@ -58,12 +58,12 @@ export function MarketingComingSoon({ eyebrow, title, subtitle, icon: Icon = Spa
                 <input
                   type="email"
                   placeholder={t("Enter your email...", "أدخل بريدك الإلكتروني...")}
-                  className="h-12 w-full rounded-xl border border-gray-300 bg-white/90 backdrop-blur-sm ps-10 pe-4 text-base text-[#484848] placeholder:text-gray-400 focus:border-[#664FA1] focus:outline-none focus:ring-2 focus:ring-[#664FA1]/20 transition-all shadow-sm sm:text-sm"
+                  className="h-12 w-full rounded-xl border border-gray-300 bg-white/90 backdrop-blur-sm ps-10 pe-4 text-base text-[#484848] placeholder:text-gray-400 focus:border-[#5433c2] focus:outline-none focus:ring-2 focus:ring-[#5433c2]/20 transition-all shadow-sm sm:text-sm"
                 />
               </div>
               <Button
                 type="submit"
-                className="h-12 w-full rounded-xl bg-[#664FA1] px-6 font-semibold text-white hover:bg-[#5A4590] cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-[#664FA1]/25 sm:w-auto"
+                className="h-12 w-full rounded-xl bg-[#5433c2] px-6 font-semibold text-white hover:bg-[#4527a8] cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-[#5433c2]/25 sm:w-auto"
               >
                 {t("Notify me", "نبّهني")}
                 <ArrowRight className="size-4 rtl:rotate-180" />
@@ -75,7 +75,7 @@ export function MarketingComingSoon({ eyebrow, title, subtitle, icon: Icon = Spa
             <div className="mt-10">
               <Link
                 to="/"
-                className="text-sm text-[#664FA1] hover:text-[#5A4590] transition-colors"
+                className="text-sm text-[#5433c2] hover:text-[#4527a8] transition-colors"
               >
                 {t("← Back to home", "← العودة إلى الرئيسية")}
               </Link>

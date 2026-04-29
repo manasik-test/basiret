@@ -210,7 +210,7 @@ export function Hero() {
           className="pointer-events-none absolute inset-0 z-[2]"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(102,79,161,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(102,79,161,0.04) 1px, transparent 1px)",
+              "linear-gradient(rgba(84,51,194,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(84,51,194,0.04) 1px, transparent 1px)",
             backgroundSize: "56px 56px",
           }}
         />
@@ -275,7 +275,7 @@ export function Hero() {
                     transition={{ type: "spring", stiffness: 400, damping: 17 }}
                     className="block"
                   >
-                    <Button className="pointer-events-auto h-14 w-full rounded-full bg-[#664FA1] px-10 text-base font-semibold text-white hover:bg-[#5A4590] cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-[#664FA1]/25 sm:w-56 md:w-60">
+                    <Button className="pointer-events-auto h-14 w-full rounded-full bg-[#5433c2] px-10 text-base font-semibold text-white hover:bg-[#4527a8] cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-[#5433c2]/25 sm:w-56 md:w-60">
                       {t("Start for free", "ابدأ مجاناً")}
                       <ArrowRight className="size-4 rtl:rotate-180" />
                     </Button>

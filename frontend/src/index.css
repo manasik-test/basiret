@@ -3,7 +3,7 @@
 @theme {
   --color-background: #F5F3FF;
   --color-foreground: #484848;
-  --color-primary: #664FA1;
+  --color-primary: #5433c2;
   --color-primary-foreground: #FFFFFF;
   --color-accent: #A5DDEC;
   --color-accent-foreground: #484848;
@@ -13,15 +13,15 @@
   --color-muted-foreground: #6B7280;
   --color-card: rgba(255, 255, 255, 0.6);
   --color-card-foreground: #484848;
-  --color-border: rgba(102, 79, 161, 0.15);
-  --color-ring: #664FA1;
+  --color-border: rgba(84, 51, 194, 0.15);
+  --color-ring: #5433c2;
 
   /* Tokens used by ported shadcn/base-ui primitives */
   --color-secondary: #F0ECF9;
   --color-secondary-foreground: #484848;
   --color-destructive: #E11D48;
   --color-destructive-foreground: #FFFFFF;
-  --color-input: rgba(102, 79, 161, 0.18);
+  --color-input: rgba(84, 51, 194, 0.18);
 
   --radius-lg: 1rem;
   --radius-md: 0.75rem;
@@ -48,7 +48,7 @@ html {
 }
 
 ::selection {
-  background-color: rgba(102, 79, 161, 0.2);
+  background-color: rgba(84, 51, 194, 0.2);
   color: #484848;
 }
 
@@ -67,7 +67,7 @@ html {
 
 /* Hero grid background with mouse glow (used by some marketing pages) */
 .hero-grid-bg {
-  --grid-color: rgba(102, 79, 161, 0.06);
+  --grid-color: rgba(84, 51, 194, 0.06);
   --grid-size: 48px;
   background-image:
     linear-gradient(var(--grid-color) 1px, transparent 1px),
@@ -158,7 +158,7 @@ html {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 4px 30px rgba(102, 79, 161, 0.08);
+  box-shadow: 0 4px 30px rgba(84, 51, 194, 0.08);
 }
 
 .glass-strong {
@@ -166,7 +166,7 @@ html {
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow: 0 8px 32px rgba(102, 79, 161, 0.12);
+  box-shadow: 0 8px 32px rgba(84, 51, 194, 0.12);
 }
 
 /* Bento card — glassmorphism + hover */
@@ -175,14 +175,14 @@ html {
   backdrop-filter: blur(16px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
   border: 1px solid rgba(255, 255, 255, 0.25) !important;
-  box-shadow: 0 4px 30px rgba(102, 79, 161, 0.06), inset 0 1px 0 rgba(255,255,255,0.4) !important;
+  box-shadow: 0 4px 30px rgba(84, 51, 194, 0.06), inset 0 1px 0 rgba(255,255,255,0.4) !important;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
 }
 .bento-card:hover {
   background: rgba(255, 255, 255, 0.5) !important;
-  border-color: rgba(102, 79, 161, 0.2) !important;
-  box-shadow: 0 12px 48px rgba(102, 79, 161, 0.14), inset 0 1px 0 rgba(255,255,255,0.5) !important;
+  border-color: rgba(84, 51, 194, 0.2) !important;
+  box-shadow: 0 12px 48px rgba(84, 51, 194, 0.14), inset 0 1px 0 rgba(255,255,255,0.5) !important;
   transform: translateY(-3px);
 }
 

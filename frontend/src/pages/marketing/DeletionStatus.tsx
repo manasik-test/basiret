@@ -25,7 +25,7 @@ export default function DeletionStatusPage() {
             <CheckCircle2 className="size-8" />
           </div>
 
-          <span className="mb-4 inline-block rounded-full bg-[#664FA1]/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-[#664FA1]">
+          <span className="mb-4 inline-block rounded-full bg-[#5433c2]/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-[#5433c2]">
             {t("Deletion request received", "تم استلام طلب الحذف")}
           </span>
 
@@ -65,14 +65,14 @@ export default function DeletionStatusPage() {
 
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Link to="/">
-              <button className="h-11 cursor-pointer rounded-xl bg-[#664FA1] px-6 font-semibold text-white hover:bg-[#5A4590] shadow-md flex items-center gap-2">
+              <button className="h-11 cursor-pointer rounded-xl bg-[#5433c2] px-6 font-semibold text-white hover:bg-[#4527a8] shadow-md flex items-center gap-2">
                 {t("Back to home", "العودة إلى الرئيسية")}
                 <ArrowRight className="size-4 rtl:rotate-180" />
               </button>
             </Link>
             <Link
               to="/privacy"
-              className="text-sm text-[#664FA1] hover:text-[#5A4590] transition-colors"
+              className="text-sm text-[#5433c2] hover:text-[#4527a8] transition-colors"
             >
               {t("Read our Privacy Policy", "اقرأ سياسة الخصوصية")}
             </Link>

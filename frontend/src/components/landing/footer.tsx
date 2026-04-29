@@ -57,7 +57,7 @@ export function Footer() {
         <div className="grid gap-10 sm:grid-cols-2 sm:gap-12 md:grid-cols-5">
           <div className="sm:col-span-2 md:col-span-1">
             <Link to="/" className="text-lg font-bold text-[#484848]">
-              Basiret <span className="text-[#664FA1]">|</span>{" "}
+              Basiret <span className="text-[#5433c2]">|</span>{" "}
               <span className="font-tajawal">بصيرة</span>
             </Link>
             <p className="mt-3 max-w-xs text-sm text-gray-500 leading-relaxed">
@@ -76,7 +76,7 @@ export function Footer() {
                   key={social.label}
                   href={social.href}
                   aria-label={social.label}
-                  className="flex size-9 items-center justify-center rounded-lg border border-gray-200 text-xs font-semibold text-gray-500 transition-all hover:border-[#664FA1]/30 hover:bg-[#664FA1]/5 hover:text-[#664FA1] cursor-pointer"
+                  className="flex size-9 items-center justify-center rounded-lg border border-gray-200 text-xs font-semibold text-gray-500 transition-all hover:border-[#5433c2]/30 hover:bg-[#5433c2]/5 hover:text-[#5433c2] cursor-pointer"
                 >
                   {social.label}
                 </a>
@@ -94,7 +94,7 @@ export function Footer() {
                   <li key={j}>
                     <Link
                       to={link.href}
-                      className="text-sm text-gray-500 transition-colors hover:text-[#664FA1] cursor-pointer"
+                      className="text-sm text-gray-500 transition-colors hover:text-[#5433c2] cursor-pointer"
                     >
                       {tr(link.en, link.ar)}
                     </Link>

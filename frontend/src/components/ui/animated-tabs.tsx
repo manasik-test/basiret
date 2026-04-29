@@ -62,7 +62,7 @@ export function AnimatedTabs({
 
       <div
         className={cn(
-          "p-8 sm:p-12 bg-gradient-to-br from-[#664FA1] to-[#4A3A7A] shadow-[0_30px_80px_-20px_rgba(102,79,161,0.5)] text-white rounded-3xl border border-white/10 min-h-[22rem] sm:min-h-[26rem]",
+          "p-8 sm:p-12 bg-gradient-to-br from-[#5433c2] to-[#4A3A7A] shadow-[0_30px_80px_-20px_rgba(84,51,194,0.5)] text-white rounded-3xl border border-white/10 min-h-[22rem] sm:min-h-[26rem]",
           panelClassName
         )}
       >

@@ -5,7 +5,7 @@ export default function ContentPlannerPage() {
   return (
     <ProductPage
       icon={Calendar}
-      accent="#664FA1"
+      accent="#5433c2"
       eyebrow={{ en: "Content Planner", ar: "مخطط المحتوى" }}
       title={{
         en: "Plan a month of posts in an hour",

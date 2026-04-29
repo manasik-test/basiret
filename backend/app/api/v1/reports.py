@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── Brand palette ───────────────────────────────────────────
-PURPLE = HexColor("#664FA1")
+PURPLE = HexColor("#5433c2")
 TEXT = HexColor("#484848")
 MUTED = HexColor("#9B9B9B")
 DIVIDER = HexColor("#E7E5EE")
@@ -47,7 +47,7 @@ POSITIVE = HexColor("#10B981")
 NEUTRAL = HexColor("#9CA3AF")
 NEGATIVE = HexColor("#EF4444")
 PRIORITY_HIGH = HexColor("#BF499B")
-PRIORITY_MEDIUM = HexColor("#664FA1")
+PRIORITY_MEDIUM = HexColor("#5433c2")
 PRIORITY_LOW = HexColor("#A5DDEC")
 
 PAGE_W, PAGE_H = A4

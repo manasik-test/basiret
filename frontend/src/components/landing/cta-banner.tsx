@@ -24,7 +24,7 @@ export function CTABanner() {
     <section dir={dir} className="bg-[#F5F3FF] py-16 sm:py-24">
       <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-10 px-4 py-4 sm:px-6 md:grid-cols-2 md:gap-12">
         <ContainerStagger className="text-center md:text-left rtl:md:text-right">
-          <ContainerAnimated className="mb-4 block text-xs font-semibold uppercase tracking-[0.2em] text-[#664FA1] md:text-sm">
+          <ContainerAnimated className="mb-4 block text-xs font-semibold uppercase tracking-[0.2em] text-[#5433c2] md:text-sm">
             {t("Ready to grow?", "جاهز للنمو؟")}
           </ContainerAnimated>
           <ContainerAnimated className="text-3xl font-bold tracking-tight text-[#484848] sm:text-4xl md:text-[2.6rem] md:leading-[1.1]">
@@ -46,7 +46,7 @@ export function CTABanner() {
                 whileTap={{ scale: 0.97 }}
                 transition={{ type: "spring", stiffness: 400, damping: 17 }}
               >
-                <Button className="h-12 cursor-pointer rounded-xl bg-[#664FA1] px-7 font-semibold text-white hover:bg-[#5A4590] shadow-lg shadow-[#664FA1]/25 flex items-center gap-2">
+                <Button className="h-12 cursor-pointer rounded-xl bg-[#5433c2] px-7 font-semibold text-white hover:bg-[#4527a8] shadow-lg shadow-[#5433c2]/25 flex items-center gap-2">
                   {t("Get Started for Free", "ابدأ مجاناً")}
                   <ArrowRight className="size-4 rtl:rotate-180" />
                 </Button>
