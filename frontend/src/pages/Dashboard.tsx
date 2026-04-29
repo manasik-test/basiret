@@ -868,11 +868,13 @@ const HM_STYLES = `
 .hm-act-meta { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:4px; padding-inline-start:14px; border-inline-start:1px solid var(--line); min-width:0; }
 .hm-act-impact { font-size:11px; font-weight:600; color:oklch(0.5 0.15 155); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .hm-act-time { font-size:10.5px; color:var(--ink-500); font-weight:500; white-space:nowrap; }
-/* Non-urgent CTAs are dark/black; urgent CTAs are purple (brand) per design v2. */
-.hm-act-cta { padding:9px 14px; border-radius:9px; background:var(--ink-900); color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; width:100%; }
-.hm-act-cta:hover { background:var(--ink-800); }
-.hm-act--urgent .hm-act-cta { background:var(--purple-600); }
-.hm-act--urgent .hm-act-cta:hover { background:var(--purple-700); }
+/* Per Buttons Spec.html: dark CTA (ink-900 → purple-700 hover) by default,
+ * urgent override (coral) inside .hm-act--urgent rows. Same dimensions for
+ * both — only the color shifts. */
+.hm-act-cta { padding:9px 14px; border-radius:9px; background:var(--ink-900); color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; width:100%; transition:background .15s; }
+.hm-act-cta:hover { background:var(--purple-700); }
+.hm-act--urgent .hm-act-cta { background:oklch(0.55 0.17 30); }
+.hm-act--urgent .hm-act-cta:hover { background:oklch(0.48 0.18 30); }
 
 /* Bottom grid */
 .hm-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:flex-start; }

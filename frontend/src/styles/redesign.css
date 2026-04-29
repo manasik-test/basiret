@@ -157,45 +157,100 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Brand component primitives ─────────────────────────────────
- * These were spec'd in the design system's preview/* files. They give
- * any new page a consistent button/pill/avatar baseline without forcing
- * us to rewrite the existing redesigned dashboards. */
+/* ── Brand component primitives — Buttons Spec v1.0 ─────────────
+ * Verbatim from project/Buttons Spec.html. Seven canonical variants:
+ *   1. .bsr-btn-primary    — purple solid, with shadow (NBA banner CTA)
+ *   2. .bsr-btn-dark       — ink default, hovers PURPLE (action CTA)
+ *   3. .bsr-btn-urgent     — coral, replaces dark inside .hm-act--urgent
+ *   4. .bsr-btn-ghost      — transparent + line-strong border (secondary)
+ *   5. .bsr-btn-fill-dark  — bigger ink fill, hovers ink-800 (next-post acts)
+ *   6. .bsr-seg            — segmented control (range pills)
+ *   7. .bsr-btn-link       — text link, purple-700, hover underline
+ *
+ * General rules per spec: font-family inherit, border:none except ghost,
+ * transition: background .15s, no shadow except on Primary, icons 11–12px
+ * with 5px gap, NEVER text-transform: uppercase on Arabic. */
 
 .bsr-btn-primary {
   background: var(--purple-600); color: #fff;
-  padding: 10px 18px; border-radius: var(--radius-sm);
-  font: 600 13px/1 var(--font-ar); cursor: pointer;
-  border: none; transition: background .12s;
+  padding: 10px 16px; border-radius: 10px;
+  font: 600 12.5px/1 inherit; cursor: pointer;
+  border: none; display: inline-flex; align-items: center; gap: 5px;
+  box-shadow: 0 6px 16px -6px rgba(99, 65, 224, .5);
+  transition: background .15s;
 }
 .bsr-btn-primary:hover { background: var(--purple-700); }
 
-.bsr-btn-secondary {
-  background: var(--surface); color: var(--ink-900);
-  border: 1px solid var(--line-strong);
-  padding: 9px 17px; border-radius: var(--radius-sm);
-  font: 600 13px/1 var(--font-ar); cursor: pointer;
-  transition: background .12s;
+.bsr-btn-dark {
+  background: var(--ink-900); color: #fff;
+  padding: 9px 14px; border-radius: 9px;
+  font: 600 11.5px/1 inherit; cursor: pointer;
+  border: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  white-space: nowrap; transition: background .15s;
 }
-.bsr-btn-secondary:hover { background: var(--ink-100); }
+.bsr-btn-dark:hover { background: var(--purple-700); }
+
+.bsr-btn-urgent {
+  background: oklch(0.55 0.17 30); color: #fff;
+  padding: 9px 14px; border-radius: 9px;
+  font: 600 11.5px/1 inherit; cursor: pointer;
+  border: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  white-space: nowrap; transition: background .15s;
+}
+.bsr-btn-urgent:hover { background: oklch(0.48 0.18 30); }
 
 .bsr-btn-ghost {
   background: transparent; color: var(--ink-700);
-  padding: 8px 14px; border-radius: var(--radius-sm);
-  font: 500 13px/1 var(--font-ar); cursor: pointer;
-  border: none; transition: background .12s, color .12s;
+  padding: 11px 16px; border-radius: 10px;
+  font: 600 12.5px/1 inherit; cursor: pointer;
+  border: 1px solid var(--line-strong);
+  transition: background .15s;
 }
-.bsr-btn-ghost:hover { background: var(--ink-100); color: var(--ink-900); }
+.bsr-btn-ghost:hover { background: var(--ink-50); }
 
-.bsr-btn-dark {
+.bsr-btn-fill-dark {
   background: var(--ink-900); color: #fff;
-  padding: 10px 18px; border-radius: var(--radius-sm);
-  font: 600 13px/1 var(--font-ar); cursor: pointer;
-  border: none; display: inline-flex; align-items: center; gap: 8px;
-  transition: background .12s;
+  padding: 11px 18px; border-radius: 10px;
+  font: 600 12.5px/1 inherit; cursor: pointer;
+  border: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  transition: background .15s;
 }
-.bsr-btn-dark:hover { background: var(--ink-800); }
-.bsr-btn-dark svg { color: var(--purple-300); }
+.bsr-btn-fill-dark:hover { background: var(--ink-800); }
+
+.bsr-btn-link {
+  background: none; color: var(--purple-700);
+  padding: 4px 0; border: none;
+  font: 500 12px/1 inherit; cursor: pointer;
+  transition: color .15s;
+}
+.bsr-btn-link:hover { color: var(--purple-800); text-decoration: underline; }
+
+/* Segmented control — track + segments. Active segment gets surface bg + shadow. */
+.bsr-seg {
+  display: inline-flex; background: var(--ink-100);
+  border-radius: 10px; padding: 3px;
+}
+.bsr-seg button {
+  padding: 7px 14px; border-radius: 7px;
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-600); font: 500 12.5px/1 inherit;
+  transition: background .15s, color .15s;
+}
+.bsr-seg button.is-on {
+  background: var(--surface); color: var(--ink-900);
+  font-weight: 600; box-shadow: var(--shadow-sm);
+}
+
+/* Backwards-compat alias kept for components that already use .bsr-btn-secondary
+ * (Settings tabs etc.) — points at the canonical Ghost variant per spec. */
+.bsr-btn-secondary {
+  background: var(--surface); color: var(--ink-900);
+  border: 1px solid var(--line-strong);
+  padding: 11px 16px; border-radius: 10px;
+  font: 600 12.5px/1 inherit; cursor: pointer;
+  transition: background .15s;
+}
+.bsr-btn-secondary:hover { background: var(--ink-50); }
 
 .bsr-pill {
   display: inline-flex; align-items: center; gap: 6px;
