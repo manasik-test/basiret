@@ -375,17 +375,15 @@ export default function AskBasiretFab() {
         {isOpen && <PanelInner />}
       </div>
 
-      {/* FAB — trailing corner with purple gradient + pulse ring + saturated
-          indigo halo. Matches AskFab.jsx (.mpg-fab) verbatim: 58×58, gradient
-          from purple-500 → purple-700, shadow rgba(99,65,224,.55). */}
+      {/* FAB — trailing corner, saturated indigo (#5433c2) per design inspector.
+          Soft pulse ring on a 2.4s loop (Tailwind's animate-ping is 1s and far
+          too aggressive). Heavier shadow keeps the indigo halo. */}
       <button
         onClick={toggle}
         aria-label={isOpen ? t('askBasiret.close') : t('askBasiret.open')}
         title={isOpen ? t('askBasiret.close') : t('askBasiret.open')}
         style={{
-          background: isOpen
-            ? 'var(--purple-700)'
-            : 'linear-gradient(135deg, var(--purple-500), var(--purple-700))',
+          background: '#5433c2',
           boxShadow: '0 12px 32px -8px rgba(99, 65, 224, 0.55), 0 4px 12px -2px rgba(0, 0, 0, 0.1)',
         }}
         className={cn(
@@ -394,13 +392,10 @@ export default function AskBasiretFab() {
           'hover:scale-105 active:scale-95',
         )}
       >
-        {/* Pulse ring — only animates when closed. Soft purple halo at -6px
-            inset, scales 0.9 → 1.6 with opacity fade per design keyframe. */}
         {!isOpen && (
           <span
             aria-hidden="true"
-            style={{ background: 'var(--purple-500)' }}
-            className="absolute -inset-1.5 rounded-full opacity-25 animate-ping"
+            className="askbasiret-pulse"
           />
         )}
         {isOpen ? (
@@ -408,6 +403,24 @@ export default function AskBasiretFab() {
         ) : (
           <Sparkles className="w-6 h-6 relative" />
         )}
+        <style>{`
+          .askbasiret-pulse {
+            position: absolute;
+            inset: -6px;
+            border-radius: 50%;
+            background: #5433c2;
+            opacity: 0.22;
+            animation: askbasiret-pulse 2.4s ease-out infinite;
+            pointer-events: none;
+          }
+          @keyframes askbasiret-pulse {
+            0%   { transform: scale(0.92); opacity: 0.28; }
+            100% { transform: scale(1.45); opacity: 0; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .askbasiret-pulse { animation: none; opacity: 0.18; }
+          }
+        `}</style>
       </button>
     </>
   )
