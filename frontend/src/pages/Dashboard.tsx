@@ -107,6 +107,16 @@ function formatCount(n: number): string {
   return String(Math.round(n))
 }
 
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'
+function toArDigits(s: string | number): string {
+  return String(s).replace(/\d/g, (d) => AR_DIGITS[+d])
+}
+// Format a number string ("+8", "9.6%", "48.2K", "65") for the active locale.
+// Latin → Arabic-Indic mapping when isAr; English passes through unchanged.
+function fmt(value: string | number, isAr: boolean): string {
+  return isAr ? toArDigits(value) : String(value)
+}
+
 /* ------------------------------------------------------------------ */
 /* Header                                                             */
 /* ------------------------------------------------------------------ */
@@ -151,7 +161,7 @@ function Header({ range, setRange }: { range: '7d' | '30d' | '90d'; setRange: (r
 /* KPI strip                                                          */
 /* ------------------------------------------------------------------ */
 
-function GrowthRing({ score, change }: { score: number; change: number }) {
+function GrowthRing({ score, change, isAr }: { score: number; change: number; isAr: boolean }) {
   const r = 50
   const circ = 2 * Math.PI * r
   const offset = circ * (1 - Math.max(0, Math.min(100, score)) / 100)
@@ -173,12 +183,13 @@ function GrowthRing({ score, change }: { score: number; change: number }) {
         />
       </svg>
       <div className="hm-kpi-ring-c">
-        <span className="num">{Math.round(score)}</span>
-        <em>/100</em>
+        <span className="num">{fmt(Math.round(score), isAr)}</span>
+        <em>/{fmt(100, isAr)}</em>
       </div>
       {change !== 0 && (
         <div className="hm-kpi-ring-delta">
-          {change > 0 ? '↑' : '↓'} <span className="num">{change > 0 ? `+${change}` : change}</span>
+          {change > 0 ? '↑' : '↓'}{' '}
+          <span className="num">{fmt(change > 0 ? `+${change}` : String(change), isAr)}</span>
         </div>
       )}
     </div>
@@ -207,6 +218,7 @@ function KpiStrip({
   audienceFitValue,
   varietyValue,
   igPerfValue,
+  isAr,
 }: {
   overview: OverviewData | undefined
   sentiment: SentimentData | undefined
@@ -218,6 +230,7 @@ function KpiStrip({
   audienceFitValue: number
   varietyValue: number
   igPerfValue: number
+  isAr: boolean
 }) {
   const { t } = useTranslation()
 
@@ -254,29 +267,31 @@ function KpiStrip({
             {insightChange !== 0 && (
               <>
                 {insightChange > 0 ? '↑' : '↓'}{' '}
-                <span className="num">{insightChange > 0 ? `+${insightChange}` : insightChange}</span>{' '}
+                <span className="num">
+                  {fmt(insightChange > 0 ? `+${insightChange}` : String(insightChange), isAr)}
+                </span>{' '}
                 {t('home.kpi.pointsThisMonth', { value: '' })}
               </>
             )}
             {insightChange === 0 && t('home.growthHealthSubtitle')}
           </div>
         </div>
-        <GrowthRing score={score} change={insightChange} />
+        <GrowthRing score={score} change={insightChange} isAr={isAr} />
       </div>
 
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.totalEngagement')}</div>
-        <div className="hm-kpi-v num">{formatCount(totalEng)}</div>
+        <div className="hm-kpi-v num">{fmt(formatCount(totalEng), isAr)}</div>
         <Sparkline values={engBuckets} />
       </div>
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.reach')}</div>
-        <div className="hm-kpi-v num">{formatCount(totalReach)}</div>
+        <div className="hm-kpi-v num">{fmt(formatCount(totalReach), isAr)}</div>
         <Sparkline values={reachBuckets} />
       </div>
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.postsThisMonth')}</div>
-        <div className="hm-kpi-v num">{postsThisMonth}</div>
+        <div className="hm-kpi-v num">{fmt(postsThisMonth, isAr)}</div>
         <Sparkline values={postBuckets} />
       </div>
     </section>
@@ -319,7 +334,7 @@ function NBABanner({ insight, summary }: { insight: InsightAction | null; summar
 /* Today's actions                                                    */
 /* ------------------------------------------------------------------ */
 
-function ActionsList({ actions }: { actions: ActionVm[] }) {
+function ActionsList({ actions, isAr }: { actions: ActionVm[]; isAr: boolean }) {
   const { t } = useTranslation()
   const buckets = {
     urgent: actions.filter((a) => a.pri === 'urgent').length,
@@ -336,13 +351,13 @@ function ActionsList({ actions }: { actions: ActionVm[] }) {
         </div>
         <div className="hm-actions-stats">
           <span>
-            <b className="num">{buckets.urgent}</b> {t('home.actions.urgentCount')}
+            <b className="num">{fmt(buckets.urgent, isAr)}</b> {t('home.actions.urgentCount')}
           </span>
           <span>
-            <b className="num">{buckets.today}</b> {t('home.actions.todayCount')}
+            <b className="num">{fmt(buckets.today, isAr)}</b> {t('home.actions.todayCount')}
           </span>
           <span>
-            <b className="num">{buckets.week}</b> {t('home.actions.weekCount')}
+            <b className="num">{fmt(buckets.week, isAr)}</b> {t('home.actions.weekCount')}
           </span>
         </div>
       </div>
@@ -390,7 +405,7 @@ function ActionsList({ actions }: { actions: ActionVm[] }) {
                 </div>
                 <div className="hm-act-meta">
                   {a.impact && <span className="hm-act-impact" title={a.impact}>{a.impact}</span>}
-                  {a.time && <span className="hm-act-time num">⏱ {a.time}</span>}
+                  {a.time && <span className="hm-act-time num">⏱ {fmt(a.time, isAr)}</span>}
                 </div>
                 <button className="hm-act-cta">
                   {t('home.actions.openCta')}
@@ -525,6 +540,7 @@ function GrowthHealthBreakdown({
   variety,
   igPerformance,
   displayScore,
+  isAr,
 }: {
   consistency: number
   consistencyHelper: string
@@ -532,6 +548,7 @@ function GrowthHealthBreakdown({
   variety: number
   igPerformance: number
   displayScore: number
+  isAr: boolean
 }) {
   const { t } = useTranslation()
   const rows: Array<{ k: string; v: number; hint: string; tone: 'good' | 'warn' | 'bad' }> = [
@@ -569,8 +586,8 @@ function GrowthHealthBreakdown({
           <p>{t('home.growthHealthBreakdownSubtitle')}</p>
         </div>
         <div className="hm-score">
-          <span className="num">{displayScore}</span>
-          <em>/100</em>
+          <span className="num">{fmt(displayScore, isAr)}</span>
+          <em>/{fmt(100, isAr)}</em>
         </div>
       </div>
       <div className="hm-health">
@@ -578,7 +595,7 @@ function GrowthHealthBreakdown({
           <div key={i} className="hm-hr">
             <div className="hm-hr-top">
               <div className="hm-hr-k">{row.k}</div>
-              <div className={`hm-hr-v num ${row.tone}`}>{row.v}%</div>
+              <div className={`hm-hr-v num ${row.tone}`}>{fmt(row.v, isAr)}{isAr ? '٪' : '%'}</div>
             </div>
             <div className="hm-hr-track">
               <div className={`hm-hr-fill ${row.tone}`} style={{ width: `${row.v}%` }} />
@@ -607,6 +624,7 @@ export default function Dashboard() {
   const timelineDays = range === '7d' ? 7 : range === '90d' ? 90 : 30
   const timeline = useEngagementTimeline(timelineDays)
   const { t, i18n } = useTranslation()
+  const isAr = i18n.language?.startsWith('ar') ?? false
 
   // Derived values used both by the bottom panel AND by the KPI fallback score.
   const consistency = useMemo(() => {
@@ -700,6 +718,7 @@ export default function Dashboard() {
           audienceFitValue={audienceFit}
           varietyValue={variety}
           igPerfValue={igPerformance}
+          isAr={isAr}
         />
 
         <NBABanner
@@ -707,7 +726,7 @@ export default function Dashboard() {
           summary={insights.data?.summary ?? ''}
         />
 
-        <ActionsList actions={actions} />
+        <ActionsList actions={actions} isAr={isAr} />
 
         <div className="hm-grid">
           <WhatsWorking breakdown={breakdown.data} sentiment={sentiment.data} />
@@ -718,6 +737,7 @@ export default function Dashboard() {
             variety={variety}
             igPerformance={igPerformance}
             displayScore={displayScore}
+            isAr={isAr}
           />
         </div>
       </div>
@@ -789,10 +809,10 @@ const HM_STYLES = `
 .hm-actions-stats b { color:var(--ink-950); font-weight:700; font-size:14px; letter-spacing:-0.005em; }
 .hm-actions-empty { padding:36px; text-align:center; font-size:13px; color:var(--ink-500); border:1px dashed var(--line); border-radius:12px; }
 
-.hm-actions-list { display:flex; flex-direction:column; gap:8px; }
-/* Layout: pri pill | body (flex grows) | meta (truncated) | CTA. */
-.hm-act { display:grid; grid-template-columns:96px minmax(0,1fr) minmax(120px, 160px) auto; gap:14px; align-items:center; padding:14px 16px; border-radius:12px; border:1px solid var(--line); background:var(--surface); transition:all .15s; }
-@media (max-width:900px) { .hm-act { grid-template-columns:1fr; gap:8px; } .hm-act-meta { padding-inline-start:0; border-inline-start:none; padding-top:8px; border-top:1px solid var(--line); } }
+.hm-actions-list { display:flex; flex-direction:column; gap:6px; }
+/* Layout: pri pill | body | meta (left-aligned, divider) | CTA. Matches HomeApp.jsx. */
+.hm-act { display:grid; grid-template-columns:72px minmax(0,1fr) 130px 150px; gap:14px; align-items:center; padding:14px 16px; border-radius:12px; border:1px solid var(--line); background:var(--surface); transition:all .15s; min-height:64px; }
+@media (max-width:900px) { .hm-act { grid-template-columns:1fr; gap:8px; min-height:0; } .hm-act-meta { padding-inline-start:0; border-inline-start:none; padding-top:8px; border-top:1px solid var(--line); align-items:flex-start; } }
 .hm-act:hover { border-color:var(--purple-300); background:var(--ink-50); }
 .hm-act--urgent { border-color:oklch(0.88 0.06 30); background:oklch(0.99 0.01 30); }
 .hm-act--urgent:hover { border-color:oklch(0.75 0.13 30); background:oklch(0.97 0.03 30); }
@@ -806,13 +826,12 @@ const HM_STYLES = `
 .hm-act-src { font-weight:600; margin-inline-end:6px; display:inline-flex; align-items:center; gap:4px; }
 .hm-act-src svg { flex-shrink:0; }
 .hm-act-dot { color:var(--ink-300); margin-inline-end:6px; }
-.hm-act-meta { display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:4px; padding-inline-start:14px; border-inline-start:1px solid var(--line); min-width:0; }
+.hm-act-meta { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:4px; padding-inline-start:14px; border-inline-start:1px solid var(--line); min-width:0; }
 .hm-act-impact { font-size:11px; font-weight:600; color:oklch(0.5 0.15 155); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .hm-act-time { font-size:10.5px; color:var(--ink-500); font-weight:500; white-space:nowrap; }
-.hm-act-cta { padding:9px 14px; border-radius:9px; background:var(--ink-900); color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; }
-.hm-act-cta:hover { background:var(--purple-700); }
-.hm-act--urgent .hm-act-cta { background:oklch(0.55 0.17 30); }
-.hm-act--urgent .hm-act-cta:hover { background:oklch(0.48 0.18 30); }
+/* All CTAs are dark/black per the user's spec — no urgent-red override. */
+.hm-act-cta { padding:9px 14px; border-radius:9px; background:var(--ink-900); color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; width:100%; }
+.hm-act-cta:hover { background:var(--ink-800); }
 
 /* Bottom grid */
 .hm-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:flex-start; }

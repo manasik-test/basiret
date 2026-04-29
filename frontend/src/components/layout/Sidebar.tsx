@@ -143,22 +143,23 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col w-64 h-screen fixed start-0 top-0 glass-strong z-30">
-        {/* Logo */}
-        <div className="flex items-center gap-3 px-6 py-6">
-          <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-primary-foreground" />
+      {/* Desktop sidebar — 240px wide, tighter padding to match Sidebar.jsx */}
+      <aside className="hidden md:flex flex-col w-60 h-screen fixed start-0 top-0 glass-strong z-30 px-4 pt-5 pb-4">
+        {/* Logo — 36×36, matches design's .sb-brand */}
+        <div className="flex items-center gap-2.5 px-2 pb-5">
+          <div className="w-9 h-9 rounded-[10px] bg-primary flex items-center justify-center shrink-0">
+            <Sparkles className="w-[18px] h-[18px] text-primary-foreground" />
           </div>
-          <span className="text-xl font-bold text-primary tracking-tight">Basiret</span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-base font-bold text-primary tracking-tight">Basiret</span>
+            <span className="text-[10px] text-muted-foreground tracking-[0.08em] uppercase">Insight</span>
+          </div>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 px-3 space-y-1 mt-2">
+        {/* Nav — 2px gap, 10/12 item padding, 18px icons */}
+        <nav className="flex-1 flex flex-col gap-0.5 mt-1">
           {navItems.map(({ key, icon: Icon, href }) => {
             const active = currentPath === href
-            // Insert the Ask Basiret panel-trigger button right after `myGoals`
-            // so the visual order matches the legacy nav layout.
             const isAfterMyGoals = key === 'settings'
             return (
               <Fragment key={key}>
@@ -166,26 +167,26 @@ export default function Sidebar() {
                   <button
                     onClick={openAsk}
                     className={cn(
-                      'w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-colors text-start',
                       askIsOpen
-                        ? 'bg-primary text-primary-foreground shadow-md'
+                        ? 'bg-primary/10 text-primary font-semibold'
                         : 'text-foreground/70 hover:bg-muted hover:text-foreground',
                     )}
                   >
-                    <MessageCircleQuestion className="w-5 h-5 shrink-0" />
+                    <MessageCircleQuestion className="w-[18px] h-[18px] shrink-0" />
                     <span>{t('nav.askBasiret')}</span>
                   </button>
                 )}
                 <Link
                   to={href}
                   className={cn(
-                    'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                    'flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-colors',
                     active
-                      ? 'bg-primary text-primary-foreground shadow-md'
+                      ? 'bg-primary/10 text-primary font-semibold'
                       : 'text-foreground/70 hover:bg-muted hover:text-foreground',
                   )}
                 >
-                  <Icon className="w-5 h-5 shrink-0" />
+                  <Icon className="w-[18px] h-[18px] shrink-0" />
                   <span>{t(`nav.${key}`)}</span>
                 </Link>
               </Fragment>
@@ -197,37 +198,38 @@ export default function Sidebar() {
             <Link
               to="/admin"
               className={cn(
-                'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-colors',
                 currentPath === '/admin'
-                  ? 'bg-primary text-primary-foreground shadow-md'
+                  ? 'bg-primary/10 text-primary font-semibold'
                   : 'text-foreground/70 hover:bg-muted hover:text-foreground',
               )}
             >
-              <Shield className="w-5 h-5 shrink-0" />
+              <Shield className="w-[18px] h-[18px] shrink-0" />
               <span>{t('nav.admin')}</span>
             </Link>
           )}
         </nav>
 
-        {/* User info + Logout */}
-        <div className="px-4 pb-3 space-y-2">
-          {user && (
-            <div className="px-3 py-2 text-xs text-muted-foreground truncate">
-              {user.full_name}
-            </div>
-          )}
-          <button
-            onClick={() => { void logout() }}
-            className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-sm font-medium text-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-            {t('nav.logout')}
-          </button>
-        </div>
-
-        {/* Upgrade CTA */}
-        <div className="px-4 pb-6">
+        {/* Foot — Upgrade CTA + user/logout, separated by border per design */}
+        <div className="flex flex-col gap-3 pt-3.5 border-t border-border">
           <UpgradeButton />
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+              {user?.full_name?.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-foreground leading-tight truncate">
+                {user?.full_name}
+              </div>
+              <button
+                onClick={() => { void logout() }}
+                className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                <LogOut className="w-3 h-3" />
+                {t('nav.logout')}
+              </button>
+            </div>
+          </div>
         </div>
       </aside>
 
