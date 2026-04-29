@@ -1,75 +1,275 @@
-/* Basiret redesign — design-system tokens
- * Imported once at app boot (main.tsx).
- * Class-prefixed selectors (.hm-, .mp-, .aud-, .snt-, .cmp-, .tra-) live
- * in per-page <style> blocks alongside their JSX.
+/* Basiret Design System v1.0 — canonical token sheet.
+ *
+ * Mirrors `Basiretdashoards/colors_and_type.css` from the design handoff:
+ * brand purple anchored on #664FA1, pink anchored on #BF499B, sky on #A5DDEC.
+ * Imported once at app boot (main.tsx). Page-level <style> blocks reference
+ * these tokens by var() name so swapping a token value here cascades.
  */
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  /* Purple system */
-  --purple-50:  #f7f5ff;
-  --purple-100: #ede8ff;
-  --purple-200: #dcd2ff;
-  --purple-300: #c0b0ff;
-  --purple-400: #9b82f5;
-  --purple-500: #7c5cef;
-  --purple-600: #6341e0;
-  --purple-700: #5433c2;
-  --purple-800: #43299b;
-  --purple-900: #2e1b6b;
+  /* ── Brand purple — primary (anchored on #664FA1) ───────────── */
+  --purple-50:  #f4f1fa;
+  --purple-100: #e8e1f4;
+  --purple-200: #d2c5e9;
+  --purple-300: #b09ad6;
+  --purple-400: #8c70bf;
+  --purple-500: #7559b0;
+  --purple-600: #664FA1;
+  --purple-700: #543f88;
+  --purple-800: #41306b;
+  --purple-900: #2c2049;
 
-  /* Warm neutrals */
+  /* ── Brand pink — secondary (anchored on #BF499B) ──────────── */
+  --pink-50:    #fbf2f8;
+  --pink-100:   #f6e2ee;
+  --pink-200:   #ecc4dd;
+  --pink-300:   #dd9bc4;
+  --pink-400:   #cc6cab;
+  --pink-500:   #BF499B;
+  --pink-600:   #a23a82;
+  --pink-700:   #832e69;
+
+  /* ── Brand sky — tertiary (anchored on #A5DDEC) ────────────── */
+  --sky-50:     #f1fafd;
+  --sky-100:    #dff2f8;
+  --sky-200:    #c6e8f2;
+  --sky-300:    #A5DDEC;
+  --sky-400:    #7cc6db;
+  --sky-500:    #56adc6;
+  --sky-600:    #3e8ca3;
+
+  /* Brand gradient — used on the logo lockup and hero accents. */
+  --brand-gradient: linear-gradient(135deg, #664FA1 0%, #BF499B 100%);
+
+  /* Off-white — alternative to `--surface` when warmer feel is needed. */
+  --off-white: #faf8f5;
+
+  /* ── Ink / neutrals — slightly cool ─────────────────────────── */
   --ink-950: #12101a;
-  --ink-900: #1c1a28;
+  --ink-900: #1c1a28;   /* primary text */
   --ink-800: #2a2839;
   --ink-700: #3d3b50;
-  --ink-600: #55536b;
-  --ink-500: #74718a;
-  --ink-400: #9996ad;
+  --ink-600: #55536b;   /* secondary text */
+  --ink-500: #74718a;   /* tertiary text */
+  --ink-400: #9996ad;   /* muted */
   --ink-300: #bfbdcc;
   --ink-200: #e3e1ec;
   --ink-150: #ecebf3;
   --ink-100: #f3f2f8;
   --ink-50:  #faf9fc;
 
-  /* Semantic */
-  --surface: #ffffff;
-  --canvas:  #f5f3f9;
-  --line:    #ebe9f2;
+  /* ── Semantic surfaces ──────────────────────────────────────── */
+  --surface:     #ffffff;
+  --canvas:      #f5f3f9;
+  --line:        #ebe9f2;
   --line-strong: #d8d5e4;
 
-  /* Content-type hues */
+  /* ── Content-type accents (share chroma in oklch) ───────────── */
   --video:    oklch(0.58 0.14 25);
   --image:    oklch(0.58 0.14 180);
   --carousel: oklch(0.58 0.14 295);
 
-  --radius-sm: 8px;
-  --radius:    12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  --video-tone:    rgba(234, 105, 90, 0.10);
+  --image-tone:    rgba(70, 168, 158, 0.10);
+  --carousel-tone: rgba(124, 92, 239, 0.10);
 
+  /* ── Status (use sparingly) ─────────────────────────────────── */
+  --success: #2f9e6b;
+  --warning: #d99020;
+  --danger:  #d04a4a;
+
+  /* ── Radii ──────────────────────────────────────────────────── */
+  --radius-sm:   8px;
+  --radius:      12px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-pill: 999px;
+
+  /* ── Shadows — soft, ink-tinted ─────────────────────────────── */
   --shadow-sm: 0 1px 2px rgba(30, 20, 70, 0.04);
   --shadow:    0 4px 14px -4px rgba(30, 20, 70, 0.08), 0 1px 2px rgba(30, 20, 70, 0.04);
   --shadow-lg: 0 18px 40px -18px rgba(30, 20, 70, 0.18);
+
+  /* ── Spacing scale (4px base) ───────────────────────────────── */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-8:  32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* ── Type families ──────────────────────────────────────────── */
+  --font-ar:  'IBM Plex Sans Arabic', 'Inter', system-ui, sans-serif;
+  --font-num: 'Inter', system-ui, sans-serif;
 }
 
-/* Tabular numbers for stat displays */
-.num {
-  font-family: 'Inter', system-ui, sans-serif;
+/* ── Semantic type — opt-in classes on individual elements ──────
+ * Pages can mix these with Tailwind without conflict. The redesigned
+ * dashboards still use inline font shorthand inside their scoped <style>
+ * blocks; these classes are available for future adopters. */
+.bsr-display {
+  font-size: 40px; font-weight: 700; line-height: 1.15;
+  letter-spacing: -0.02em; color: var(--ink-900);
+}
+.bsr-h1 {
+  font-size: 28px; font-weight: 700; line-height: 1.25;
+  letter-spacing: -0.015em; color: var(--ink-900);
+}
+.bsr-h2 {
+  font-size: 22px; font-weight: 600; line-height: 1.3;
+  letter-spacing: -0.01em; color: var(--ink-900);
+}
+.bsr-h3 {
+  font-size: 17px; font-weight: 600; line-height: 1.35;
+  letter-spacing: -0.005em; color: var(--ink-900);
+}
+.bsr-body {
+  font-size: 14px; font-weight: 400; line-height: 1.55;
+  color: var(--ink-700);
+}
+.bsr-body-sm {
+  font-size: 13px; font-weight: 400; line-height: 1.5;
+  color: var(--ink-700);
+}
+.bsr-caption {
+  font-size: 12px; font-weight: 500; line-height: 1.4;
+  color: var(--ink-500);
+}
+.bsr-eyebrow {
+  font-size: 11px; font-weight: 600; line-height: 1.3;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-400); font-family: var(--font-num);
+}
+.bsr-num {
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
 }
 
-/* Utility container used by every redesigned page so we don't fight the
- * existing AppLayout padding. AppLayout wraps content in `px-6 pb-6`; pages
- * apply this class to opt into the redesign canvas color and reset the
- * default content area. */
+/* ── Numerals — kept for backwards compat with existing pages.
+ * Aliases the canonical .bsr-num so older `<span class="num">` markup
+ * inside per-page <style> blocks keeps tabular numerals. */
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Brand component primitives ─────────────────────────────────
+ * These were spec'd in the design system's preview/* files. They give
+ * any new page a consistent button/pill/avatar baseline without forcing
+ * us to rewrite the existing redesigned dashboards. */
+
+.bsr-btn-primary {
+  background: var(--purple-600); color: #fff;
+  padding: 10px 18px; border-radius: var(--radius-sm);
+  font: 600 13px/1 var(--font-ar); cursor: pointer;
+  border: none; transition: background .12s;
+}
+.bsr-btn-primary:hover { background: var(--purple-700); }
+
+.bsr-btn-secondary {
+  background: var(--surface); color: var(--ink-900);
+  border: 1px solid var(--line-strong);
+  padding: 9px 17px; border-radius: var(--radius-sm);
+  font: 600 13px/1 var(--font-ar); cursor: pointer;
+  transition: background .12s;
+}
+.bsr-btn-secondary:hover { background: var(--ink-100); }
+
+.bsr-btn-ghost {
+  background: transparent; color: var(--ink-700);
+  padding: 8px 14px; border-radius: var(--radius-sm);
+  font: 500 13px/1 var(--font-ar); cursor: pointer;
+  border: none; transition: background .12s, color .12s;
+}
+.bsr-btn-ghost:hover { background: var(--ink-100); color: var(--ink-900); }
+
+.bsr-btn-dark {
+  background: var(--ink-900); color: #fff;
+  padding: 10px 18px; border-radius: var(--radius-sm);
+  font: 600 13px/1 var(--font-ar); cursor: pointer;
+  border: none; display: inline-flex; align-items: center; gap: 8px;
+  transition: background .12s;
+}
+.bsr-btn-dark:hover { background: var(--ink-800); }
+.bsr-btn-dark svg { color: var(--purple-300); }
+
+.bsr-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--radius-pill);
+  font: 600 12px/1 var(--font-ar);
+}
+.bsr-pill.sm { padding: 3px 8px; font-size: 11px; }
+
+.bsr-pill-video    { background: var(--video-tone);    color: var(--video); }
+.bsr-pill-image    { background: var(--image-tone);    color: var(--image); }
+.bsr-pill-carousel { background: var(--carousel-tone); color: var(--carousel); }
+
+.bsr-badge-suggest { background: var(--purple-100); color: var(--purple-700);
+                     padding: 3px 9px; border-radius: var(--radius-pill);
+                     font: 600 11px/1 var(--font-ar); }
+.bsr-badge-pro     { background: var(--ink-900); color: #fff;
+                     padding: 3px 9px; border-radius: var(--radius-pill);
+                     font: 600 11px/1 var(--font-ar); }
+.bsr-badge-new     { background: rgba(47,158,107,.12); color: var(--success);
+                     padding: 3px 9px; border-radius: var(--radius-pill);
+                     font: 600 11px/1 var(--font-ar); }
+
+.bsr-input {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font: 400 14px/1.4 var(--font-ar); color: var(--ink-900);
+  outline: none; transition: border-color .12s, box-shadow .12s;
+}
+.bsr-input:focus {
+  border-color: var(--purple-500);
+  box-shadow: 0 0 0 3px var(--purple-100);
+}
+.bsr-input::placeholder { color: var(--ink-400); }
+
+.bsr-search {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px; background: var(--ink-100);
+  border-radius: var(--radius-sm);
+}
+.bsr-search svg { color: var(--ink-500); flex-shrink: 0; }
+.bsr-search input {
+  flex: 1; border: none; background: transparent;
+  padding: 11px 0;
+  font: 400 14px var(--font-ar); color: var(--ink-900);
+  outline: none;
+}
+
+.bsr-avatar {
+  border-radius: 50%; display: grid; place-items: center;
+  background: var(--purple-100); color: var(--purple-700);
+  font: 700 12px/1 var(--font-num);
+}
+.bsr-avatar-32 { width: 32px; height: 32px; font-size: 12px; }
+.bsr-avatar-40 { width: 40px; height: 40px; font-size: 14px; }
+.bsr-avatar-56 { width: 56px; height: 56px; font-size: 18px; }
+
+/* ── Focus ring — design-system spec. ───────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--purple-500);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── App-specific layout utility ────────────────────────────────
+ * Wraps each redesigned page so it can opt into the canvas color and
+ * cancel the AppLayout's default `px-6 pb-6` padding. */
 .rd-canvas {
   background: var(--canvas);
   margin: 0 -24px;
   padding: 24px 32px 48px;
   min-height: calc(100vh - 56px);
   color: var(--ink-900);
-  font-family: 'IBM Plex Sans Arabic', 'Inter', system-ui, sans-serif;
+  font-family: var(--font-ar);
 }
 
 @media (min-width: 768px) {
@@ -79,8 +279,6 @@
   }
 }
 
-/* Generic redesign typography reset within rd-canvas — keeps things
- * predictable when a page mixes Tailwind and the redesign CSS. */
 .rd-canvas h1,
 .rd-canvas h2,
 .rd-canvas h3,

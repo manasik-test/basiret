@@ -215,7 +215,7 @@ const PHASE_META: Record<Phase, { fg: string; bg: string; dot: string }> = {
 }
 
 const CAT_META: Record<Category, { color: string; tint: string }> = {
-  topic: { color: '#7c5cef', tint: '#ede8ff' },
+  topic: { color: '#664FA1', tint: '#e8e1f4' },
   cultural: { color: '#d4881e', tint: '#fbf1e0' },
   macro: { color: '#0e7c8a', tint: '#dff0f2' },
   format: { color: '#c44a8a', tint: '#fae3ee' },
