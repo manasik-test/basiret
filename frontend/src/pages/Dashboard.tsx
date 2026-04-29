@@ -102,6 +102,22 @@ function maxOr1(arr: number[]): number {
   return Math.max(1, ...arr)
 }
 
+// Compute the period-over-period delta from a timeline by comparing the first
+// half of the window against the second half. Returns the percentage change as
+// a signed number (e.g. 17 means +17%). Returns null when we don't have enough
+// data or the prior half is zero (avoids divide-by-zero / misleading +∞%).
+function periodDelta(
+  entries: EngagementTimelineEntry[] | undefined,
+  field: 'engagement' | 'reach' | 'posts',
+): number | null {
+  if (!entries || entries.length < 4) return null
+  const half = Math.floor(entries.length / 2)
+  const prev = entries.slice(0, half).reduce((s, e) => s + e[field], 0)
+  const curr = entries.slice(half).reduce((s, e) => s + e[field], 0)
+  if (prev === 0) return null
+  return Math.round(((curr - prev) / prev) * 100)
+}
+
 function formatCount(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K'
   return String(Math.round(n))
@@ -196,6 +212,21 @@ function GrowthRing({ score, change, isAr }: { score: number; change: number; is
   )
 }
 
+// Small "↑ +12%" / "↓ -3%" delta line beneath a KPI value. Renders nothing when
+// no data is available — matches the design's pattern of always showing an
+// arrow + signed number when data exists.
+function DeltaPill({ value, suffix, isAr }: { value: number | null; suffix: string; isAr: boolean }) {
+  if (value === null) return null
+  const arrow = value > 0 ? '↑' : value < 0 ? '↓' : '→'
+  const signed = value > 0 ? `+${value}` : String(value)
+  const pctSuffix = suffix === '%' ? (isAr ? '٪' : '%') : ''
+  return (
+    <div className={`hm-kpi-d ${value >= 0 ? 'up' : 'down'}`}>
+      {arrow} <span className="num">{fmt(signed, isAr)}{pctSuffix}</span>
+    </div>
+  )
+}
+
 function Sparkline({ values }: { values: number[] }) {
   const max = maxOr1(values)
   return (
@@ -257,6 +288,10 @@ function KpiStrip({
   const reachBuckets = sparkFromTimeline(timeline, 'reach')
   const postBuckets = sparkFromTimeline(timeline, 'posts')
 
+  const engDelta = periodDelta(timeline, 'engagement')
+  const reachDelta = periodDelta(timeline, 'reach')
+  const postDelta = periodDelta(timeline, 'posts')
+
   return (
     <section className="hm-kpi">
       {/* Hero — growth health ring */}
@@ -282,16 +317,19 @@ function KpiStrip({
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.totalEngagement')}</div>
         <div className="hm-kpi-v num">{fmt(formatCount(totalEng), isAr)}</div>
+        <DeltaPill value={engDelta} suffix="%" isAr={isAr} />
         <Sparkline values={engBuckets} />
       </div>
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.reach')}</div>
         <div className="hm-kpi-v num">{fmt(formatCount(totalReach), isAr)}</div>
+        <DeltaPill value={reachDelta} suffix="%" isAr={isAr} />
         <Sparkline values={reachBuckets} />
       </div>
       <div className="hm-kpi-card">
         <div className="hm-kpi-k">{t('home.kpi.postsThisMonth')}</div>
         <div className="hm-kpi-v num">{fmt(postsThisMonth, isAr)}</div>
+        <DeltaPill value={postDelta} suffix="" isAr={isAr} />
         <Sparkline values={postBuckets} />
       </div>
     </section>
@@ -780,6 +818,7 @@ const HM_STYLES = `
 .hm-kpi-v { font-size:28px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
 .hm-kpi-d { font-size:12px; font-weight:600; color:var(--ink-600); }
 .hm-kpi-d.up { color:oklch(0.5 0.15 155); }
+.hm-kpi-d.down { color:oklch(0.6 0.2 30); }
 .hm-kpi-spark { display:flex; gap:3px; align-items:flex-end; height:34px; margin-top:auto; }
 .hm-kpi-spark > div { flex:1; background:var(--purple-200); border-radius:2px 2px 0 0; min-height:3px; }
 .hm-kpi-ring { position:relative; width:92px; height:92px; flex-shrink:0; }
@@ -829,9 +868,11 @@ const HM_STYLES = `
 .hm-act-meta { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:4px; padding-inline-start:14px; border-inline-start:1px solid var(--line); min-width:0; }
 .hm-act-impact { font-size:11px; font-weight:600; color:oklch(0.5 0.15 155); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .hm-act-time { font-size:10.5px; color:var(--ink-500); font-weight:500; white-space:nowrap; }
-/* All CTAs are dark/black per the user's spec — no urgent-red override. */
+/* Non-urgent CTAs are dark/black; urgent CTAs are purple (brand) per design v2. */
 .hm-act-cta { padding:9px 14px; border-radius:9px; background:var(--ink-900); color:#fff; font-size:11.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap; width:100%; }
 .hm-act-cta:hover { background:var(--ink-800); }
+.hm-act--urgent .hm-act-cta { background:var(--purple-600); }
+.hm-act--urgent .hm-act-cta:hover { background:var(--purple-700); }
 
 /* Bottom grid */
 .hm-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:flex-start; }
