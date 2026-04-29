@@ -122,10 +122,12 @@ export const I = {
 
 export type ContentTypeKey = 'video' | 'image' | 'carousel'
 
+// References the canonical Design-System tokens so any color shift in
+// `redesign.css` cascades automatically.
 export const TYPE_META: Record<ContentTypeKey, { color: string; tone: string }> = {
-  video: { color: 'var(--video)', tone: 'rgba(234, 105, 90, 0.10)' },
-  image: { color: 'var(--image)', tone: 'rgba(70, 168, 158, 0.10)' },
-  carousel: { color: 'var(--carousel)', tone: 'rgba(124, 92, 239, 0.10)' },
+  video: { color: 'var(--video)', tone: 'var(--video-tone)' },
+  image: { color: 'var(--image)', tone: 'var(--image-tone)' },
+  carousel: { color: 'var(--carousel)', tone: 'var(--carousel-tone)' },
 }
 
 // Normalise backend strings ("CAROUSEL_ALBUM", "VIDEO", "REELS", "IMAGE")
@@ -183,26 +185,15 @@ interface TypePillProps {
   size?: 'sm' | 'md'
 }
 
+// Wraps the `.bsr-pill` + `.bsr-pill-${type}` Design-System classes so every
+// content-type pill across the dashboard gets identical styling. The size
+// variant maps to `.sm` per the design's preview spec.
 export const TypePill = ({ type, label, size = 'md' }: TypePillProps) => {
-  const m = TYPE_META[type]
-  const pad = size === 'sm' ? '3px 8px' : '4px 10px'
-  const fs = size === 'sm' ? 11 : 12
+  const sizeClass = size === 'sm' ? 'sm' : ''
+  const iconSize = size === 'sm' ? 11 : 13
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: pad,
-        borderRadius: 999,
-        background: m.tone,
-        color: m.color,
-        fontSize: fs,
-        fontWeight: 600,
-        letterSpacing: '-0.005em',
-      }}
-    >
-      <TypeIcon type={type} size={size === 'sm' ? 11 : 13} />
+    <span className={`bsr-pill bsr-pill-${type} ${sizeClass}`.trim()}>
+      <TypeIcon type={type} size={iconSize} />
       {label}
     </span>
   )
