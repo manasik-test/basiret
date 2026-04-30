@@ -13,7 +13,6 @@ import {
   Swords,
   Smile,
   TrendingUp,
-  Target,
   MessageCircleQuestion,
   Settings,
   Sparkles,
@@ -33,7 +32,6 @@ const navItems = [
   { key: 'competitors', icon: Swords, href: '/competitors', primary: false },
   { key: 'sentiment', icon: Smile, href: '/sentiment', primary: false },
   { key: 'trends', icon: TrendingUp, href: '/trends', primary: false },
-  { key: 'myGoals', icon: Target, href: '/my-goals', primary: false },
   { key: 'settings', icon: Settings, href: '/settings', primary: true },
 ] as const
 

@@ -18,7 +18,6 @@ import ResetPassword from './pages/ResetPassword'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
 import AskBasiretRedirect from './pages/AskBasiretRedirect'
-import MyGoals from './pages/MyGoals'
 import { useLanguageCacheInvalidation } from './hooks/useAnalytics'
 
 // Marketing routes are lazy-loaded — they ship Framer Motion + WebGL on top
@@ -161,16 +160,6 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AppLayout><Trends /></AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/my-goals"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <MyGoals />
-                </AppLayout>
               </ProtectedRoute>
             }
           />
