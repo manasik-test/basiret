@@ -129,18 +129,18 @@ function ContentPlanContent() {
 
   if (isLoading) {
     return (
-      <div className="cp">
+      <div className="rd-canvas"><div className="cp">
         <div className="cp-loading">{t('contentPlanPage.loading')}</div>
         <style>{CP_STYLES}</style>
-      </div>
+      </div></div>
     )
   }
   if (!sel || days.length === 0) {
     return (
-      <div className="cp">
+      <div className="rd-canvas"><div className="cp">
         <div className="cp-loading">{t('contentPlanPage.empty')}</div>
         <style>{CP_STYLES}</style>
-      </div>
+      </div></div>
     )
   }
 
@@ -160,7 +160,7 @@ function ContentPlanContent() {
   const selType = normalizeContentType(sel.content_type)
 
   return (
-    <div className="cp">
+    <div className="rd-canvas"><div className="cp">
       {/* Page header */}
       <header className="cp-head">
         <div>
@@ -404,7 +404,7 @@ function ContentPlanContent() {
       </div>
 
       <style>{CP_STYLES}</style>
-    </div>
+    </div></div>
   )
 }
 
