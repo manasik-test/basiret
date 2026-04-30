@@ -75,6 +75,26 @@ const FEED: FeedItem[] = [
     mood: 'neg',
     tagKey: 'tagWarning',
   },
+  {
+    who: '@noor_brand',
+    whenKey: 'ago4d',
+    kindKey: 'kindReel',
+    titleKey: 'feed.post6Title',
+    engKey: 'feed.post6Eng',
+    whyKey: 'feed.post6Why',
+    mood: 'pos',
+    tagKey: 'tagStyle',
+  },
+  {
+    who: '@nour_design',
+    whenKey: 'ago5d',
+    kindKey: 'kindCarousel',
+    titleKey: 'feed.post7Title',
+    engKey: 'feed.post7Eng',
+    whyKey: 'feed.post7Why',
+    mood: 'pos',
+    tagKey: 'tagOpportunity',
+  },
 ]
 
 interface HashtagRow {

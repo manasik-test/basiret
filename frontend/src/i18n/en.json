@@ -898,6 +898,8 @@
     "ago1d": "1 day ago",
     "ago2d": "2 days ago",
     "ago3d": "3 days ago",
+    "ago4d": "4 days ago",
+    "ago5d": "5 days ago",
     "feed": {
       "post1Title": "Before/after · new project",
       "post1Eng": "3× their average",
@@ -913,7 +915,13 @@
       "post4Why": "Simple, repeatable format",
       "post5Title": "30% off promo announcement",
       "post5Eng": "Negative comments",
-      "post5Why": "Audience pushed back on the pricing tone"
+      "post5Why": "Audience pushed back on the pricing tone",
+      "post6Title": "Daily quote reels",
+      "post6Eng": "+22% views",
+      "post6Why": "A recurring format that works for them — try your version",
+      "post7Title": "30-day content challenge",
+      "post7Eng": "High engagement",
+      "post7Why": "Long-running format builds audience loyalty"
     },
     "hashtags": {
       "h1": "#beforeafter",
