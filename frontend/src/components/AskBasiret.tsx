@@ -365,7 +365,7 @@ export default function AskBasiretFab() {
         aria-hidden={!isOpen}
         className={cn(
           'fixed z-50 bottom-24 end-7 w-[calc(100vw-3rem)] max-w-[420px] h-[580px] max-h-[calc(100vh-8rem)]',
-          'glass-strong rounded-2xl shadow-2xl border border-white/40 overflow-hidden',
+          'bg-white rounded-2xl shadow-2xl border border-border overflow-hidden',
           'transition-all duration-200 ease-out origin-bottom-end',
           isOpen
             ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
