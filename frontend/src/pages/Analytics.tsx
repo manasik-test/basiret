@@ -21,6 +21,41 @@ function splitCaption(raw: string): { body: string; tags: string } {
   return { body: raw.slice(0, idx).trim(), tags: raw.slice(idx).trim() }
 }
 
+// Headline preview: strip hashtags + emoji, take the first ~6 words. Used
+// as the winner card title so a long caption doesn't push the body block
+// off the visible bubble.
+function firstFewWords(raw: string, words = 6): string {
+  if (!raw) return ''
+  const noTags = raw.split('#')[0]
+  const cleaned = noTags
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return ''
+  const parts = cleaned.split(' ').filter(Boolean)
+  if (parts.length <= words) return parts.join(' ')
+  return parts.slice(0, words).join(' ') + '…'
+}
+
+// Description preview: cut at the first sentence terminator (Arabic or
+// Latin) when one falls within ~140 chars; otherwise truncate at a word
+// boundary. Keeps the bubble compact while preserving meaning.
+function shortDescription(raw: string, max = 140): string {
+  if (!raw) return ''
+  const cleaned = raw.replace(/\s+/g, ' ').trim()
+  if (cleaned.length <= max) return cleaned
+  const slice = cleaned.slice(0, max)
+  const sentenceEnd = Math.max(
+    slice.lastIndexOf('.'),
+    slice.lastIndexOf('۔'),
+    slice.lastIndexOf('!'),
+    slice.lastIndexOf('؟'),
+  )
+  if (sentenceEnd > max * 0.5) return cleaned.slice(0, sentenceEnd + 1)
+  const lastSpace = slice.lastIndexOf(' ')
+  return (lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice) + '…'
+}
+
 const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 function fmtNum(value: string | number, isAr: boolean): string {
   const s = String(value)
@@ -206,7 +241,9 @@ function WinnerBubble({ isAr }: { isAr: boolean }) {
   }
 
   const best = data?.best_post
-  const why = (data?.why_it_worked || '').trim() || t('myPostsPage.whyFallback')
+  const whyRaw = (data?.why_it_worked || '').trim() || t('myPostsPage.whyFallback')
+  const why = shortDescription(whyRaw, 140)
+  const headline = best ? firstFewWords(best.caption || '', 6) : ''
 
   function onGenerateCaption(lang: 'en' | 'ar' = captionLang) {
     if (!best) return
@@ -245,7 +282,7 @@ function WinnerBubble({ isAr }: { isAr: boolean }) {
   return (
     <article className="mp-bubble">
       <div className="mp-k">{t('myPostsPage.eyebrowWinner')}</div>
-      <h3 dir="auto">{best.caption || t('myPostsPage.winnerHeadline')}</h3>
+      <h3 dir="auto">{headline || t('myPostsPage.winnerHeadline')}</h3>
       <p dir="auto">{why}</p>
 
       <div className="mp-stats-row">
