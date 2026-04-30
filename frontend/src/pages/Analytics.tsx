@@ -483,21 +483,19 @@ function TopPostsRanking({ isAr, range }: { isAr: boolean; range: '7d' | '30d' |
               <div className="mp-rank-meta">
                 <div className="mp-rank-title" dir="auto">
                   <TypeIcon type={p.type} size={11} />
-                  <span>{truncateCaption(p.caption || t('myPostsPage.bestEmpty'), 36)}</span>
+                  <span>{truncateCaption(p.caption || t('myPostsPage.bestEmpty'), 48)}</span>
                 </div>
                 <div className="mp-rank-date">{formatPostDate(p.posted_at, isAr)}</div>
               </div>
-              <div className="mp-rank-bar-wrap">
-                <div className="mp-rank-pct num">{fmtNum(p.pct, isAr)}{pctSuffix(isAr)}</div>
-                <div className="mp-rank-bar" dir="ltr">
-                  <div
-                    className="mp-rank-bar-fill"
-                    style={{
-                      width: `${p.pct}%`,
-                      background: `linear-gradient(to right, ${colorFor(p.type)}, color-mix(in oklch, ${colorFor(p.type)} 70%, white))`,
-                    }}
-                  />
-                </div>
+              <div className="mp-rank-pct num">{fmtNum(p.pct, isAr)}{pctSuffix(isAr)}</div>
+              <div className="mp-rank-bar" dir="ltr">
+                <div
+                  className="mp-rank-bar-fill"
+                  style={{
+                    width: `${p.pct}%`,
+                    background: `linear-gradient(to right, ${colorFor(p.type)}, color-mix(in oklch, ${colorFor(p.type)} 70%, white))`,
+                  }}
+                />
               </div>
             </li>
           ))}
@@ -621,8 +619,11 @@ const MP_STYLES = `
 .mp-range button { padding:7px 14px; font-size:12.5px; font-weight:500; border-radius:7px; color:var(--ink-600); }
 .mp-range button.is-on { background:var(--surface); color:var(--ink-900); box-shadow:var(--shadow-sm); font-weight:600; }
 
-/* 2-column grid */
-.mp-grid-2 { display:grid; grid-template-columns:1.4fr 1fr; gap:18px; align-items:flex-start; }
+/* 2-column grid — rankings/distribution column gets slightly more horizontal
+ * space than the insight stack so 5 ranking rows + a stacked distribution bar
+ * have room to breathe. Equal-ish (1 : 1.05) so the insight cards don't feel
+ * crowded either. */
+.mp-grid-2 { display:grid; grid-template-columns:1fr 1.05fr; gap:18px; align-items:flex-start; }
 @media (max-width:1024px) { .mp-grid-2 { grid-template-columns:1fr; } }
 .mp-col-left, .mp-col-right { display:flex; flex-direction:column; gap:18px; }
 
@@ -691,18 +692,30 @@ const MP_STYLES = `
 .mp-rank-filter button { padding:5px 10px; font-size:11.5px; font-weight:500; border-radius:6px; color:var(--ink-600); }
 .mp-rank-filter button.is-on { background:var(--surface); color:var(--ink-900); font-weight:600; box-shadow:var(--shadow-sm); }
 
-.mp-rank-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
-.mp-rank-row { display:grid; grid-template-columns:20px 36px 1fr auto; align-items:center; gap:10px; }
-.mp-rank-num { font-size:13px; font-weight:700; color:var(--ink-500); text-align:center; }
-.mp-rank-thumb { width:36px; height:36px; border-radius:8px; background-size:cover; background-position:center; flex-shrink:0; }
+.mp-rank-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:14px; }
+/* 2-line layout: row 1 = rank, thumb, title/date, percentage. Row 2 = the bar
+ * spans the full width. The bar's width auto-fills the card so the visual
+ * weight matches the design. */
+.mp-rank-row {
+  display:grid;
+  grid-template-columns:24px 44px minmax(0,1fr) auto;
+  grid-template-rows:auto auto;
+  column-gap:12px;
+  row-gap:6px;
+  align-items:center;
+}
+.mp-rank-num { font-size:14px; font-weight:700; color:var(--ink-400); text-align:center; }
+.mp-rank-thumb { width:44px; height:44px; border-radius:10px; background-size:cover; background-position:center; flex-shrink:0; }
 .mp-rank-meta { min-width:0; }
-.mp-rank-title { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--ink-900); line-height:1.35; overflow:hidden; }
+.mp-rank-title { display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:600; color:var(--ink-900); line-height:1.35; overflow:hidden; }
 .mp-rank-title svg { color:var(--ink-500); flex-shrink:0; }
 .mp-rank-title span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.mp-rank-date { font-size:11px; color:var(--ink-500); margin-top:2px; }
-.mp-rank-bar-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:4px; min-width:80px; }
-.mp-rank-pct { font-size:12.5px; font-weight:700; color:var(--ink-900); letter-spacing:-0.01em; }
-.mp-rank-bar { width:80px; height:6px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
+.mp-rank-date { font-size:11.5px; color:var(--ink-500); margin-top:2px; }
+.mp-rank-pct { font-size:14px; font-weight:700; color:var(--ink-900); letter-spacing:-0.01em; }
+/* Bar lives on row 2, spans columns 2 → end so it starts under the thumbnail
+ * and runs the full width of the rest of the row. Gives the bar the visual
+ * presence the design calls for. */
+.mp-rank-bar { grid-column:2 / -1; height:8px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
 .mp-rank-bar-fill { height:100%; border-radius:99px; transition:width 0.4s cubic-bezier(.2,.8,.2,1); }
 
 /* Card E — Distribution */
