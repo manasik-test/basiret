@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { Icon, I } from '../components/redesign/icons'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
-import { useCompetitorLeaderboard, useCompetitorTopPosts } from '../hooks/useAnalytics'
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                          */
@@ -127,22 +126,8 @@ const C_TAG = {
 function CompetitorsContent() {
   const { t } = useTranslation()
   const [range, setRange] = useState<'today' | '7d' | '30d'>('7d')
-  const leaderboard = useCompetitorLeaderboard()
-  const topPosts = useCompetitorTopPosts()
 
   const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-  const me = {
-    handle: '@you',
-    name: t('competitorsPage.youLabel'),
-    avatar: 'Y',
-    followers: '12.4K',
-    growth: '+2.1%',
-    engagement: '9.6%',
-    cadence: '4/week',
-    isMe: true,
-  }
-  const competitors = leaderboard.data?.competitors ?? []
-  const topPostsList = topPosts.data?.posts ?? []
 
   return (
     <div className="rd-canvas">
@@ -193,86 +178,6 @@ function CompetitorsContent() {
             </div>
           </div>
         </section>
-
-        {/* Leaderboard — you vs competitors on the four KPI columns */}
-        <section className="cmp-card">
-          <div className="cmp-card-head">
-            <div>
-              <h3>{t('competitorsPage.leaderboardTitle')}</h3>
-              <p>{t('competitorsPage.leaderboardSubtitle')}</p>
-            </div>
-          </div>
-          <div className="cmp-board">
-            <div className="cmp-board-h">
-              <span>{t('competitorsPage.colAccount')}</span>
-              <span>{t('competitorsPage.colFollowers')}</span>
-              <span>{t('competitorsPage.colGrowth')}</span>
-              <span>{t('competitorsPage.colEngagement')}</span>
-              <span>{t('competitorsPage.colCadence')}</span>
-            </div>
-            {[me, ...competitors].map((row, i) => {
-              const isMe = (row as { isMe?: boolean }).isMe
-              return (
-                <div key={`${row.handle}-${i}`} className={`cmp-board-r ${isMe ? 'is-me' : ''}`}>
-                  <div className="cmp-board-acc">
-                    <span className="cmp-board-rank num">{i + 1}</span>
-                    <span className="cmp-av">{row.avatar}</span>
-                    <div>
-                      <div className="cmp-board-n">
-                        {row.name}
-                        {isMe && <span className="cmp-me">{t('competitorsPage.youBadge')}</span>}
-                      </div>
-                      <div className="cmp-board-h2">{row.handle}</div>
-                    </div>
-                  </div>
-                  <span className="cmp-board-num num">{row.followers}</span>
-                  <span className="cmp-board-up num">{row.growth}</span>
-                  <span className="cmp-board-eng num">{row.engagement}</span>
-                  <span className="cmp-board-cad num">{row.cadence}</span>
-                </div>
-              )
-            })}
-          </div>
-        </section>
-
-        {/* Top posts grid — 4 cards of best-performing competitor posts */}
-        {topPostsList.length > 0 && (
-          <section className="cmp-card">
-            <div className="cmp-card-head">
-              <div>
-                <h3>{t('competitorsPage.topPostsTitle')}</h3>
-                <p>{t('competitorsPage.topPostsSubtitle')}</p>
-              </div>
-            </div>
-            <div className="cmp-top">
-              {topPostsList.map((p, i) => (
-                <article key={i} className="cmp-top-c">
-                  <div
-                    className="cmp-top-thumb"
-                    style={{
-                      background: i % 2 ? 'oklch(0.75 0.12 60)' : 'oklch(0.7 0.15 30)',
-                    }}
-                  >
-                    <span className="cmp-top-fmt">
-                      {t(`competitorsPage.kind${p.format.charAt(0).toUpperCase()}${p.format.slice(1)}` as never)}
-                    </span>
-                    <span className="cmp-top-eng">{p.engagement_pct}</span>
-                  </div>
-                  <div className="cmp-top-meta">
-                    <div className="cmp-top-tag">
-                      {t(`competitorsPage.topTag.${p.tag_key}` as never)}
-                    </div>
-                    <div className="cmp-top-who">{p.who}</div>
-                    <div className="cmp-top-m num">{p.metric}</div>
-                  </div>
-                  <button className="cmp-top-btn">
-                    {t('competitorsPage.actionGenerate')}
-                  </button>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
 
         <div className="cmp-grid">
           <div className="cmp-col">
