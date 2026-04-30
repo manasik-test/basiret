@@ -706,10 +706,6 @@ function TrendsContent() {
         </header>
 
         <HeroTrend />
-        <SummaryChips />
-        <HashtagsSection />
-        <FormatTrendsSection />
-        <PostingHeatmap />
 
         <div className="tra-grid">
           <div className="tra-col-main">
