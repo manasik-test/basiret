@@ -692,38 +692,39 @@ const MP_STYLES = `
 .mp-rank-filter button { padding:5px 10px; font-size:11.5px; font-weight:500; border-radius:6px; color:var(--ink-600); }
 .mp-rank-filter button.is-on { background:var(--surface); color:var(--ink-900); font-weight:600; box-shadow:var(--shadow-sm); }
 
-.mp-rank-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:14px; }
+.mp-rank-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:18px; }
 /* 2-line layout: row 1 = rank, thumb, title/date, percentage. Row 2 = the bar
- * spans the full width. The bar's width auto-fills the card so the visual
- * weight matches the design. */
+ * spans the full width. */
 .mp-rank-row {
   display:grid;
-  grid-template-columns:24px 44px minmax(0,1fr) auto;
+  grid-template-columns:28px 48px minmax(0,1fr) auto;
   grid-template-rows:auto auto;
   column-gap:12px;
-  row-gap:6px;
+  row-gap:8px;
   align-items:center;
 }
-.mp-rank-num { font-size:14px; font-weight:700; color:var(--ink-400); text-align:center; }
-.mp-rank-thumb { width:44px; height:44px; border-radius:10px; background-size:cover; background-position:center; flex-shrink:0; }
+.mp-rank-num { font-size:18px; font-weight:700; color:var(--ink-700); text-align:center; letter-spacing:-0.02em; }
+.mp-rank-thumb { width:48px; height:48px; border-radius:10px; background-size:cover; background-position:center; flex-shrink:0; }
 .mp-rank-meta { min-width:0; }
 .mp-rank-title { display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:600; color:var(--ink-900); line-height:1.35; overflow:hidden; }
 .mp-rank-title svg { color:var(--ink-500); flex-shrink:0; }
 .mp-rank-title span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.mp-rank-date { font-size:11.5px; color:var(--ink-500); margin-top:2px; }
-.mp-rank-pct { font-size:14px; font-weight:700; color:var(--ink-900); letter-spacing:-0.01em; }
+.mp-rank-date { font-size:11.5px; color:var(--ink-500); margin-top:3px; }
+.mp-rank-pct { font-size:15px; font-weight:700; color:var(--ink-900); letter-spacing:-0.01em; }
 /* Bar lives on row 2, spans columns 2 → end so it starts under the thumbnail
- * and runs the full width of the rest of the row. Gives the bar the visual
- * presence the design calls for. */
+ * and runs the full width of the rest of the row. */
 .mp-rank-bar { grid-column:2 / -1; height:8px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
 .mp-rank-bar-fill { height:100%; border-radius:99px; transition:width 0.4s cubic-bezier(.2,.8,.2,1); }
 
 /* Card E — Distribution */
 .mp-dist-bar { display:flex; height:14px; border-radius:99px; overflow:hidden; background:var(--ink-100); }
 .mp-dist-seg { height:100%; transition:width 0.4s cubic-bezier(.2,.8,.2,1); }
-.mp-dist-legend { display:flex; gap:18px; flex-wrap:wrap; margin-top:4px; }
-.mp-leg { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-700); font-weight:500; }
-.mp-leg-dot { width:10px; height:10px; border-radius:3px; }
+/* Legend stays on a single line — never wrap mid-item, allow horizontal
+ * scroll if the card is too narrow rather than stacking each legend entry
+ * on its own row. */
+.mp-dist-legend { display:flex; gap:14px; margin-top:6px; flex-wrap:nowrap; overflow:hidden; }
+.mp-leg { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-700); font-weight:500; white-space:nowrap; flex-shrink:0; }
+.mp-leg-dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
 .mp-leg-n { color:var(--ink-900); font-weight:700; margin-inline-start:2px; }
 
 /* RTL flip on chevrons in CTAs */
