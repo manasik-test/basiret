@@ -422,7 +422,7 @@ export default function Recommendations() {
 /* ---------------- styles (translated from OptionCApp) ---------------- */
 
 const CP_STYLES = `
-.cp { display:flex; flex-direction:column; gap:22px; max-width:1480px; margin:0 auto; }
+.cp { display:flex; flex-direction:column; gap:22px; max-width:1480px; margin:0 auto; padding-top:18px; }
 .cp-loading { padding:48px; text-align:center; color:var(--ink-500); font-size:13px; background:var(--surface); border:1px dashed var(--line); border-radius:18px; }
 
 /* Page header */
