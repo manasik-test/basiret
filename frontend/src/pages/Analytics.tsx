@@ -468,44 +468,53 @@ function TopPostsRanking({ isAr, range }: { isAr: boolean; range: '7d' | '30d' |
         <div className="mp-empty">{t('myPostsPage.rankingsEmpty')}</div>
       ) : (
         <ol className="mp-rank-list">
-          {ranked.map((p, i) => (
-            <li key={p.id} className="mp-rank-row">
-              {/* Source order = visual order in LTR. In RTL the grid auto-flips
-                  so % column lands on the visual LEFT and rank# on the visual
-                  RIGHT — matching the mockup. */}
-              <div className="mp-rank-pctcol">
-                <div className="mp-rank-pct num">{fmtNum(p.pct, isAr)}{pctSuffix(isAr)}</div>
-                <div className="mp-rank-bar" dir="ltr">
-                  <div
-                    className="mp-rank-bar-fill"
-                    style={{
-                      width: `${p.pct}%`,
-                      background: `linear-gradient(to right, ${colorFor(p.type)}, color-mix(in oklch, ${colorFor(p.type)} 70%, white))`,
-                    }}
-                  />
+          {ranked.map((p, i) => {
+            // Thresholded color per the reference: green when ≥15% engagement,
+            // red otherwise. Drives both the % label and the bar fill.
+            const isStrong = p.pct >= 15
+            return (
+              <li key={p.id} className="mp-rank-row">
+                <div className="mp-rank-meta">
+                  <div className="mp-rank-meta-top">
+                    <div className="mp-rank-meta-tags" dir="auto">
+                      <span className={`mp-rank-pct num ${isStrong ? 'is-strong' : 'is-weak'}`}>
+                        {fmtNum(p.pct, isAr)}{pctSuffix(isAr)}
+                      </span>
+                      <span className="mp-rank-date">{formatPostDate(p.posted_at, isAr)}</span>
+                      <span className="mp-rank-meta-sep">·</span>
+                      <span className="mp-rank-type">
+                        <TypeIcon type={p.type} size={10} />
+                        {p.type === 'video'
+                          ? t('myPostsPage.videoLabel')
+                          : p.type === 'image'
+                            ? t('myPostsPage.imageLabel')
+                            : t('myPostsPage.carouselLabel')}
+                      </span>
+                    </div>
+                    <span className="mp-rank-num num">{fmtNum(i + 1, isAr)}</span>
+                  </div>
+                  <p className="mp-rank-caption" dir="auto">
+                    {truncateCaption(p.caption || t('myPostsPage.bestEmpty'), 56)}
+                  </p>
+                  <div className="mp-rank-bar" dir="ltr">
+                    <div
+                      className={`mp-rank-bar-fill ${isStrong ? 'is-strong' : 'is-weak'}`}
+                      style={{ width: `${p.pct}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-              <div className="mp-rank-meta">
-                <div className="mp-rank-meta-top" dir="auto">
-                  <TypeIcon type={p.type} size={11} />
-                  <span>{formatPostDate(p.posted_at, isAr)}</span>
-                </div>
-                <div className="mp-rank-caption" dir="auto">
-                  {truncateCaption(p.caption || t('myPostsPage.bestEmpty'), 48)}
-                </div>
-              </div>
-              <div
-                className="mp-rank-thumb"
-                style={{
-                  background: p.thumbnail_url
-                    ? `center / cover no-repeat url(${p.thumbnail_url})`
-                    : `linear-gradient(135deg, ${tintFor(p.type)}, color-mix(in oklch, ${colorFor(p.type)} 30%, white))`,
-                }}
-                aria-hidden="true"
-              />
-              <div className="mp-rank-num num">{fmtNum(i + 1, isAr)}</div>
-            </li>
-          ))}
+                <div
+                  className="mp-rank-thumb"
+                  style={{
+                    background: p.thumbnail_url
+                      ? `center / cover no-repeat url(${p.thumbnail_url})`
+                      : `linear-gradient(135deg, ${tintFor(p.type)}, color-mix(in oklch, ${colorFor(p.type)} 30%, white))`,
+                  }}
+                  aria-hidden="true"
+                />
+              </li>
+            )
+          })}
         </ol>
       )}
     </article>
@@ -703,28 +712,30 @@ const MP_STYLES = `
 .mp-rank-filter button:hover { background:var(--ink-50); color:var(--ink-800); }
 .mp-rank-filter button.is-on { background:var(--purple-100); color:var(--purple-700); font-weight:600; }
 
-.mp-rank-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:14px; }
-/* Single-row layout (no row 2). Source order LTR: pct/bar | meta | thumb |
- * rank#. RTL flips the grid so pct/bar appears visually on the LEFT and
- * rank# on the visual RIGHT — matching the mockup. */
-.mp-rank-row {
-  display:grid;
-  grid-template-columns:130px minmax(0,1fr) 44px 24px;
-  column-gap:14px;
-  align-items:center;
-}
-/* % stacked above bar in the same fixed-width column */
-.mp-rank-pctcol { display:flex; flex-direction:column; gap:6px; min-width:0; }
-.mp-rank-pct { font-size:14px; font-weight:700; color:var(--ink-900); letter-spacing:-0.01em; }
+.mp-rank-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:20px; }
+/* Single-row flex: meta column (flex:1) + thumb (48px). The bar lives at the
+ * BOTTOM of the meta column spanning its full width, with caption above and
+ * the meta-top header (% · date · type · rank#) above the caption. */
+.mp-rank-row { display:flex; align-items:center; gap:12px; }
+.mp-rank-meta { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+/* Meta header: tag cluster (pct+date+type) on one side, rank# pushed to the
+ * other end via justify-between. */
+.mp-rank-meta-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.mp-rank-meta-tags { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; }
+.mp-rank-pct { font-size:13px; font-weight:700; letter-spacing:-0.01em; }
+.mp-rank-pct.is-strong { color:oklch(0.55 0.15 155); }
+.mp-rank-pct.is-weak { color:oklch(0.6 0.2 30); }
+.mp-rank-date { font-size:11.5px; color:var(--ink-400); font-weight:500; }
+.mp-rank-meta-sep { color:var(--ink-300); font-size:10px; }
+.mp-rank-type { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--ink-400); font-weight:500; }
+.mp-rank-type svg { color:var(--ink-400); }
+.mp-rank-num { font-size:13px; font-weight:500; color:var(--ink-300); }
+.mp-rank-caption { font-size:13.5px; font-weight:500; color:var(--ink-700); line-height:1.4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .mp-rank-bar { height:6px; background:var(--ink-100); border-radius:99px; overflow:hidden; width:100%; }
 .mp-rank-bar-fill { height:100%; border-radius:99px; transition:width 0.4s cubic-bezier(.2,.8,.2,1); }
-/* Meta column: type+date on top (small/muted), caption on bottom (bold ink-900) */
-.mp-rank-meta { min-width:0; display:flex; flex-direction:column; gap:3px; }
-.mp-rank-meta-top { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-500); font-weight:500; line-height:1.3; }
-.mp-rank-meta-top svg { color:var(--ink-500); flex-shrink:0; }
-.mp-rank-caption { font-size:13.5px; font-weight:600; color:var(--ink-900); line-height:1.4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.mp-rank-thumb { width:44px; height:44px; border-radius:10px; background-size:cover; background-position:center; flex-shrink:0; }
-.mp-rank-num { font-size:14px; font-weight:600; color:var(--ink-400); text-align:center; }
+.mp-rank-bar-fill.is-strong { background:oklch(0.65 0.15 155); }
+.mp-rank-bar-fill.is-weak { background:oklch(0.7 0.18 30); }
+.mp-rank-thumb { width:48px; height:48px; border-radius:12px; background-size:cover; background-position:center; flex-shrink:0; }
 
 /* Card E — Distribution */
 .mp-dist-bar { display:flex; height:14px; border-radius:99px; overflow:hidden; background:var(--ink-100); }
