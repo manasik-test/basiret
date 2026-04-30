@@ -126,7 +126,8 @@
       "postsThisMonth": "Posts this month",
       "scoreOf": "/100",
       "pointsThisMonth": "{{value}} points this month",
-      "delta": "{{value}}"
+      "delta": "{{value}}",
+      "emptyHint": "Connect Instagram and sync — your metrics will appear here."
     },
     "nba": {
       "label": "Top recommendation today",

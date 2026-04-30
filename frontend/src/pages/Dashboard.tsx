@@ -289,6 +289,16 @@ function KpiStrip({
   const reachDelta = periodDelta(timeline, 'reach')
   const postDelta = periodDelta(timeline, 'posts')
 
+  // Honest empty state: the connected account has nothing to summarize yet.
+  // Trigger only when overview is loaded AND every aggregate is zero — avoids
+  // flashing the message while hooks are in flight.
+  const isEmpty =
+    overview != null &&
+    (overview.total_posts ?? 0) === 0 &&
+    totalEng === 0 &&
+    totalReach === 0 &&
+    postsThisMonth === 0
+
   return (
     <section className="hm-kpi">
       {/* Hero — growth health ring */}
@@ -311,25 +321,72 @@ function KpiStrip({
         <GrowthRing score={score} isAr={isAr} />
       </div>
 
-      <div className="hm-kpi-card">
-        <div className="hm-kpi-k">{t('home.kpi.totalEngagement')}</div>
-        <div className="hm-kpi-v num">{fmt(formatCount(totalEng), isAr)}</div>
-        <DeltaPill value={engDelta} suffix="%" isAr={isAr} />
-        <Sparkline values={engBuckets} />
-      </div>
-      <div className="hm-kpi-card">
-        <div className="hm-kpi-k">{t('home.kpi.reach')}</div>
-        <div className="hm-kpi-v num">{fmt(formatCount(totalReach), isAr)}</div>
-        <DeltaPill value={reachDelta} suffix="%" isAr={isAr} />
-        <Sparkline values={reachBuckets} />
-      </div>
-      <div className="hm-kpi-card">
-        <div className="hm-kpi-k">{t('home.kpi.postsThisMonth')}</div>
-        <div className="hm-kpi-v num">{fmt(postsThisMonth, isAr)}</div>
-        <DeltaPill value={postDelta} suffix="" isAr={isAr} />
-        <Sparkline values={postBuckets} />
-      </div>
+      <KpiCard
+        label={t('home.kpi.totalEngagement')}
+        value={isEmpty ? null : fmt(formatCount(totalEng), isAr)}
+        delta={engDelta}
+        deltaSuffix="%"
+        sparkValues={engBuckets}
+        isEmpty={isEmpty}
+        emptyHint={t('home.kpi.emptyHint')}
+        isAr={isAr}
+      />
+      <KpiCard
+        label={t('home.kpi.reach')}
+        value={isEmpty ? null : fmt(formatCount(totalReach), isAr)}
+        delta={reachDelta}
+        deltaSuffix="%"
+        sparkValues={reachBuckets}
+        isEmpty={isEmpty}
+        emptyHint={t('home.kpi.emptyHint')}
+        isAr={isAr}
+      />
+      <KpiCard
+        label={t('home.kpi.postsThisMonth')}
+        value={isEmpty ? null : fmt(postsThisMonth, isAr)}
+        delta={postDelta}
+        deltaSuffix=""
+        sparkValues={postBuckets}
+        isEmpty={isEmpty}
+        emptyHint={t('home.kpi.emptyHint')}
+        isAr={isAr}
+      />
     </section>
+  )
+}
+
+function KpiCard({
+  label,
+  value,
+  delta,
+  deltaSuffix,
+  sparkValues,
+  isEmpty,
+  emptyHint,
+  isAr,
+}: {
+  label: string
+  value: string | null
+  delta: number | null
+  deltaSuffix: string
+  sparkValues: number[]
+  isEmpty: boolean
+  emptyHint: string
+  isAr: boolean
+}) {
+  return (
+    <div className="hm-kpi-card">
+      <div className="hm-kpi-k">{label}</div>
+      {isEmpty ? (
+        <div className="hm-kpi-empty">{emptyHint}</div>
+      ) : (
+        <>
+          <div className="hm-kpi-v num">{value}</div>
+          <DeltaPill value={delta} suffix={deltaSuffix} isAr={isAr} />
+          <Sparkline values={sparkValues} />
+        </>
+      )}
+    </div>
   )
 }
 
@@ -813,6 +870,7 @@ const HM_STYLES = `
 .hm-kpi-hero-l { flex:1; }
 .hm-kpi-k { font-size:11.5px; color:var(--ink-500); font-weight:500; }
 .hm-kpi-v { font-size:28px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
+.hm-kpi-empty { font-size:12.5px; color:var(--ink-500); line-height:1.55; padding:14px 0; max-width:230px; }
 .hm-kpi-d { font-size:12px; font-weight:600; color:var(--ink-600); }
 .hm-kpi-d.up { color:oklch(0.5 0.15 155); }
 .hm-kpi-d.down { color:oklch(0.6 0.2 30); }

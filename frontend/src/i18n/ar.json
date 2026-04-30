@@ -126,7 +126,8 @@
       "postsThisMonth": "منشور هذا الشهر",
       "scoreOf": "/١٠٠",
       "pointsThisMonth": "{{value}} نقاط هذا الشهر",
-      "delta": "{{value}}"
+      "delta": "{{value}}",
+      "emptyHint": "اربط إنستغرام وزامن — ستظهر مقاييسك هنا."
     },
     "nba": {
       "label": "التوصية الأهم اليوم",
