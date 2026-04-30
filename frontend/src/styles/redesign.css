@@ -104,7 +104,7 @@
 
   /* ── Type families ──────────────────────────────────────────── */
   --font-ar:  'IBM Plex Sans Arabic', 'Inter', system-ui, sans-serif;
-  --font-num: 'Inter', system-ui, sans-serif;
+  --font-num: 'Inter', 'IBM Plex Sans Arabic', 'Tajawal', system-ui, sans-serif;
 }
 
 /* ── Semantic type — opt-in classes on individual elements ──────
