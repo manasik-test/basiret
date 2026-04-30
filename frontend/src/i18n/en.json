@@ -531,6 +531,7 @@
     "weaknessHeadline": "What to change",
     "weaknessPatternTitle": "Pattern in low performers",
     "weaknessTipTitle": "What to do",
+    "weaknessTipPrefix": "Try:",
     "viewPostCta": "View post",
     "whyFallback": "Sync more posts so we can explain what made this one outperform.",
     "changeFallback": "We need a few more posts before we can spot a clear pattern. Keep posting and check back.",

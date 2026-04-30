@@ -531,6 +531,7 @@
     "weaknessHeadline": "ما الذي ينبغي تغييره",
     "weaknessPatternTitle": "نمط في الأداء الضعيف",
     "weaknessTipTitle": "ما الذي ينبغي فعله",
+    "weaknessTipPrefix": "جرّب:",
     "viewPostCta": "عرض المنشور",
     "whyFallback": "زامن المزيد من المنشورات لنستطيع شرح سبب تفوّق هذا المنشور.",
     "changeFallback": "نحتاج إلى منشورات إضافية قبل أن نرصد نمطاً واضحاً. استمر بالنشر وعد لاحقاً.",
