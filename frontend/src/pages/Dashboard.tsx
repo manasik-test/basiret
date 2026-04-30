@@ -177,7 +177,7 @@ function Header({ range, setRange }: { range: '7d' | '30d' | '90d'; setRange: (r
 /* KPI strip                                                          */
 /* ------------------------------------------------------------------ */
 
-function GrowthRing({ score, change, isAr }: { score: number; change: number; isAr: boolean }) {
+function GrowthRing({ score, isAr }: { score: number; isAr: boolean }) {
   const r = 50
   const circ = 2 * Math.PI * r
   const offset = circ * (1 - Math.max(0, Math.min(100, score)) / 100)
@@ -198,19 +198,12 @@ function GrowthRing({ score, change, isAr }: { score: number; change: number; is
           transform="rotate(-90 60 60)"
         />
       </svg>
-      {/* dir="ltr" + isolation: the slash + digits read as a single
-          left-to-right token, otherwise the bidi algorithm reorders the "/"
-          weirdly between Arabic-Indic digits in an RTL container. */}
+      {/* dir="ltr": the slash + digits read as a single LTR token, otherwise
+          the bidi algorithm reorders "/" between Arabic-Indic digits. */}
       <div className="hm-kpi-ring-c" dir="ltr">
         <span className="num">{fmt(Math.round(score), isAr)}</span>
         <em>/{fmt(100, isAr)}</em>
       </div>
-      {change !== 0 && (
-        <div className="hm-kpi-ring-delta">
-          {change > 0 ? '↑' : '↓'}{' '}
-          <span className="num">{fmt(change > 0 ? `+${change}` : String(change), isAr)}</span>
-        </div>
-      )}
     </div>
   )
 }
@@ -314,7 +307,7 @@ function KpiStrip({
             {insightChange === 0 && t('home.growthHealthSubtitle')}
           </div>
         </div>
-        <GrowthRing score={score} change={insightChange} isAr={isAr} />
+        <GrowthRing score={score} isAr={isAr} />
       </div>
 
       <div className="hm-kpi-card">
@@ -829,7 +822,6 @@ const HM_STYLES = `
 .hm-kpi-ring-c { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1; }
 .hm-kpi-ring-c .num { font-size:28px; font-weight:700; letter-spacing:-0.02em; }
 .hm-kpi-ring-c em { font-style:normal; font-size:11px; opacity:.85; font-weight:500; margin-top:3px; }
-.hm-kpi-ring-delta { position:absolute; bottom:-8px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:700; padding:2px 8px; border-radius:99px; background:rgba(255,255,255,.18); color:oklch(0.92 0.18 150); white-space:nowrap; }
 
 /* NBA banner */
 .hm-nba { background:linear-gradient(135deg, var(--purple-50), oklch(0.97 0.03 280)); border:1px solid var(--purple-200); border-radius:16px; padding:18px 22px; display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
