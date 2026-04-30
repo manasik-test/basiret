@@ -132,10 +132,18 @@ function AudHero({ segments }: { segments: SegmentsData | undefined }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Persona card                                                       */
+/* Persona row (editorial list)                                       */
 /* ------------------------------------------------------------------ */
 
-interface PersonaCardProps {
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'
+function toArDigits(n: number): string {
+  return String(n)
+    .split('')
+    .map((d) => (d >= '0' && d <= '9' ? AR_DIGITS[+d]! : d))
+    .join('')
+}
+
+interface PersonaRowProps {
   index: number
   size: number
   pct: number
@@ -148,6 +156,8 @@ interface PersonaCardProps {
   contentTypeBreakdown: { video: number; image: number; carousel: number }
   topTopics: string[]
   bestDayHour: { day: string; hour: number } | null | undefined
+  isOpen: boolean
+  onToggle: () => void
 }
 
 // Format a "Tuesday 4pm" style chip from a {day, hour} object, localised.
@@ -172,7 +182,7 @@ function formatBestDayHour(
   return `${d} ${hour12}${suffix}`
 }
 
-function PersonaCard({
+function PersonaRow({
   index,
   size,
   pct,
@@ -184,9 +194,11 @@ function PersonaCard({
   contentTypeBreakdown,
   topTopics,
   bestDayHour,
-}: PersonaCardProps) {
+  isOpen,
+  onToggle,
+}: PersonaRowProps) {
   const { t, i18n } = useTranslation()
-  const p = PALETTES[index % PALETTES.length]
+  const p = PALETTES[index % PALETTES.length]!
   const timeLabelMap: Record<string, string> = {
     morning: t('myAudiencePage.morningLabel'),
     afternoon: t('myAudiencePage.afternoonLabel'),
@@ -194,10 +206,8 @@ function PersonaCard({
   }
   const timeKey = postingTime?.toLowerCase()
   const fallbackTimeLabel = timeKey && timeLabelMap[timeKey] ? timeLabelMap[timeKey] : postingTime || '—'
-  const isAr = i18n.language?.startsWith('ar')
-  // Prefer the day+hour chip from the new computed field; fall back to the
-  // broad bucket label when it's missing (e.g. older segment rows).
-  const bestTimeLabel = formatBestDayHour(bestDayHour, !!isAr) || fallbackTimeLabel
+  const isAr = !!i18n.language?.startsWith('ar')
+  const bestTimeLabel = formatBestDayHour(bestDayHour, isAr) || fallbackTimeLabel
 
   const contentTypeLabels = {
     video: t('myPostsPage.videoLabel'),
@@ -212,15 +222,19 @@ function PersonaCard({
         ? t('myAudiencePage.engagementMedium')
         : t('myAudiencePage.engagementLow')
 
-  // Sort the breakdown so the dominant type appears first — matches the
-  // design's "yiprefer" ordering.
   const breakdownEntries = (['video', 'image', 'carousel'] as const)
     .map((k) => ({ type: k, pct: contentTypeBreakdown[k] || 0 }))
     .sort((a, b) => b.pct - a.pct)
 
+  const rankLabel = isAr ? toArDigits(index + 1) : String(index + 1)
+  const sizeLabel = isAr ? toArDigits(size) : String(size)
+  const pctLabel = isAr ? toArDigits(pct) : String(pct)
+
   return (
     <article
-      className="aud-card"
+      className="aud-row"
+      data-open={isOpen ? '' : undefined}
+      onClick={onToggle}
       style={
         {
           ['--acc-bg' as string]: p.bg,
@@ -229,75 +243,59 @@ function PersonaCard({
         } as React.CSSProperties
       }
     >
-      <div className="aud-card-top">
-        <div className="aud-avatar" style={{ background: p.bg, color: p.fg }}>
-          {emoji}
-        </div>
-        <div className="aud-card-t">
-          <div className="aud-card-n" dir="auto">
-            {name}
+      <div className="aud-row-rank num">{rankLabel}</div>
+      <div className="aud-row-avatar" style={{ background: p.bg, color: p.fg }}>
+        {emoji}
+      </div>
+      <div className="aud-row-ident">
+        <div className="aud-row-n" dir="auto">{name}</div>
+        {persona && (
+          <div className="aud-row-p" dir="auto">{persona}</div>
+        )}
+      </div>
+      <div className="aud-row-size">
+        <div className="aud-row-sv num">{sizeLabel}</div>
+        <div className="aud-row-sp">
+          <div className="aud-row-sb">
+            <div style={{ width: `${pct}%`, background: p.solid }} />
           </div>
-          {persona && (
-            <div className="aud-card-p" dir="auto">
-              {persona}
-            </div>
-          )}
-        </div>
-        <div className="aud-card-size">
-          <div className="num">{size}</div>
-          <em>{pct}%</em>
+          <span className="num">{pctLabel}%</span>
         </div>
       </div>
-
-      {/* Real content-type breakdown from segmentation.py:_compute_segment_extras */}
-      <div className="aud-card-row">
-        <div className="aud-card-k">{t('myAudiencePage.prefersHeader')}</div>
-        <div className="aud-card-bars">
+      <div className="aud-row-prefs">
+        <div className="aud-row-k">{t('myAudiencePage.prefersHeader')}</div>
+        <div className="aud-row-pf">
           {breakdownEntries.map((entry) => (
-            <div key={entry.type} className="aud-pref">
-              <div className="aud-pref-lbl">
-                <TypeIcon type={entry.type} size={11} /> {contentTypeLabels[entry.type]}
-              </div>
-              <div className="aud-pref-bar">
-                <div
-                  style={{
-                    width: `${entry.pct}%`,
-                    background: `var(--${entry.type})`,
-                  }}
-                />
-              </div>
-              <div className="num aud-pref-p">{entry.pct}%</div>
+            <div key={entry.type} className="aud-row-pi">
+              <TypeIcon type={entry.type} size={10} />
+              <span>{contentTypeLabels[entry.type]}</span>
+              <b className="num">{isAr ? toArDigits(entry.pct) : entry.pct}%</b>
             </div>
           ))}
         </div>
       </div>
-
-      <div className="aud-card-row aud-card-row--grid">
-        <div>
-          <div className="aud-card-k">{t('myAudiencePage.bestTimeHeader')}</div>
-          <div className="aud-card-v">{bestTimeLabel}</div>
-        </div>
-        <div>
-          <div className="aud-card-k">{t('myAudiencePage.engagementHeader')}</div>
-          <div className="aud-card-v">{engBucket}</div>
-        </div>
+      <div className="aud-row-when">
+        <div className="aud-row-k">{t('myAudiencePage.bestTimeHeader')}</div>
+        <div className="aud-row-wv num">{bestTimeLabel}</div>
       </div>
-
-      {topTopics.length > 0 && (
-        <div className="aud-card-row">
-          <div className="aud-card-k">{t('myAudiencePage.topicsHeader')}</div>
+      <div className="aud-row-eng">
+        <div className="aud-row-k">{t('myAudiencePage.engagementHeader')}</div>
+        <div className="aud-row-ev">{engBucket}</div>
+      </div>
+      <button className="aud-row-cta" onClick={(e) => e.stopPropagation()}>
+        {t('myAudiencePage.createForRowCta')}
+        <Icon path={I.wand} size={11} />
+      </button>
+      {isOpen && topTopics.length > 0 && (
+        <div className="aud-row-ex">
+          <div className="aud-row-k">{t('myAudiencePage.topicsHeader')}</div>
           <div className="aud-topics">
-            {topTopics.slice(0, 3).map((topic) => (
+            {topTopics.slice(0, 6).map((topic) => (
               <span key={topic} dir="auto">{topic}</span>
             ))}
           </div>
         </div>
       )}
-
-      <button className="aud-card-cta">
-        <Icon path={I.wand} size={12} />
-        {t('myAudiencePage.createForCta', { name: name.split(/[—\-]/)[0]?.trim() || name })}
-      </button>
     </article>
   )
 }
@@ -312,6 +310,7 @@ function AudienceContent() {
   const regenerate = useRegenerateSegments()
   const [cooldownLeft, setCooldownLeft] = useState(0)
   const [range, setRange] = useState<'7d' | '30d' | '90d'>('30d')
+  const [openId, setOpenId] = useState<string | null>(null)
 
   useEffect(() => {
     if (cooldownLeft <= 0) return
@@ -360,7 +359,7 @@ function AudienceContent() {
         <div className="aud-sec-head">
           <div>
             <h3>{t('myAudiencePage.personasTitle')}</h3>
-            <span className="aud-sec-s">{t('myAudiencePage.personasSortedBySize')}</span>
+            <span className="aud-sec-s">{t('myAudiencePage.personasClickHint')}</span>
           </div>
           <button onClick={handleRegenerate} disabled={buttonDisabled} className="aud-regen-btn">
             <Icon
@@ -384,19 +383,18 @@ function AudienceContent() {
         </div>
 
         {sorted.length > 0 ? (
-          <section className="aud-grid">
+          <section className="aud-list">
             {sorted.map((seg, i) => {
               const c = seg.characteristics
               const { name, persona } = deriveName(c, seg.label)
               const pct = Math.round((seg.size / totalSize) * 100)
               const contentType = normalizeContentType(c?.dominant_content_type)
-              // avg_engagement may be a number (legacy) or an object {likes,comments,engagement_rate}.
               const rawEng = c?.avg_engagement
               const avgEng = typeof rawEng === 'number'
                 ? rawEng
                 : (rawEng?.likes ?? 0) + (rawEng?.comments ?? 0)
               return (
-                <PersonaCard
+                <PersonaRow
                   key={seg.id}
                   index={i}
                   size={seg.size}
@@ -410,6 +408,8 @@ function AudienceContent() {
                   contentTypeBreakdown={c?.content_type_breakdown ?? { video: 0, image: 0, carousel: 0 }}
                   topTopics={c?.top_topics ?? []}
                   bestDayHour={c?.best_day_hour ?? null}
+                  isOpen={openId === seg.id}
+                  onToggle={() => setOpenId(openId === seg.id ? null : seg.id)}
                 />
               )
             })}
@@ -481,35 +481,44 @@ const AUD_STYLES = `
 
 .aud-empty { padding:48px; text-align:center; color:var(--ink-500); font-size:13px; background:var(--surface); border:1px dashed var(--line); border-radius:18px; }
 
-/* Cards grid */
-.aud-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:16px; }
-@media (max-width:768px) { .aud-grid { grid-template-columns:1fr; } }
-.aud-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:22px; display:flex; flex-direction:column; gap:16px; position:relative; overflow:hidden; }
-.aud-card::before { content:''; position:absolute; top:0; inset-inline-start:0; height:3px; width:100%; background:var(--acc); }
-.aud-card-top { display:flex; gap:14px; align-items:center; }
-.aud-avatar { width:52px; height:52px; border-radius:14px; display:grid; place-items:center; font-size:22px; flex-shrink:0; }
-.aud-card-t { flex:1; min-width:0; }
-.aud-card-n { font-size:15px; font-weight:700; color:var(--ink-950); margin-bottom:2px; letter-spacing:-0.005em; }
-.aud-card-p { font-size:12px; color:var(--ink-600); line-height:1.45; }
-.aud-card-size { text-align:center; flex-shrink:0; padding-inline-start:12px; border-inline-start:1px solid var(--line); }
-.aud-card-size .num { font-size:24px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
-.aud-card-size em { font-style:normal; font-size:11px; color:var(--ink-500); font-weight:500; display:block; margin-top:4px; }
+/* Editorial list */
+.aud-list { display:flex; flex-direction:column; gap:10px; }
+.aud-row { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px 22px; display:grid; grid-template-columns:28px 52px 1.4fr 1fr 1.3fr 0.9fr 0.8fr auto; gap:22px; align-items:center; position:relative; overflow:hidden; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.aud-row:hover { border-color:var(--acc); box-shadow:0 2px 12px -6px var(--acc); }
+.aud-row[data-open] { border-color:var(--acc); box-shadow:0 4px 20px -10px var(--acc); }
+.aud-row::before { content:''; position:absolute; top:0; bottom:0; inset-inline-start:0; width:3px; background:var(--acc); }
+.aud-row-rank { font-size:15px; font-weight:700; color:var(--ink-400); text-align:center; letter-spacing:-0.01em; }
+.aud-row-avatar { width:48px; height:48px; border-radius:12px; display:grid; place-items:center; font-size:20px; flex-shrink:0; }
+.aud-row-ident { min-width:0; }
+.aud-row-n { font-size:14px; font-weight:700; color:var(--ink-950); letter-spacing:-0.005em; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.aud-row-p { font-size:11.5px; color:var(--ink-600); line-height:1.4; }
 
-.aud-card-row { display:flex; flex-direction:column; gap:8px; }
-.aud-card-row--grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-.aud-card-k { font-size:11px; font-weight:600; color:var(--ink-500); letter-spacing:0.02em; }
-.aud-card-v { font-size:13.5px; font-weight:600; color:var(--ink-950); display:flex; align-items:center; gap:8px; }
+.aud-row-size { display:flex; flex-direction:column; gap:6px; }
+.aud-row-sv { font-size:20px; font-weight:700; color:var(--ink-950); letter-spacing:-0.015em; line-height:1; }
+.aud-row-sp { display:flex; align-items:center; gap:8px; }
+.aud-row-sb { flex:1; height:5px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
+.aud-row-sb > div { height:100%; border-radius:99px; }
+.aud-row-sp .num { font-size:11px; color:var(--ink-600); font-weight:600; }
 
-.aud-card-bars { display:flex; flex-direction:column; gap:6px; }
-.aud-pref { display:grid; grid-template-columns:90px 1fr 40px; align-items:center; gap:10px; font-size:11.5px; color:var(--ink-700); }
-.aud-pref-lbl { display:inline-flex; align-items:center; gap:5px; font-weight:500; }
-.aud-pref-bar { height:6px; background:var(--ink-100); border-radius:99px; overflow:hidden; }
-.aud-pref-bar > div { height:100%; border-radius:99px; transition:width .5s; }
-.aud-pref-p { font-weight:700; color:var(--ink-900); text-align:start; letter-spacing:-0.005em; }
+.aud-row-k { font-size:10.5px; font-weight:600; color:var(--ink-500); letter-spacing:0.02em; margin-bottom:6px; }
+.aud-row-pf { display:flex; flex-direction:column; gap:4px; }
+.aud-row-pi { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--ink-700); }
+.aud-row-pi b { color:var(--ink-950); font-weight:700; margin-inline-start:auto; font-size:11.5px; }
+
+.aud-row-wv { font-size:13px; font-weight:600; color:var(--ink-950); letter-spacing:-0.005em; }
+.aud-row-ev { font-size:12.5px; font-weight:600; color:var(--ink-950); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+
+.aud-row-cta { padding:9px 14px; background:var(--ink-900); color:#fff; border-radius:9px; font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.aud-row-cta:hover { background:var(--ink-800); }
+
+.aud-row-ex { grid-column:1 / -1; border-top:1px dashed var(--line); padding-top:14px; margin-top:4px; display:flex; flex-direction:column; gap:8px; animation:audfade .2s ease-out; }
+@keyframes audfade { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
 
 .aud-topics { display:flex; flex-wrap:wrap; gap:6px; }
 .aud-topics span { padding:4px 10px; background:var(--acc-bg); color:var(--acc-fg); border-radius:99px; font-size:11.5px; font-weight:500; }
 
-.aud-card-cta { padding:11px; background:var(--ink-900); color:#fff; border-radius:10px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:6px; margin-top:auto; }
-.aud-card-cta:hover { background:var(--ink-800); }
+@media (max-width:1100px) {
+  .aud-row { grid-template-columns:28px 48px 1fr auto; gap:14px; }
+  .aud-row-prefs, .aud-row-when, .aud-row-eng { display:none; }
+}
 `
