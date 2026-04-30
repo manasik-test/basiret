@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { Icon, I } from '../components/redesign/icons'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
-import { useHashtagTrends } from '../hooks/useAnalytics'
 
 /* ------------------------------------------------------------------ */
 /* Mock data                                                          */
@@ -320,44 +319,6 @@ function HeroTrend() {
   )
 }
 
-function SummaryChips() {
-  const { t } = useTranslation()
-  const counts = {
-    rising: TRENDS.filter((x) => x.phase === 'rising').length,
-    peaking: TRENDS.filter((x) => x.phase === 'peaking').length,
-    fading: TRENDS.filter((x) => x.phase === 'fading').length,
-    seasons: CULTURAL_CALENDAR.length,
-  }
-  return (
-    <div className="tra-chips">
-      <div className="tra-chip">
-        <div className="tra-chip-v num" style={{ color: PHASE_META.rising.fg }}>
-          {counts.rising}
-        </div>
-        <div className="tra-chip-l">{t('trendsPage.summaryRising')}</div>
-      </div>
-      <div className="tra-chip">
-        <div className="tra-chip-v num" style={{ color: PHASE_META.peaking.fg }}>
-          {counts.peaking}
-        </div>
-        <div className="tra-chip-l">{t('trendsPage.summaryPeaking')}</div>
-      </div>
-      <div className="tra-chip">
-        <div className="tra-chip-v num" style={{ color: PHASE_META.fading.fg }}>
-          {counts.fading}
-        </div>
-        <div className="tra-chip-l">{t('trendsPage.summaryFading')}</div>
-      </div>
-      <div className="tra-chip">
-        <div className="tra-chip-v num" style={{ color: CAT_META.cultural.color }}>
-          {counts.seasons}
-        </div>
-        <div className="tra-chip-l">{t('trendsPage.summarySeasons')}</div>
-      </div>
-    </div>
-  )
-}
-
 function TrendCard({ trend }: { trend: Trend }) {
   const { t } = useTranslation()
   const cat = CAT_META[trend.cat]
@@ -526,151 +487,6 @@ function MacroSignals() {
 /* ------------------------------------------------------------------ */
 /* Page                                                               */
 /* ------------------------------------------------------------------ */
-
-// Heatmap reused from the Competitors page — mock posting density on a
-// 7-day × 10-hour grid. Higher cells = more activity at that slot.
-const HEATMAP = [
-  [0, 0, 1, 2, 1, 3, 2, 1, 0, 0],
-  [1, 2, 3, 5, 3, 4, 2, 1, 0, 0],
-  [0, 1, 2, 3, 4, 5, 4, 3, 1, 0],
-  [1, 1, 2, 4, 5, 6, 4, 2, 1, 0],
-  [0, 1, 3, 4, 5, 7, 5, 3, 2, 1],
-  [2, 3, 4, 5, 6, 7, 6, 4, 3, 2],
-  [1, 2, 3, 4, 4, 5, 3, 2, 1, 0],
-]
-const HOUR_LABELS = ['6a', '8a', '10a', '12p', '2p', '4p', '6p', '8p', '10p', '12a']
-
-function HashtagsSection() {
-  const { t } = useTranslation()
-  const { data } = useHashtagTrends()
-  const tags = data?.hashtags ?? []
-  if (tags.length === 0) return null
-
-  return (
-    <section className="tra-card-flat">
-      <header className="tra-sec-h" style={{ marginBottom: 12 }}>
-        <h2>{t('trendsPage.hashtagsTitle')}</h2>
-        <span className="tra-sec-sub">{t('trendsPage.hashtagsSubtitle')}</span>
-      </header>
-      <div className="tra-hashtags">
-        {tags.map((h) => {
-          const phaseColor =
-            h.phase === 'rising'
-              ? PHASE_META.rising.fg
-              : h.phase === 'fading'
-                ? PHASE_META.fading.fg
-                : PHASE_META.peaking.fg
-          return (
-            <div key={h.tag} className="tra-hashtag-chip">
-              <span className="tra-hashtag-tag">{h.tag}</span>
-              <span className="tra-hashtag-vol num">
-                {h.volume.toLocaleString()}
-              </span>
-              <span className="tra-hashtag-mom num" style={{ color: phaseColor }}>
-                {h.momentum}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-function FormatTrendsSection() {
-  const { t } = useTranslation()
-  const formats = [
-    {
-      titleKey: 'formatVideoTitle',
-      bodyKey: 'formatVideoBody',
-      momentum: '+2.1×',
-      momentumKey: 'formatVideoMomentum',
-      phase: 'rising' as const,
-    },
-    {
-      titleKey: 'formatCarouselTitle',
-      bodyKey: 'formatCarouselBody',
-      momentum: '-18%',
-      momentumKey: 'formatCarouselMomentum',
-      phase: 'fading' as const,
-    },
-  ]
-  return (
-    <section className="tra-card-flat">
-      <header className="tra-sec-h" style={{ marginBottom: 12 }}>
-        <h2>{t('trendsPage.formatTrendsTitle')}</h2>
-        <span className="tra-sec-sub">{t('trendsPage.formatTrendsSubtitle')}</span>
-      </header>
-      <div className="tra-format-grid">
-        {formats.map((f) => {
-          const phaseColor = f.phase === 'rising' ? PHASE_META.rising.fg : PHASE_META.fading.fg
-          const phaseBg = f.phase === 'rising' ? PHASE_META.rising.bg : PHASE_META.fading.bg
-          return (
-            <article key={f.titleKey} className="tra-format-card">
-              <div className="tra-format-h">
-                <h3 dir="auto">{t(`trendsPage.${f.titleKey}` as never)}</h3>
-                <span className="tra-format-mom" style={{ color: phaseColor, background: phaseBg }}>
-                  {f.momentum}
-                </span>
-              </div>
-              <p dir="auto">{t(`trendsPage.${f.bodyKey}` as never)}</p>
-              <div className="tra-format-foot">
-                <span>{t(`trendsPage.${f.momentumKey}` as never)}</span>
-              </div>
-            </article>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-function PostingHeatmap() {
-  const { t } = useTranslation()
-  const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-  return (
-    <section className="tra-card-flat">
-      <header className="tra-sec-h" style={{ marginBottom: 12 }}>
-        <h2>{t('trendsPage.heatmapTitle')}</h2>
-        <span className="tra-sec-sub">{t('trendsPage.heatmapSubtitle')}</span>
-      </header>
-      <div className="tra-heat" dir="ltr">
-        <div className="tra-heat-cols">
-          <span />
-          {HOUR_LABELS.map((h) => (
-            <span key={h}>{h}</span>
-          ))}
-        </div>
-        <div className="tra-heat-grid">
-          {HEATMAP.map((row, r) => (
-            <div key={r} className="tra-heat-row">
-              <span className="tra-heat-day">
-                {t(`trendsPage.heatmapDays.${dayKeys[r]}` as never)}
-              </span>
-              {row.map((v, c) => (
-                <div
-                  key={c}
-                  className="tra-heat-cell"
-                  style={{
-                    background:
-                      v === 0
-                        ? 'var(--ink-100)'
-                        : `oklch(0.62 0.18 285 / ${0.18 + v * 0.11})`,
-                    borderColor: v >= 5 ? 'var(--purple-700)' : 'transparent',
-                  }}
-                  title={String(v)}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-        <p className="tra-heat-hint">
-          {t('trendsPage.heatmapPeak', { slot: t('trendsPage.heatmapPeakSlot') })}
-        </p>
-      </div>
-    </section>
-  )
-}
 
 function TrendsContent() {
   const { t } = useTranslation()
