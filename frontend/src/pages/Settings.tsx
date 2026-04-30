@@ -33,8 +33,17 @@ type TabKey = typeof tabs[number]['key']
 /* ── Profile Tab ────────────────────────────────────────── */
 
 function ProfileTab() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { user, updateUser } = useAuth()
+  const isAr = i18n.language === 'ar'
+
+  function setLanguage(next: 'en' | 'ar') {
+    if (next === i18n.language) return
+    i18n.changeLanguage(next)
+    document.documentElement.dir = next === 'ar' ? 'rtl' : 'ltr'
+    document.documentElement.lang = next
+  }
+
   const [name, setName] = useState(user?.full_name || '')
   const [email] = useState(user?.email || '')
   const [currentPw, setCurrentPw] = useState('')
@@ -105,6 +114,38 @@ function ProfileTab() {
 
   return (
     <div className="space-y-6">
+      {/* Language preference */}
+      <div className="glass rounded-2xl p-6 space-y-3">
+        <h3 className="text-base font-bold text-foreground">{t('settings.languageTitle')}</h3>
+        <p className="text-xs text-muted-foreground">{t('settings.languageDesc')}</p>
+        <div className="inline-flex bg-muted rounded-lg p-1">
+          <button
+            type="button"
+            onClick={() => setLanguage('en')}
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+              !isAr
+                ? 'bg-white text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            English
+          </button>
+          <button
+            type="button"
+            onClick={() => setLanguage('ar')}
+            className={cn(
+              'px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
+              isAr
+                ? 'bg-white text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            العربية
+          </button>
+        </div>
+      </div>
+
       {/* Profile form */}
       <form onSubmit={handleSaveProfile} className="glass rounded-2xl p-6 space-y-4">
         <div>

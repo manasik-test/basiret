@@ -699,6 +699,8 @@
   },
   "settings": {
     "title": "Settings",
+    "languageTitle": "Language",
+    "languageDesc": "Choose the language Basiret displays for menus, buttons, and AI-generated copy.",
     "profileTab": "Profile",
     "organizationTab": "Organization",
     "notificationsTab": "Notifications",

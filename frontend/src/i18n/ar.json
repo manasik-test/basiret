@@ -699,6 +699,8 @@
   },
   "settings": {
     "title": "الإعدادات",
+    "languageTitle": "اللغة",
+    "languageDesc": "اختر اللغة التي يعرض بها بصيرة القوائم والأزرار والمحتوى الذي ينشئه الذكاء الاصطناعي.",
     "profileTab": "الملف الشخصي",
     "organizationTab": "المؤسسة",
     "notificationsTab": "الإشعارات",

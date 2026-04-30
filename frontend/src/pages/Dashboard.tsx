@@ -198,7 +198,10 @@ function GrowthRing({ score, change, isAr }: { score: number; change: number; is
           transform="rotate(-90 60 60)"
         />
       </svg>
-      <div className="hm-kpi-ring-c">
+      {/* dir="ltr" + isolation: the slash + digits read as a single
+          left-to-right token, otherwise the bidi algorithm reorders the "/"
+          weirdly between Arabic-Indic digits in an RTL container. */}
+      <div className="hm-kpi-ring-c" dir="ltr">
         <span className="num">{fmt(Math.round(score), isAr)}</span>
         <em>/{fmt(100, isAr)}</em>
       </div>
@@ -623,7 +626,7 @@ function GrowthHealthBreakdown({
           <h3>{t('home.growthHealthBreakdown')}</h3>
           <p>{t('home.growthHealthBreakdownSubtitle')}</p>
         </div>
-        <div className="hm-score">
+        <div className="hm-score" dir="ltr">
           <span className="num">{fmt(displayScore, isAr)}</span>
           <em>/{fmt(100, isAr)}</em>
         </div>
