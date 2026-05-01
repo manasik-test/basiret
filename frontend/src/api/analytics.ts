@@ -4,6 +4,10 @@ export interface OverviewData {
   total_posts: number
   total_likes: number
   total_comments: number
+  total_shares?: number
+  total_saves?: number
+  total_reach?: number
+  total_impressions?: number
   total_engagement: number
   connected_accounts: number
   avg_engagement_per_post: number

@@ -266,20 +266,25 @@ function KpiStrip({
   const score =
     insightScore ?? Math.round(((consistencyValue + audienceFitValue + varietyValue + igPerfValue) / 4) * 100)
 
-  // Prefer the engagement timeline (real per-day totals) over the breakdown's
-  // posting-dates aggregate. Falls back to overview totals when the timeline
-  // hasn't loaded yet.
-  const totalEng = timeline?.length
-    ? timeline.reduce((s, e) => s + e.engagement, 0)
-    : overview?.total_engagement ?? (sentiment?.positive ?? 0) + (sentiment?.neutral ?? 0) + (sentiment?.negative ?? 0)
-  const totalReach = timeline?.length
-    ? timeline.reduce((s, e) => s + e.reach, 0)
-    : overview
-      ? Math.round(overview.total_engagement * 5)
-      : 0
-  const postsThisMonth = timeline?.length
-    ? timeline.reduce((s, e) => s + e.posts, 0)
-    : breakdown?.posting_dates?.reduce((s, d) => s + d.count, 0) ?? overview?.total_posts ?? 0
+  // Prefer the engagement timeline (real per-day totals over the last 30 days);
+  // when it's empty (sparse posting / older account), fall through to the
+  // overview's lifetime aggregates. The previous `??` chain was broken because
+  // an empty `.reduce(...)` returns 0 — which `??` accepts as a valid value
+  // and never reaches `overview.total_posts`. Length-checking each source
+  // before reducing avoids that trap.
+  const timelineEng = timeline?.length ? timeline.reduce((s, e) => s + e.engagement, 0) : null
+  const timelineReach = timeline?.length ? timeline.reduce((s, e) => s + e.reach, 0) : null
+  const timelinePosts = timeline?.length ? timeline.reduce((s, e) => s + e.posts, 0) : null
+  const breakdownPosts = breakdown?.posting_dates?.length
+    ? breakdown.posting_dates.reduce((s, d) => s + d.count, 0)
+    : null
+  const sentimentSum = sentiment
+    ? (sentiment.positive ?? 0) + (sentiment.neutral ?? 0) + (sentiment.negative ?? 0)
+    : null
+
+  const totalEng = timelineEng ?? overview?.total_engagement ?? sentimentSum ?? 0
+  const totalReach = timelineReach ?? overview?.total_reach ?? (overview ? overview.total_engagement * 5 : 0)
+  const postsThisMonth = timelinePosts ?? breakdownPosts ?? overview?.total_posts ?? 0
 
   const engBuckets = sparkFromTimeline(timeline, 'engagement')
   const reachBuckets = sparkFromTimeline(timeline, 'reach')
