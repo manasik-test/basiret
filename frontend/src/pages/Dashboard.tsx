@@ -266,25 +266,30 @@ function KpiStrip({
   const score =
     insightScore ?? Math.round(((consistencyValue + audienceFitValue + varietyValue + igPerfValue) / 4) * 100)
 
-  // Prefer the engagement timeline (real per-day totals over the last 30 days);
-  // when it's empty (sparse posting / older account), fall through to the
-  // overview's lifetime aggregates. The previous `??` chain was broken because
-  // an empty `.reduce(...)` returns 0 — which `??` accepts as a valid value
-  // and never reaches `overview.total_posts`. Length-checking each source
-  // before reducing avoids that trap.
-  const timelineEng = timeline?.length ? timeline.reduce((s, e) => s + e.engagement, 0) : null
-  const timelineReach = timeline?.length ? timeline.reduce((s, e) => s + e.reach, 0) : null
-  const timelinePosts = timeline?.length ? timeline.reduce((s, e) => s + e.posts, 0) : null
-  const breakdownPosts = breakdown?.posting_dates?.length
-    ? breakdown.posting_dates.reduce((s, d) => s + d.count, 0)
-    : null
+  // "Total engagement" + "Reach" = lifetime aggregates (per their labels), so
+  // pull from /overview directly. The timeline is a recent-period view used
+  // only for the sparkline + delta. Falls back to summed sentiment counts when
+  // /overview is in flight, so first paint isn't a stack of zeros.
   const sentimentSum = sentiment
     ? (sentiment.positive ?? 0) + (sentiment.neutral ?? 0) + (sentiment.negative ?? 0)
     : null
+  const totalEng = overview?.total_engagement ?? sentimentSum ?? 0
+  const totalReach = overview?.total_reach ?? (overview ? overview.total_engagement * 5 : 0)
 
-  const totalEng = timelineEng ?? overview?.total_engagement ?? sentimentSum ?? 0
-  const totalReach = timelineReach ?? overview?.total_reach ?? (overview ? overview.total_engagement * 5 : 0)
-  const postsThisMonth = timelinePosts ?? breakdownPosts ?? overview?.total_posts ?? 0
+  // "Posts this month" = recent posts in the selected window. Prefer the
+  // timeline sum, but treat 0 (sparse / older account) as "no recent data" and
+  // fall through to the lifetime total — anything > 0 is more useful than the
+  // bare zero the user actually sees today.
+  const timelinePostCount = timeline?.length ? timeline.reduce((s, e) => s + e.posts, 0) : 0
+  const breakdownPostCount = breakdown?.posting_dates?.length
+    ? breakdown.posting_dates.reduce((s, d) => s + d.count, 0)
+    : 0
+  const postsThisMonth =
+    timelinePostCount > 0
+      ? timelinePostCount
+      : breakdownPostCount > 0
+        ? breakdownPostCount
+        : overview?.total_posts ?? 0
 
   const engBuckets = sparkFromTimeline(timeline, 'engagement')
   const reachBuckets = sparkFromTimeline(timeline, 'reach')
