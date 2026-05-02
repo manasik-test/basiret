@@ -184,6 +184,17 @@ function ContentPlanContent() {
             <Icon path={I.spark} size={14} />
             <span>{t('contentPlanPage.regeneratePlan')}</span>
           </button>
+          <button
+            className="cp-create"
+            type="button"
+            // No-op until Sprint 3 lands the Post Creator. The button is
+            // already rendered + styled so the layout doesn't shift when
+            // the handler is wired up.
+            onClick={() => undefined}
+          >
+            <Icon path={I.spark} size={14} />
+            <span>{t('contentPlanPage.createPost')}</span>
+          </button>
         </div>
       </header>
 
@@ -408,14 +419,229 @@ function ContentPlanContent() {
   )
 }
 
+type ContentPlanTab = 'ai' | 'calendar' | 'drafts' | 'published'
+
 export default function Recommendations() {
   const { t } = useTranslation()
   const isLocked = useIsFeatureLocked('content_recommendations')
+  const [tab, setTab] = useState<ContentPlanTab>('ai')
 
+  // Tab bar lives INSIDE the LockedFeature wrapper so all four tabs share
+  // the same Pro-tier gate as the AI plan. Starter users see the blurred
+  // overlay across the entire surface (consistent with the rest of the
+  // pricing model).
   return (
     <LockedFeature locked={isLocked} featureName={t('nav.contentPlan')}>
-      <ContentPlanContent />
+      <div className="rd-canvas">
+        <div className="cp-shell">
+          <div className="cp-tabs" role="tablist">
+            {(
+              [
+                { key: 'ai', labelKey: 'contentPlanPage.tabs.ai' },
+                { key: 'calendar', labelKey: 'contentPlanPage.tabs.calendar' },
+                { key: 'drafts', labelKey: 'contentPlanPage.tabs.drafts' },
+                { key: 'published', labelKey: 'contentPlanPage.tabs.published' },
+              ] as const
+            ).map(({ key, labelKey }) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={tab === key}
+                className={tab === key ? 'cp-tab is-on' : 'cp-tab'}
+                onClick={() => setTab(key)}
+              >
+                {t(labelKey)}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'ai' && <ContentPlanContent />}
+          {tab === 'calendar' && <CalendarTab />}
+          {tab === 'drafts' && <DraftsTab />}
+          {tab === 'published' && <PublishedTab />}
+        </div>
+        <style>{CP_TAB_STYLES}</style>
+      </div>
     </LockedFeature>
+  )
+}
+
+/* ---------------- Calendar tab ---------------- */
+
+type CalendarFilter = 'all' | 'scheduled' | 'published' | 'draft'
+
+function CalendarTab() {
+  const { t, i18n } = useTranslation()
+  const isAr = !!i18n.language?.startsWith('ar')
+  const [cursor, setCursor] = useState<Date>(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [filter, setFilter] = useState<CalendarFilter>('all')
+
+  const today = new Date()
+  const todayY = today.getFullYear()
+  const todayM = today.getMonth()
+  const todayD = today.getDate()
+
+  const year = cursor.getFullYear()
+  const month = cursor.getMonth()
+  const monthLabel = cursor.toLocaleDateString(
+    isAr ? 'ar-EG-u-ca-gregory' : 'en-US',
+    { month: 'long', year: 'numeric' },
+  )
+
+  // Build a Sunday-first 6×7 grid covering the displayed month.
+  // First-of-month's weekday tells us how many leading blanks to render.
+  const firstWeekday = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: Array<{ day: number | null; isToday: boolean }> = []
+  for (let i = 0; i < firstWeekday; i++) cells.push({ day: null, isToday: false })
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({
+      day: d,
+      isToday: year === todayY && month === todayM && d === todayD,
+    })
+  }
+  while (cells.length % 7 !== 0) cells.push({ day: null, isToday: false })
+
+  // Localized weekday header. Use a fixed Sunday in 2024 (a known Sun) +
+  // increment, so the labels respect the active locale and show as
+  // "Sun Mon Tue …" / "أحد إثنين ثلاثاء …".
+  const weekdayLabels = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(2024, 0, 7 + i) // Jan 7 2024 was a Sunday
+    return d.toLocaleDateString(
+      isAr ? 'ar-EG-u-ca-gregory' : 'en-US',
+      { weekday: 'short' },
+    )
+  })
+
+  const filterKeys: CalendarFilter[] = ['all', 'scheduled', 'published', 'draft']
+  void filter // filter is wired to the pills today; counts/data hook up in Sprint 3.
+
+  return (
+    <div className="cp-cal">
+      <div className="cp-cal-head">
+        <div className="cp-cal-nav">
+          <button
+            type="button"
+            className="cp-nav"
+            aria-label={t('contentPlanPage.calendar.prev')}
+            onClick={() => setCursor(new Date(year, month - 1, 1))}
+          >
+            <Icon path={I.chevR} size={14} />
+          </button>
+          <div className="cp-cal-month" dir="auto">{monthLabel}</div>
+          <button
+            type="button"
+            className="cp-nav"
+            aria-label={t('contentPlanPage.calendar.next')}
+            onClick={() => setCursor(new Date(year, month + 1, 1))}
+          >
+            <Icon path={I.chevL} size={14} />
+          </button>
+        </div>
+        <div className="cp-cal-filters" role="tablist">
+          {filterKeys.map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={filter === key ? 'cp-filter is-on' : 'cp-filter'}
+              onClick={() => setFilter(key)}
+            >
+              {t(`contentPlanPage.calendar.filter.${key}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="cp-cal-grid-wrap">
+        <div className="cp-cal-grid cp-cal-weekdays">
+          {weekdayLabels.map((w, i) => (
+            <div key={i} className="cp-cal-weekday">{w}</div>
+          ))}
+        </div>
+        <div className="cp-cal-grid cp-cal-days">
+          {cells.map((cell, i) =>
+            cell.day === null ? (
+              <div key={i} className="cp-cal-cell is-blank" aria-hidden />
+            ) : (
+              <button
+                key={i}
+                type="button"
+                className={cell.isToday ? 'cp-cal-cell is-today' : 'cp-cal-cell'}
+                // No-op until Sprint 3 — clicking a day will open the
+                // Post Creator pre-filled with that date.
+                onClick={() => undefined}
+                aria-label={t('contentPlanPage.calendar.dayLabel', { d: cell.day })}
+              >
+                <span className="cp-cal-num num">{cell.day}</span>
+              </button>
+            ),
+          )}
+        </div>
+        <div className="cp-cal-empty" aria-live="polite">
+          {t('contentPlanPage.calendar.empty')}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Drafts / Published tabs ---------------- */
+
+function DraftsTab() {
+  const { t } = useTranslation()
+  return (
+    <EmptyListTab
+      iconPath={I.pencil}
+      title={t('contentPlanPage.drafts.title')}
+      body={t('contentPlanPage.drafts.body')}
+      cta={t('contentPlanPage.createPost')}
+    />
+  )
+}
+
+function PublishedTab() {
+  const { t } = useTranslation()
+  return (
+    <EmptyListTab
+      iconPath={I.trend}
+      title={t('contentPlanPage.published.title')}
+      body={t('contentPlanPage.published.body')}
+      cta={t('contentPlanPage.createPost')}
+    />
+  )
+}
+
+function EmptyListTab({
+  iconPath,
+  title,
+  body,
+  cta,
+}: {
+  iconPath: React.ReactNode
+  title: string
+  body: string
+  cta: string
+}) {
+  return (
+    <div className="cp-empty-card">
+      <div className="cp-empty-icon">
+        <Icon path={iconPath} size={32} />
+      </div>
+      <h2 className="cp-empty-title" dir="auto">{title}</h2>
+      <p className="cp-empty-body" dir="auto">{body}</p>
+      <button
+        type="button"
+        className="cp-create"
+        // No-op for now; Sprint 3 wires the Post Creator.
+        onClick={() => undefined}
+      >
+        <Icon path={I.spark} size={14} />
+        <span>{cta}</span>
+      </button>
+    </div>
   )
 }
 
@@ -531,4 +757,59 @@ const CP_STYLES = `
 .cp-cta { flex:1.4; display:flex; align-items:center; justify-content:center; gap:7px; padding:12px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84,51,194,.55), inset 0 1px 0 rgba(255,255,255,.15); transition:background .12s, transform .12s; }
 .cp-cta:hover:not(:disabled) { background:var(--purple-700); transform:translateY(-1px); }
 .cp-cta:disabled { opacity:.7; cursor:not-allowed; }
+
+/* Magenta "Create post" CTA shared by AI Plan header + empty-state tabs.
+   Uses the brand CTA color (#BF499B) so it's visually distinct from the
+   primary purple regenerate button next to it. */
+.cp-create { display:inline-flex; align-items:center; gap:8px; padding:11px 18px; background:#BF499B; color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(191,73,155,.55), inset 0 1px 0 rgba(255,255,255,.15); transition:background .12s, transform .12s; }
+.cp-create:hover { background:#A83B85; transform:translateY(-1px); }
+`
+
+/* Styles for the Sprint-2 tab bar + Calendar tab + empty-state tabs.
+   Kept separate from CP_STYLES so the AI-Plan view stays untouched and
+   the new shell can evolve independently. */
+const CP_TAB_STYLES = `
+.cp-shell { display:flex; flex-direction:column; gap:18px; max-width:1480px; margin:0 auto; padding-top:18px; }
+
+/* Tab bar */
+.cp-tabs { display:flex; gap:4px; padding:4px; background:var(--surface); border:1px solid var(--line); border-radius:12px; align-self:flex-start; }
+.cp-tab { padding:8px 18px; border-radius:8px; font-size:13px; font-weight:600; color:var(--ink-600); transition:background .12s, color .12s; background:transparent; border:none; cursor:pointer; }
+.cp-tab:hover { color:var(--ink-900); background:var(--ink-50); }
+.cp-tab.is-on { background:var(--purple-600); color:#fff; box-shadow:0 4px 12px -4px rgba(84,51,194,.45); }
+.cp-tab.is-on:hover { background:var(--purple-700); color:#fff; }
+
+/* Override: when an "AI Plan" tab is active, the existing .cp container
+   already provides its own padding-top — strip the shell's top padding
+   so we don't double up. */
+.cp-shell > .rd-canvas:first-of-type, .cp-shell > .cp { padding-top:0; }
+
+/* Calendar */
+.cp-cal { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:22px; display:flex; flex-direction:column; gap:18px; }
+.cp-cal-head { display:flex; align-items:center; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+.cp-cal-nav { display:flex; align-items:center; gap:14px; }
+.cp-cal-month { font-size:18px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; min-width:180px; text-align:center; }
+.cp-cal-filters { display:flex; gap:6px; flex-wrap:wrap; }
+
+.cp-cal-grid-wrap { position:relative; }
+.cp-cal-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
+.cp-cal-weekdays { margin-bottom:6px; }
+.cp-cal-weekday { text-align:center; font-size:11px; font-weight:600; color:var(--ink-500); text-transform:uppercase; letter-spacing:0.04em; padding:6px 0; }
+
+.cp-cal-cell { aspect-ratio:1.05; border-radius:10px; background:var(--ink-50); border:1px solid transparent; display:flex; align-items:flex-start; justify-content:flex-start; padding:8px 10px; color:var(--ink-700); font-size:13px; font-weight:600; transition:background .12s, border-color .12s, color .12s; cursor:pointer; }
+.cp-cal-cell:hover { background:var(--purple-50); border-color:var(--purple-200); color:var(--purple-900); }
+.cp-cal-cell.is-blank { background:transparent; cursor:default; pointer-events:none; }
+.cp-cal-cell.is-today { background:var(--purple-100); border-color:var(--purple-300); color:var(--purple-900); }
+.cp-cal-cell.is-today:hover { background:var(--purple-200); }
+.cp-cal-num { font-variant-numeric:tabular-nums; }
+
+/* Empty-state overlay sits centered on top of the empty grid so the
+   month structure stays visible behind it. pointer-events:none lets day
+   clicks pass through. */
+.cp-cal-empty { position:absolute; inset:50% 0 auto 0; transform:translateY(-50%); text-align:center; font-size:13px; color:var(--ink-500); padding:0 18px; pointer-events:none; }
+
+/* Empty-state cards for Drafts + Published */
+.cp-empty-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:64px 24px; display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center; }
+.cp-empty-icon { width:64px; height:64px; border-radius:16px; background:var(--purple-50); color:var(--purple-700); display:grid; place-items:center; }
+.cp-empty-title { font-size:18px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; }
+.cp-empty-body { font-size:13.5px; color:var(--ink-500); max-width:420px; line-height:1.6; }
 `

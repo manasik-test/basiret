@@ -677,6 +677,33 @@
       "friday": "Friday",
       "saturday": "Saturday",
       "sunday": "Sunday"
+    },
+    "createPost": "✦ Create post",
+    "tabs": {
+      "ai": "AI Plan",
+      "calendar": "Calendar",
+      "drafts": "Drafts",
+      "published": "Published"
+    },
+    "calendar": {
+      "prev": "Previous month",
+      "next": "Next month",
+      "dayLabel": "Day {{d}}",
+      "empty": "No scheduled posts yet — create your first post to see it here.",
+      "filter": {
+        "all": "All",
+        "scheduled": "Scheduled",
+        "published": "Published",
+        "draft": "Draft"
+      }
+    },
+    "drafts": {
+      "title": "No drafts yet",
+      "body": "Create a post and save it as a draft to find it here."
+    },
+    "published": {
+      "title": "Nothing published yet",
+      "body": "Posts you publish through Basiret will appear here with their performance metrics."
     }
   },
   "sentiment": {
