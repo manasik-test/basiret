@@ -1,0 +1,2 @@
+# Force LF line endings on shell hooks so bash works on Linux + macOS + Git Bash.
+.githooks/* text eol=lf
