@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/marketing-i18n";
 
 export default function AboutPage() {
-  const { t, lang, dir } = useI18n();
+  const { lang, dir } = useI18n();
   const tr = (en: string, ar: string) => (lang === "en" ? en : ar);
 
   const values = [
