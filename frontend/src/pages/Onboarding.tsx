@@ -14,17 +14,14 @@ import {
   PartyPopper,
   Check,
   X,
-  Building2,
 } from 'lucide-react'
 import api from '../api/client'
-import {
-  saveBusinessProfile,
-  type AudienceLanguage,
-  type BusinessCategory,
-  type BusinessCountry,
-} from '../api/auth'
 
-const STEPS = ['account', 'business', 'connect', 'complete'] as const
+// Onboarding visible-input steps are now {account, connect}; "complete" is a
+// brief success screen that auto-redirects to /dashboard. Business profile
+// + brand identity have moved to the Get Started checklist on Home so the
+// user can land on the dashboard faster and configure at their own pace.
+const STEPS = ['account', 'connect', 'complete'] as const
 type Step = (typeof STEPS)[number]
 
 // ── Password validation ────────────────────────────────────
@@ -123,7 +120,6 @@ function StepIndicator({ current }: { current: Step }) {
   const { t } = useTranslation()
   const labels = [
     t('onboarding.stepAccount'),
-    t('onboarding.stepBusiness'),
     t('onboarding.stepConnect'),
     t('onboarding.stepComplete'),
   ]
@@ -310,193 +306,7 @@ function StepAccount({ onNext }: { onNext: () => void }) {
   )
 }
 
-// ── Step 2: Business profile ───────────────────────────────
-
-const CATEGORY_OPTIONS: Array<{ value: BusinessCategory; key: string }> = [
-  { value: 'restaurant_cafe', key: 'onboarding.categoryRestaurantCafe' },
-  { value: 'fashion_clothing', key: 'onboarding.categoryFashionClothing' },
-  { value: 'beauty_salon', key: 'onboarding.categoryBeautySalon' },
-  { value: 'fitness_gym', key: 'onboarding.categoryFitnessGym' },
-  { value: 'real_estate', key: 'onboarding.categoryRealEstate' },
-  { value: 'retail_shop', key: 'onboarding.categoryRetailShop' },
-  { value: 'services', key: 'onboarding.categoryServices' },
-  { value: 'other', key: 'onboarding.categoryOther' },
-]
-
-const COUNTRY_OPTIONS: Array<{ value: BusinessCountry; key: string }> = [
-  { value: 'AE', key: 'onboarding.countryAE' },
-  { value: 'SA', key: 'onboarding.countrySA' },
-  { value: 'EG', key: 'onboarding.countryEG' },
-  { value: 'JO', key: 'onboarding.countryJO' },
-  { value: 'KW', key: 'onboarding.countryKW' },
-  { value: 'QA', key: 'onboarding.countryQA' },
-  { value: 'BH', key: 'onboarding.countryBH' },
-  { value: 'OM', key: 'onboarding.countryOM' },
-  { value: 'TR', key: 'onboarding.countryTR' },
-  { value: 'SD', key: 'onboarding.countrySD' },
-  { value: 'OTHER', key: 'onboarding.countryOTHER' },
-]
-
-function StepBusiness({ onNext }: { onNext: () => void }) {
-  const { t } = useTranslation()
-  const [category, setCategory] = useState<BusinessCategory | ''>('')
-  const [city, setCity] = useState('')
-  const [country, setCountry] = useState<BusinessCountry | ''>('')
-  const [audienceLanguage, setAudienceLanguage] = useState<AudienceLanguage>('both')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const canSubmit = !!category && !!country && city.trim().length > 0 && !loading
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!canSubmit) return
-    setError('')
-    setLoading(true)
-    try {
-      await saveBusinessProfile({
-        category: category as BusinessCategory,
-        city: city.trim(),
-        country: country as BusinessCountry,
-        audience_language: audienceLanguage,
-      })
-      onNext()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg || t('onboarding.businessError'))
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="text-center">
-        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
-          <Building2 className="w-8 h-8 text-primary" />
-        </div>
-        <h2 className="text-xl font-bold text-foreground">{t('onboarding.businessTitle')}</h2>
-        <p className="text-sm text-muted-foreground mt-1">{t('onboarding.businessSubtitle')}</p>
-      </div>
-
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-foreground mb-1.5">
-            {t('onboarding.businessCategory')}
-          </label>
-          <select
-            required
-            value={category}
-            onChange={(e) => setCategory(e.target.value as BusinessCategory)}
-            className="glass w-full rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="" disabled>
-              {t('onboarding.businessCategoryPlaceholder')}
-            </option>
-            {CATEGORY_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {t(opt.key)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">
-              {t('onboarding.businessCity')}
-            </label>
-            <input
-              type="text"
-              required
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              className="glass w-full rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={t('onboarding.businessCityPlaceholder')}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">
-              {t('onboarding.businessCountry')}
-            </label>
-            <select
-              required
-              value={country}
-              onChange={(e) => setCountry(e.target.value as BusinessCountry)}
-              className="glass w-full rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="" disabled>
-                {t('onboarding.businessCountryPlaceholder')}
-              </option>
-              {COUNTRY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {t(opt.key)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-foreground mb-1.5">
-            {t('onboarding.businessAudienceLanguage')}
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                { value: 'ar', label: t('onboarding.businessAudienceArabic') },
-                { value: 'en', label: t('onboarding.businessAudienceEnglish') },
-                { value: 'both', label: t('onboarding.businessAudienceBoth') },
-              ] as const
-            ).map((opt) => {
-              const selected = audienceLanguage === opt.value
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setAudienceLanguage(opt.value)}
-                  className={cn(
-                    'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
-                    selected
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'glass text-foreground border-transparent hover:bg-muted/40',
-                  )}
-                >
-                  {opt.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="w-full rounded-lg bg-primary text-primary-foreground py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? t('onboarding.businessSaving') : t('onboarding.businessSave')}
-        </button>
-
-        <button
-          type="button"
-          onClick={onNext}
-          className="flex items-center justify-center gap-1 w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {t('onboarding.businessSkip')}
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </form>
-    </div>
-  )
-}
-
-// ── Step 3: Connect Instagram ──────────────────────────────
+// ── Step 2: Connect Instagram ──────────────────────────────
 
 function StepConnect({ onNext }: { onNext: () => void }) {
   const { t } = useTranslation()
@@ -626,7 +436,6 @@ export default function Onboarding({ initialStep = 'account' }: { initialStep?: 
         <StepIndicator current={step} />
 
         {step === 'account' && <StepAccount onNext={next} />}
-        {step === 'business' && <StepBusiness onNext={next} />}
         {step === 'connect' && <StepConnect onNext={next} />}
         {step === 'complete' && <StepComplete />}
       </div>

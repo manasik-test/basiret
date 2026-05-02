@@ -116,6 +116,54 @@ export async function saveBusinessProfile(profile: BusinessProfile): Promise<Bus
   return res.data
 }
 
+// ── Brand identity ──────────────────────────────────────────
+
+export type BrandTone = 'professional' | 'friendly' | 'luxurious' | 'playful' | 'inspiring'
+export type BrandLanguageStyle = 'formal_arabic' | 'casual_dialect' | 'bilingual'
+export type BrandEmojiUsage = 'never' | 'occasionally' | 'frequently'
+export type BrandCaptionLength = 'short' | 'medium' | 'long'
+export type BrandImageStyle = 'clean' | 'vibrant' | 'minimal' | 'luxurious' | 'playful'
+
+export interface BrandIdentity {
+  primary_color: string
+  secondary_color: string
+  tone: BrandTone
+  language_style: BrandLanguageStyle
+  emoji_usage: BrandEmojiUsage
+  caption_length: BrandCaptionLength
+  content_pillars: string[]
+  image_style: BrandImageStyle
+  detected_from_posts: boolean
+}
+
+export interface DetectedBrandIdentity extends BrandIdentity {
+  // The detect endpoint annotates the source so the UI can render the
+  // appropriate "we got this from X" hint above the preview.
+  source: 'captions' | 'category' | 'fallback'
+}
+
+export async function fetchBrandIdentity(): Promise<BrandIdentity> {
+  const res = await api.get<unknown, { success: boolean; data: BrandIdentity }>(
+    '/auth/brand-identity',
+  )
+  return res.data
+}
+
+export async function saveBrandIdentity(payload: BrandIdentity): Promise<BrandIdentity> {
+  const res = await api.put<unknown, { success: boolean; data: BrandIdentity }>(
+    '/auth/brand-identity',
+    payload,
+  )
+  return res.data
+}
+
+export async function detectBrandIdentity(): Promise<DetectedBrandIdentity> {
+  const res = await api.post<unknown, { success: boolean; data: DetectedBrandIdentity }>(
+    '/auth/brand-identity/detect',
+  )
+  return res.data
+}
+
 export async function deleteAccount(password: string): Promise<{ outcome: 'org_deleted' | 'user_only' }> {
   // Axios `delete` only sends a body when explicitly placed under `data`.
   const res = await api.delete<unknown, { success: boolean; data: { outcome: 'org_deleted' | 'user_only' } }>(

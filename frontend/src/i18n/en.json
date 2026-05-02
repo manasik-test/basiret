@@ -162,7 +162,15 @@
     },
     "whatsWorkingSubtitle": "Patterns drawn from your recent posts",
     "growthHealthBreakdown": "Growth health breakdown",
-    "growthHealthBreakdownSubtitle": "The four factors that drive your score"
+    "growthHealthBreakdownSubtitle": "The four factors that drive your score",
+    "getStarted": {
+      "title": "Let's get you set up",
+      "subtitle": "{{done}} of {{total}} steps complete — finish setup to unlock the full Basiret experience.",
+      "itemInstagram": "Connect your Instagram account",
+      "itemBusiness": "Complete your business profile",
+      "itemBrand": "Set up your brand identity",
+      "setUpLink": "Set up"
+    }
   },
   "auth": {
     "signIn": "Sign in",
@@ -729,14 +737,68 @@
     "hashtag3": "#contentcreator",
     "hashtag3Reach": "~6K estimated reach"
   },
+  "brandIdentity": {
+    "title": "Brand Identity",
+    "subtitle": "Set the voice, tone, and look that Basiret uses when it writes for you.",
+    "sectionVisual": "Visual identity",
+    "sectionVoice": "Voice & tone",
+    "sectionPillars": "Content pillars",
+    "primaryColor": "Primary color",
+    "secondaryColor": "Secondary color",
+    "toneLabel": "Tone of voice",
+    "tone": {
+      "professional": "Professional",
+      "friendly": "Friendly",
+      "luxurious": "Luxurious",
+      "playful": "Playful",
+      "inspiring": "Inspiring"
+    },
+    "languageStyleLabel": "Language style",
+    "languageStyle": {
+      "formal_arabic": "Formal Arabic (فصحى)",
+      "casual_dialect": "Casual dialect (عامية)",
+      "bilingual": "Bilingual (Arabic + English)"
+    },
+    "emojiUsageLabel": "Emoji usage",
+    "emojiUsage": {
+      "never": "Never",
+      "occasionally": "Occasionally",
+      "frequently": "Frequently"
+    },
+    "captionLengthLabel": "Caption length",
+    "captionLength": {
+      "short": "Short (<50 words)",
+      "medium": "Medium (50–100 words)",
+      "long": "Long (100+ words)"
+    },
+    "noPillars": "No pillars yet — add up to 5 themes you post about.",
+    "pillarPlaceholder": "Add a pillar (e.g. New arrivals)",
+    "addPillar": "Add",
+    "suggestionLabel": "Try one of these:",
+    "detectTitle": "Detect from my posts",
+    "detectBody": "Let Basiret analyze your recent posts and suggest a brand voice you can apply with one click.",
+    "detectButton": "Detect from my posts",
+    "detecting": "Analyzing your posts…",
+    "detectError": "We couldn't detect your brand voice right now. Try again in a moment.",
+    "detectPreviewTitle": "Suggested settings",
+    "applyDetected": "Apply these settings",
+    "dismissDetected": "Dismiss",
+    "save": "Save brand identity",
+    "saving": "Saving…",
+    "savedToast": "Brand identity saved",
+    "saveError": "Couldn't save — please try again.",
+    "invalidColor": "Colors must be in #RRGGBB format."
+  },
   "settings": {
     "title": "Settings",
     "languageTitle": "Language",
     "languageDesc": "Choose the language Basiret displays for menus, buttons, and AI-generated copy.",
     "profileTab": "Profile",
     "organizationTab": "Organization",
+    "brandIdentityTab": "Brand",
     "notificationsTab": "Notifications",
     "billingTab": "Billing",
+    "dangerTab": "Danger zone",
     "fullName": "Full Name",
     "email": "Email",
     "changePassword": "Change Password",

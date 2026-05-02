@@ -178,6 +178,34 @@ def test_generate_caption_with_gemini(client, starter_user):
     assert resp.json()["data"]["caption"] == fake_caption
 
 
+def test_caption_image_ratio_in_prompt(client, starter_user):
+    """When image_ratio is sent, the system prompt mentions the ratio's
+    word ('square'/'portrait'/'landscape') so Gemini formats accordingly."""
+    _, _, token = starter_user
+    captured: dict = {}
+
+    class _SpyProvider:
+        name = "spy"
+
+        def generate_text(self, system, user, temperature=0.5, **_kwargs):
+            captured["system"] = system
+            captured["user"] = user
+            return "fake caption"
+
+        def generate_json(self, *_args, **_kwargs):
+            return {}
+
+    with patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         patch("app.api.v1.ai_pages.get_provider", return_value=_SpyProvider()):
+        resp = client.post(
+            "/api/v1/ai-pages/generate-caption",
+            json={"content_type": "image", "language": "en", "image_ratio": "4:5"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200
+    assert "portrait" in captured.get("system", "").lower()
+
+
 def test_generate_caption_arabic(client, starter_user):
     """Arabic-language request goes through; backend just plumbs the language flag."""
     _, _, token = starter_user

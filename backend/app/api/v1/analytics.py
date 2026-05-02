@@ -120,6 +120,7 @@ def _generate_highlights(
     language: str = "en",
     account_id: str | None = None,
     source: str = "user",
+    brand_block: str = "",
 ) -> str:
     """Ask Gemini for a 2-sentence audience-intelligence summary.
 
@@ -148,7 +149,8 @@ def _generate_highlights(
         f"{k['term']} ({k['sentiment']}, n={k['count']})" for k in keywords
     ) or "(none)"
     user_msg = (
-        f"Total comments this week: {total_week}\n"
+        (f"{brand_block}\n" if brand_block else "")
+        + f"Total comments this week: {total_week}\n"
         f"Sentiment this week: {pct(current_counts.get('positive', 0))}% positive, "
         f"{pct(current_counts.get('neutral', 0))}% neutral, "
         f"{pct(current_counts.get('negative', 0))}% negative\n"
@@ -850,11 +852,12 @@ def sentiment_summary(
 
     # ── Gemini highlights (SWR cached: fresh ≤24h, stale 24-72h) ─────
     lang = "ar" if str(language).lower().startswith("ar") else "en"
-    from app.api.v1.ai_pages import _resolve_ai_payload
+    from app.api.v1.ai_pages import _resolve_ai_payload, _brand_context_block
 
     highlights = ""
     meta = build_fresh_meta()
     cache_account = str(account_ids[0]) if account_ids else None
+    brand_block = _brand_context_block(db, cache_account) if cache_account else ""
     if cache_account and total_week > 0:
         def _compute() -> dict:
             return {
@@ -865,6 +868,7 @@ def sentiment_summary(
                     keywords=keywords,
                     language=lang,
                     account_id=cache_account,
+                    brand_block=brand_block,
                 )
             }
         try:

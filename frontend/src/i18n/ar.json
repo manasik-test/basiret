@@ -162,7 +162,15 @@
     },
     "whatsWorkingSubtitle": "أنماط من تحليل منشوراتك الأخيرة",
     "growthHealthBreakdown": "تفاصيل صحة نموك",
-    "growthHealthBreakdownSubtitle": "العوامل الأربعة التي تحدد النتيجة"
+    "growthHealthBreakdownSubtitle": "العوامل الأربعة التي تحدد النتيجة",
+    "getStarted": {
+      "title": "لنُكمل إعداد حسابك",
+      "subtitle": "اكتملت {{done}} من {{total}} خطوات — أكمل الإعداد لتستفيد من كل مزايا بصيرة.",
+      "itemInstagram": "اربط حساب إنستغرام",
+      "itemBusiness": "أكمل ملف نشاطك التجاري",
+      "itemBrand": "حدد هوية علامتك التجارية",
+      "setUpLink": "ابدأ"
+    }
   },
   "auth": {
     "signIn": "تسجيل الدخول",
@@ -729,14 +737,68 @@
     "hashtag3": "#صانع_محتوى",
     "hashtag3Reach": "~6 آلاف وصول تقديري"
   },
+  "brandIdentity": {
+    "title": "هوية العلامة التجارية",
+    "subtitle": "اضبط الصوت والنبرة والشكل الذي يستخدمه بصيرة عند الكتابة نيابةً عنك.",
+    "sectionVisual": "الهوية البصرية",
+    "sectionVoice": "الصوت والنبرة",
+    "sectionPillars": "محاور المحتوى",
+    "primaryColor": "اللون الأساسي",
+    "secondaryColor": "اللون الثانوي",
+    "toneLabel": "نبرة الخطاب",
+    "tone": {
+      "professional": "احترافية",
+      "friendly": "ودودة",
+      "luxurious": "فاخرة",
+      "playful": "مرحة",
+      "inspiring": "ملهمة"
+    },
+    "languageStyleLabel": "أسلوب اللغة",
+    "languageStyle": {
+      "formal_arabic": "العربية الفصحى",
+      "casual_dialect": "العربية العامية",
+      "bilingual": "ثنائية اللغة (عربي + إنجليزي)"
+    },
+    "emojiUsageLabel": "استخدام الإيموجي",
+    "emojiUsage": {
+      "never": "أبداً",
+      "occasionally": "أحياناً",
+      "frequently": "كثيراً"
+    },
+    "captionLengthLabel": "طول التعليق",
+    "captionLength": {
+      "short": "قصير (أقل من 50 كلمة)",
+      "medium": "متوسط (50–100 كلمة)",
+      "long": "طويل (أكثر من 100 كلمة)"
+    },
+    "noPillars": "لم تُضِف محاور بعد — أضف حتى 5 موضوعات تتحدث عنها.",
+    "pillarPlaceholder": "أضف محوراً (مثل: وصول جديد)",
+    "addPillar": "إضافة",
+    "suggestionLabel": "جرّب أحد هذه:",
+    "detectTitle": "اكتشف من منشوراتي",
+    "detectBody": "دع بصيرة يحلل منشوراتك الأخيرة ويقترح هوية صوتية تستطيع تطبيقها بنقرة واحدة.",
+    "detectButton": "اكتشف من منشوراتي",
+    "detecting": "جاري تحليل منشوراتك…",
+    "detectError": "تعذّر اكتشاف هوية علامتك الآن. حاول بعد قليل.",
+    "detectPreviewTitle": "الإعدادات المقترحة",
+    "applyDetected": "تطبيق هذه الإعدادات",
+    "dismissDetected": "إلغاء",
+    "save": "حفظ هوية العلامة",
+    "saving": "جاري الحفظ…",
+    "savedToast": "تم حفظ هوية العلامة",
+    "saveError": "تعذّر الحفظ — حاول مرة أخرى.",
+    "invalidColor": "يجب أن تكون الألوان بصيغة #RRGGBB."
+  },
   "settings": {
     "title": "الإعدادات",
     "languageTitle": "اللغة",
     "languageDesc": "اختر اللغة التي يعرض بها بصيرة القوائم والأزرار والمحتوى الذي ينشئه الذكاء الاصطناعي.",
     "profileTab": "الملف الشخصي",
     "organizationTab": "المؤسسة",
+    "brandIdentityTab": "العلامة",
     "notificationsTab": "الإشعارات",
     "billingTab": "الفوترة",
+    "dangerTab": "منطقة الحذف",
     "fullName": "الاسم الكامل",
     "email": "البريد الإلكتروني",
     "changePassword": "تغيير كلمة المرور",

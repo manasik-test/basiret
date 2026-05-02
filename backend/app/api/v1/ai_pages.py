@@ -54,6 +54,7 @@ from app.models.organization import Organization
 from app.models.post import Post
 from app.models.social_account import SocialAccount
 from app.models.user import User
+from app.core.brand_context import format_brand_identity
 from app.tasks.insights import format_business_profile
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,33 @@ def _business_context_block(profile: dict | None) -> str:
     """Build the BUSINESS CONTEXT line that gets prepended to user messages."""
     line = format_business_profile(profile)
     return f"BUSINESS CONTEXT: {line}\n\n" if line else ""
+
+
+def _organization_id_for_account(db: Session, account_id: str | None):
+    """Look up the organization_id that owns a given social account.
+
+    Used to source brand identity, which is org-scoped. Returns None when the
+    account is missing so the brand-context block degrades to empty.
+    """
+    if not account_id:
+        return None
+    row = (
+        db.query(SocialAccount.organization_id)
+        .filter(SocialAccount.id == account_id)
+        .first()
+    )
+    return row[0] if row else None
+
+
+def _brand_context_block(db: Session, account_id: str | None) -> str:
+    """Build the BRAND IDENTITY block for prompt injection.
+
+    Layered AFTER the BUSINESS CONTEXT block — business says *what* the
+    creator does, brand says *how* they sound. Empty string when the org has
+    no brand identity saved, so callers can concatenate unconditionally.
+    """
+    org_id = _organization_id_for_account(db, account_id)
+    return format_brand_identity(org_id, db)
 
 
 _BUSINESS_TAILORING_RULE = (
@@ -474,6 +502,7 @@ def posts_insights(
     user_msg = (
         "Analyze the following Instagram performance data and return strict JSON.\n\n"
         + _business_context_block(bp)
+        + _brand_context_block(db, primary_account_id)
         + "TOP POST:\n"
         f"- type: {best_payload['content_type']}\n"
         f"- likes: {best_payload['likes']}, comments: {best_payload['comments']}\n"
@@ -529,6 +558,11 @@ class CaptionRequest(BaseModel):
     language: Literal["en", "ar"] = "en"
     reference_caption: str | None = None
     post_id: str | None = None
+    # Aspect ratio of the image/video this caption accompanies. Square posts
+    # do best with punchy hook copy; portrait (4:5) is the most-read carousel
+    # format; landscape (16:9) is typically a video/IGTV cross-post and gets
+    # a different CTA framing. Omitted → no ratio guidance in the prompt.
+    image_ratio: Literal["1:1", "4:5", "16:9"] | None = None
 
 
 @router.post("/generate-caption")
@@ -567,6 +601,7 @@ def generate_caption(
             "topic": (body.topic or "").strip(),
             "post_id": body.post_id or "",
             "reference": reference[:300],
+            "image_ratio": body.image_ratio or "",
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -618,6 +653,15 @@ def generate_caption(
 
     bp = _business_profile_for_account(db, primary_account_id)
     bp_line = format_business_profile(bp)
+    brand_block = _brand_context_block(db, primary_account_id)
+    ratio_label = {"1:1": "square", "4:5": "portrait", "16:9": "landscape"}.get(
+        body.image_ratio or ""
+    )
+    ratio_rule = (
+        f"This caption is for a {ratio_label} Instagram post. "
+        if ratio_label
+        else ""
+    )
 
     sys = (
         f"You are an Instagram copywriter. Write a single caption ENTIRELY in {lang_label}. "
@@ -626,6 +670,7 @@ def generate_caption(
         "Write something a small business owner can paste directly into Instagram. "
         "Match Instagram's voice — short, punchy, scannable. "
         "1-3 lines, end with a clear question or call-to-action. "
+        + ratio_rule
         + (
             f"This caption is for: {bp_line}. Tailor language, references, and CTA to that "
             "industry, city, and audience language; avoid generic copy that could apply to "
@@ -633,6 +678,7 @@ def generate_caption(
             if bp_line
             else ""
         )
+        + (f"\n\n{brand_block}\n" if brand_block else "")
         + f"{hashtag_rule} "
         f"{emoji_rule} "
         "No quotation marks around the caption. No preamble like 'Here is...'. "
@@ -810,6 +856,7 @@ def audience_insights(
     )
     user_msg = (
         _business_context_block(bp)
+        + _brand_context_block(db, primary_account_id)
         + f"Total comments last 7 days: {total_week_comments}\n"
         f"Sentiment split: {sentiment_week}\n"
         f"Top content type by engagement (all-time): {top_type}\n"
@@ -989,6 +1036,7 @@ def content_plan(
     ]
     user_msg = (
         _business_context_block(bp)
+        + _brand_context_block(db, primary_account_id)
         + "Top-performing captions from this account (for inspiration only):\n"
         + ("\n".join(top_caps_lines) or "(none yet)")
         + "\n\nWeek plan skeleton:\n"
@@ -1115,6 +1163,7 @@ def sentiment_responses(
     )
     user_msg = (
         _business_context_block(bp)
+        + _brand_context_block(db, primary_account_id)
         + "For each post below, return ONE response template. Return strict JSON:\n"
         '{ "templates": [ { "post_id": "...", "response_template": "..." } ] }\n\n'
         + "\n\n".join(
@@ -1552,6 +1601,7 @@ def ask_basiret(
         )
 
     lang_label = _lang_label(body.language)
+    brand_block = _brand_context_block(db, primary_account_id)
     system = (
         "You are Basiret, an AI analytics assistant for Instagram. You answer "
         "questions about the user's own Instagram account using only the data "
@@ -1564,9 +1614,12 @@ def ask_basiret(
         "- If `business_profile` is present, tailor recommendations to that industry, city, "
         "and audience language — a restaurant in Dubai expects different advice than a "
         "fashion brand in Cairo. Generic advice that ignores the business context is a failure.\n"
+        "- If a BRAND IDENTITY block is provided, match the user's tone, language style, "
+        "emoji usage, caption length, and content pillars in any draft copy or recommendation.\n"
         "- Tone: expert but approachable. Not corporate. Not overly casual.\n"
         f"- Language: respond in {lang_label}. "
         + ("If Arabic, use Modern Standard Arabic." if body.language == "ar" else "")
+        + (f"\n\n{brand_block}" if brand_block else "")
         + "\n\nUser account data:\n"
         + json.dumps(context, ensure_ascii=False, default=str)
     )

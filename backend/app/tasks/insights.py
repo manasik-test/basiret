@@ -133,6 +133,7 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
 
     org = db.query(Organization).filter(Organization.id == account.organization_id).first()
     business_profile = org.business_profile if org else None
+    organization_id = org.id if org else None
 
     # Posts this week
     posts = (
@@ -343,19 +344,25 @@ def _gather_metrics(db, social_account_id: str, week_start: datetime, week_end: 
         "pct_english": pct_en,
         "top_topics": topics_line,
         "business_profile": business_profile,
+        "organization_id": organization_id,
     }
 
 
-def _build_user_message(data: dict, language: str = "English") -> str:
+def _build_user_message(data: dict, language: str = "English", db=None) -> str:
     """Build the user message from gathered metrics, matching the prompt schema."""
     bp_line = format_business_profile(data.get("business_profile"))
     bp_block = f"BUSINESS CONTEXT: {bp_line}\n\n" if bp_line else ""
+    brand_block = ""
+    if db is not None and data.get("organization_id"):
+        from app.core.brand_context import format_brand_identity
+        brand_block_raw = format_brand_identity(data["organization_id"], db)
+        brand_block = f"{brand_block_raw}\n" if brand_block_raw else ""
     return f"""Analyze this account's performance for the week of {data['date_range']}.
 Language: {language}
 
 ACCOUNT: {data['account_name']} on {data['platform']}
 
-{bp_block}METRICS THIS WEEK:
+{bp_block}{brand_block}METRICS THIS WEEK:
 - Total posts: {data['total_posts']}
 - Total impressions: {data['total_impressions']}
 - Avg engagement per post: {data['avg_engagement_rate']}
@@ -433,7 +440,7 @@ def generate_weekly_insights(self, social_account_id: str, language: str = "Engl
                 logger.warning("No post data for account %s", social_account_id)
                 return {"status": "error", "detail": "No posts found for analysis"}
 
-        user_message = _build_user_message(data, language)
+        user_message = _build_user_message(data, language, db=db)
         try:
             result = _call_gemini(user_message, account_id=social_account_id)
         except AIQuotaExceededError as exc:

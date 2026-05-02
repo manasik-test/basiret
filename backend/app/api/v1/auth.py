@@ -43,6 +43,10 @@ from app.core.deps import get_current_user
 from app.models.organization import Organization
 from app.models.user import User, UserRole
 from app.models.subscription import Subscription
+from app.models.social_account import SocialAccount
+from app.models.post import Post
+from app.models.ai_page_cache import AiPageCache
+from app.models.insight_result import InsightResult
 from app.tasks.account_deletion import (
     delete_user_or_org,
     delete_data_for_meta_user_id,
@@ -140,6 +144,67 @@ class BusinessProfile(BaseModel):
     city: str = Field(min_length=1, max_length=100)
     country: BusinessCountry
     audience_language: AudienceLanguage
+
+
+# ── Brand identity ──────────────────────────────────────────
+
+BrandTone = Literal["professional", "friendly", "luxurious", "playful", "inspiring"]
+BrandLanguageStyle = Literal["formal_arabic", "casual_dialect", "bilingual"]
+BrandEmojiUsage = Literal["never", "occasionally", "frequently"]
+BrandCaptionLength = Literal["short", "medium", "long"]
+BrandImageStyle = Literal["clean", "vibrant", "minimal", "luxurious", "playful"]
+
+# Hex-color regex covers #RRGGBB only (no shorthand, no alpha) — keeps the
+# stored format predictable for the PDF report and CSS variable injection.
+_HEX_COLOR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
+
+DEFAULT_BRAND_IDENTITY: dict = {
+    "primary_color": "#664FA1",
+    "secondary_color": "#BF499B",
+    "tone": "friendly",
+    "language_style": "bilingual",
+    "emoji_usage": "occasionally",
+    "caption_length": "medium",
+    "content_pillars": [],
+    "image_style": "clean",
+    "detected_from_posts": False,
+}
+
+
+class BrandIdentity(BaseModel):
+    primary_color: str = Field(default="#664FA1", pattern=_HEX_COLOR_PATTERN)
+    secondary_color: str = Field(default="#BF499B", pattern=_HEX_COLOR_PATTERN)
+    tone: BrandTone = "friendly"
+    language_style: BrandLanguageStyle = "bilingual"
+    emoji_usage: BrandEmojiUsage = "occasionally"
+    caption_length: BrandCaptionLength = "medium"
+    content_pillars: list[str] = Field(default_factory=list, max_length=5)
+    image_style: BrandImageStyle = "clean"
+    detected_from_posts: bool = False
+
+    @field_validator("content_pillars")
+    @classmethod
+    def _trim_pillars(cls, v: list[str]) -> list[str]:
+        # Strip whitespace, drop empty strings, cap each pillar at 60 chars and
+        # the list at 5. Field(max_length=5) catches >5 at parse time, but we
+        # also clamp post-trim in case stripping introduces empties.
+        cleaned = [p.strip()[:60] for p in v if isinstance(p, str) and p.strip()]
+        return cleaned[:5]
+
+
+# Category-keyed defaults used when the user has fewer than 3 captioned posts
+# and we can't ask Gemini to infer a brand voice. The mapping uses the
+# canonical BusinessCategory enum values (NOT the shortened forms in the spec).
+_CATEGORY_BRAND_DEFAULTS: dict[str, dict] = {
+    "restaurant_cafe":  {"tone": "friendly",     "content_pillars": ["Food showcase", "Daily specials", "Behind the scenes"]},
+    "fashion_clothing": {"tone": "inspiring",    "content_pillars": ["New arrivals", "Style tips", "Customer looks"]},
+    "beauty_salon":     {"tone": "luxurious",    "content_pillars": ["Transformations", "Tips", "Before & after"]},
+    "fitness_gym":      {"tone": "inspiring",    "content_pillars": ["Workouts", "Nutrition", "Client results"]},
+    "retail_shop":      {"tone": "friendly",     "content_pillars": ["New products", "Offers", "Customer stories"]},
+    "services":         {"tone": "professional", "content_pillars": ["Case studies", "Tips", "Testimonials"]},
+    "real_estate":      {"tone": "professional", "content_pillars": ["Listings", "Market tips", "Client stories"]},
+    "other":            {"tone": "friendly",     "content_pillars": ["Behind the scenes", "Tips", "Promotions"]},
+}
 
 
 # ── Helpers ─────────────────────────────────────────────────
@@ -340,6 +405,217 @@ def upsert_business_profile(
     db.commit()
     db.refresh(user.organization)
     return {"success": True, "data": user.organization.business_profile}
+
+
+# ── Brand identity endpoints ────────────────────────────────
+
+
+def _merge_default(payload: dict | None) -> dict:
+    """Merge a stored brand_identity dict on top of the spec's defaults.
+
+    Returning the merged value rather than the raw column means that adding a
+    new field to DEFAULT_BRAND_IDENTITY (e.g. a future `voice_keywords` field)
+    keeps the API response schema stable for orgs whose stored JSONB pre-dates
+    the field.
+    """
+    merged = dict(DEFAULT_BRAND_IDENTITY)
+    if payload:
+        merged.update({k: v for k, v in payload.items() if v is not None})
+    return merged
+
+
+@router.get("/brand-identity")
+def get_brand_identity(user: User = Depends(get_current_user)):
+    """Return the current organization's brand identity, falling back to
+    DEFAULT_BRAND_IDENTITY when nothing has been saved."""
+    return {"success": True, "data": _merge_default(user.organization.brand_identity)}
+
+
+def _bust_ai_caches_for_org(db: Session, organization_id) -> None:
+    """Delete all cached Gemini output that depends on brand voice for the
+    given org's social accounts.
+
+    Brand identity feeds into every AI surface: caption generation, posts
+    insights, audience insights, content plan, sentiment responses, and the
+    weekly insight_result that powers the Home dashboard. Stale cache after a
+    brand-voice change would mask the user's update for up to 24-72 hours.
+    """
+    # Materialize the account IDs once and reuse — SQLAlchemy 2.x prefers a
+    # plain list to .in_() over a Subquery (the latter triggers a coercion
+    # warning and forces a DELETE…WHERE id IN (SELECT…) plan we don't need
+    # for the small per-org account count).
+    account_ids = [
+        a.id
+        for a in db.query(SocialAccount.id)
+        .filter(SocialAccount.organization_id == organization_id)
+        .all()
+    ]
+    if not account_ids:
+        return
+    db.query(AiPageCache).filter(
+        AiPageCache.social_account_id.in_(account_ids)
+    ).delete(synchronize_session=False)
+    db.query(InsightResult).filter(
+        InsightResult.social_account_id.in_(account_ids)
+    ).delete(synchronize_session=False)
+
+
+@router.put("/brand-identity")
+def upsert_brand_identity(
+    body: BrandIdentity,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save the organization's brand identity and bust dependent AI caches.
+
+    Cache invalidation runs in the same transaction as the JSONB write so a
+    failed flush rolls everything back — there's no half-state where the new
+    brand identity is saved but the old cached insights are still being
+    served.
+    """
+    user.organization.brand_identity = body.model_dump()
+    _bust_ai_caches_for_org(db, user.organization_id)
+    db.commit()
+    db.refresh(user.organization)
+    return {"success": True, "data": _merge_default(user.organization.brand_identity)}
+
+
+def _detect_from_captions(captions: list[str]) -> dict | None:
+    """Ask Gemini to infer brand voice from a sample of recent captions.
+
+    Returns None if the AI provider call fails for any reason — the caller
+    should fall back to category defaults so the user still sees a useful
+    preview instead of a 500.
+    """
+    from app.core.ai_provider import AIProviderError, get_provider
+
+    numbered = "\n".join(f"{i + 1}. {c.strip()}" for i, c in enumerate(captions))
+    sys = (
+        "You are a brand voice analyst. Given a sample of an Instagram "
+        "creator's recent captions, infer their brand voice and return strict "
+        "JSON. Be specific to what the captions actually show — do not guess. "
+        "Return ONLY this JSON shape, no markdown: "
+        '{"tone": "professional|friendly|luxurious|playful|inspiring", '
+        '"language_style": "formal_arabic|casual_dialect|bilingual", '
+        '"emoji_usage": "never|occasionally|frequently", '
+        '"caption_length": "short|medium|long", '
+        '"content_pillars": ["3 to 5 short pillar names"], '
+        '"image_style": "clean|vibrant|minimal|luxurious|playful"}'
+    )
+    user_msg = f"Recent captions from this account:\n\n{numbered}"
+    try:
+        provider = get_provider("personas")
+        return provider.generate_json(sys, user_msg, temperature=0.2, source="background")
+    except AIProviderError as exc:
+        logger.warning("brand-identity detect: provider error: %s", exc)
+        return None
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning("brand-identity detect: unexpected error: %s", exc)
+        return None
+
+
+def _coerce_detected(raw: dict) -> dict:
+    """Normalize a Gemini detect response onto the BrandIdentity schema.
+
+    Gemini sometimes returns extra keys, snake_cased variants, or values
+    outside our literal sets (e.g. "neutral" for tone). Anything we don't
+    recognize falls back to the default for that field, so the preview the
+    user sees is always valid Pydantic input.
+    """
+    base = dict(DEFAULT_BRAND_IDENTITY)
+    valid_tones = {"professional", "friendly", "luxurious", "playful", "inspiring"}
+    valid_styles = {"formal_arabic", "casual_dialect", "bilingual"}
+    valid_emoji = {"never", "occasionally", "frequently"}
+    valid_lengths = {"short", "medium", "long"}
+    valid_image = {"clean", "vibrant", "minimal", "luxurious", "playful"}
+
+    tone = (raw.get("tone") or "").strip().lower()
+    if tone in valid_tones:
+        base["tone"] = tone
+    style = (raw.get("language_style") or "").strip().lower()
+    if style in valid_styles:
+        base["language_style"] = style
+    emoji = (raw.get("emoji_usage") or "").strip().lower()
+    if emoji in valid_emoji:
+        base["emoji_usage"] = emoji
+    length = (raw.get("caption_length") or "").strip().lower()
+    if length in valid_lengths:
+        base["caption_length"] = length
+    image = (raw.get("image_style") or "").strip().lower()
+    if image in valid_image:
+        base["image_style"] = image
+
+    pillars_raw = raw.get("content_pillars") or []
+    if isinstance(pillars_raw, list):
+        cleaned = [str(p).strip()[:60] for p in pillars_raw if isinstance(p, (str, int, float)) and str(p).strip()]
+        base["content_pillars"] = cleaned[:5]
+
+    return base
+
+
+@router.post("/brand-identity/detect")
+def detect_brand_identity(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Build a non-persistent preview of the org's brand identity.
+
+    Strategy:
+      1. If the org has ≥ 3 captioned posts on its first active social
+         account, ask Gemini to infer voice/style/emoji/pillars from them.
+      2. Otherwise, fall back to category defaults from
+         _CATEGORY_BRAND_DEFAULTS layered onto DEFAULT_BRAND_IDENTITY.
+      3. If neither is available, return the bare defaults.
+
+    The endpoint never writes to the database — the frontend shows the
+    preview, and the user explicitly applies + saves via PUT.
+    """
+    account = (
+        db.query(SocialAccount)
+        .filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active.is_(True),
+        )
+        .order_by(SocialAccount.connected_at.asc())
+        .first()
+    )
+
+    captions: list[str] = []
+    if account:
+        rows = (
+            db.query(Post.caption)
+            .filter(
+                Post.social_account_id == account.id,
+                Post.caption.isnot(None),
+            )
+            .order_by(Post.posted_at.desc().nullslast())
+            .limit(10)
+            .all()
+        )
+        captions = [c for (c,) in rows if c and c.strip()]
+
+    if len(captions) >= 3:
+        detected = _detect_from_captions(captions)
+        if detected:
+            preview = _coerce_detected(detected)
+            preview["detected_from_posts"] = True
+            return {
+                "success": True,
+                "data": {**preview, "source": "captions"},
+            }
+        # Provider failure → fall through to category defaults instead of 500
+
+    bp = user.organization.business_profile or {}
+    category = bp.get("category") if isinstance(bp, dict) else None
+    if category in _CATEGORY_BRAND_DEFAULTS:
+        defaults = _CATEGORY_BRAND_DEFAULTS[category]
+        preview = {**DEFAULT_BRAND_IDENTITY, **defaults, "detected_from_posts": False}
+        return {"success": True, "data": {**preview, "source": "category"}}
+
+    return {
+        "success": True,
+        "data": {**DEFAULT_BRAND_IDENTITY, "source": "fallback"},
+    }
 
 
 @router.patch("/profile")

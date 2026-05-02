@@ -18,6 +18,7 @@ import type {
   EngagementTimelineEntry,
 } from '../api/analytics'
 import { Icon, I } from '../components/redesign/icons'
+import GetStartedCard from '../components/dashboard/GetStartedCard'
 
 /* ------------------------------------------------------------------ */
 /* Types and helpers                                                  */
@@ -807,6 +808,7 @@ export default function Dashboard() {
   return (
     <div className="rd-canvas">
       <div className="hm-main">
+        <GetStartedCard />
         <Header range={range} setRange={setRange} />
 
         <KpiStrip

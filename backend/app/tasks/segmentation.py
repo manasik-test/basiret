@@ -216,6 +216,7 @@ def _generate_persona_descriptions(
     segments_data: list[dict],
     account_id: str | None = None,
     language: str = "en",
+    brand_block: str = "",
 ) -> list[dict]:
     """Call the personas provider (Gemini) to generate persona objects per cluster.
 
@@ -271,7 +272,10 @@ def _generate_persona_descriptions(
         "— do not switch languages even if the input data is in another language."
     )
 
-    prompt = "Generate personas for these clusters:\n\n"
+    prompt = ""
+    if brand_block:
+        prompt += f"{brand_block}\n"
+    prompt += "Generate personas for these clusters:\n\n"
     for i, seg in enumerate(segments_data):
         prompt += (
             f"Cluster {i + 1}: \"{seg['label']}\" — {seg['size']} posts, "
@@ -454,9 +458,24 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
             "avg_comments": round(float(centroid[1]), 2),
         })
 
-    # Get AI personas (best-effort — empty fields on AI failure)
+    # Get AI personas (best-effort — empty fields on AI failure). The brand
+    # block, when non-empty, nudges Gemini to align persona name + description
+    # tone with the creator's saved brand voice.
+    from app.core.brand_context import format_brand_identity
+    from app.models.social_account import SocialAccount as _SA
+    org_row = (
+        db.query(_SA.organization_id)
+        .filter(_SA.id == social_account_id)
+        .first()
+    )
+    brand_block = (
+        format_brand_identity(org_row[0], db) if org_row and org_row[0] else ""
+    )
     personas = _generate_persona_descriptions(
-        segments_data, account_id=str(social_account_id), language=language,
+        segments_data,
+        account_id=str(social_account_id),
+        language=language,
+        brand_block=brand_block,
     )
 
     for cluster_id in range(k):

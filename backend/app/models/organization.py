@@ -12,6 +12,7 @@ class Organization(Base):
     name = Column(String(255), nullable=False)
     slug = Column(String(100), unique=True, nullable=False)
     business_profile = Column(JSONB, nullable=True)
+    brand_identity = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

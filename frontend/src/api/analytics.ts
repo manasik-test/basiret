@@ -454,6 +454,7 @@ export interface GenerateCaptionRequest {
   language: 'en' | 'ar'
   reference_caption?: string
   post_id?: string
+  image_ratio?: '1:1' | '4:5' | '16:9'
   // Client-only: used to key the sessionStorage cache so multiple connected
   // accounts don't share captions. Not sent to the backend (backend scopes
   // by user's org automatically).
@@ -475,6 +476,7 @@ function captionCacheKey(req: GenerateCaptionRequest): string | null {
     req.content_type ?? '',
     req.topic ?? '',
     req.post_id ?? '',
+    req.image_ratio ?? '',
     req.language,
   ].join(':')
 }

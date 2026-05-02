@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download, Camera, Trash2, CheckCircle2, AlertCircle, AlertTriangle, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { User, Building2, Bell, CreditCard, Sparkles, FileText, Download, Camera, Trash2, CheckCircle2, AlertCircle, AlertTriangle, X, Palette, Plus } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { useAccounts } from '../hooks/useAnalytics'
+import { useAccounts, useOverview } from '../hooks/useAnalytics'
 import { useSubscription, useIsFeatureLocked } from '../hooks/useBilling'
 import { createCheckout } from '../api/billing'
 import { fetchInstagramAuthUrl, disconnectInstagramAccount } from '../api/instagram'
@@ -12,6 +12,15 @@ import {
   updateProfile as apiUpdateProfile,
   changePassword as apiChangePassword,
   deleteAccount as apiDeleteAccount,
+  fetchBrandIdentity,
+  saveBrandIdentity,
+  detectBrandIdentity,
+  type BrandIdentity,
+  type BrandTone,
+  type BrandLanguageStyle,
+  type BrandEmojiUsage,
+  type BrandCaptionLength,
+  type DetectedBrandIdentity,
 } from '../api/auth'
 import api from '../api/client'
 import LockedFeature from '../components/LockedFeature'
@@ -22,6 +31,7 @@ import { cn } from '../lib/utils'
 const tabs = [
   { key: 'profile', icon: User },
   { key: 'organization', icon: Building2 },
+  { key: 'brandIdentity', icon: Palette },
   { key: 'notifications', icon: Bell },
   { key: 'reports', icon: FileText },
   { key: 'billing', icon: CreditCard },
@@ -727,10 +737,461 @@ function OAuthBanner({ status, onDismiss }: { status: OAuthStatus; onDismiss: ()
   )
 }
 
+/* ── Brand Identity Tab ─────────────────────────────────── */
+
+const TONE_OPTIONS: BrandTone[] = ['professional', 'friendly', 'luxurious', 'playful', 'inspiring']
+const LANGUAGE_STYLE_OPTIONS: BrandLanguageStyle[] = ['formal_arabic', 'casual_dialect', 'bilingual']
+const EMOJI_OPTIONS: BrandEmojiUsage[] = ['never', 'occasionally', 'frequently']
+const LENGTH_OPTIONS: BrandCaptionLength[] = ['short', 'medium', 'long']
+const PILLAR_SUGGESTIONS = [
+  'Behind the scenes',
+  'Product showcase',
+  'Customer stories',
+  'Tips & Education',
+  'Promotions',
+]
+const TONE_EMOJI: Record<BrandTone, string> = {
+  professional: '💼',
+  friendly: '😊',
+  luxurious: '✨',
+  playful: '🎉',
+  inspiring: '🚀',
+}
+const HEX_RE = /^#[0-9A-Fa-f]{6}$/
+
+function BrandIdentityTab() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const overview = useOverview()
+  const totalPosts = overview.data?.total_posts ?? 0
+
+  const { data, isLoading } = useQuery<BrandIdentity>({
+    queryKey: ['auth', 'brand-identity'],
+    queryFn: fetchBrandIdentity,
+    staleTime: 60_000,
+  })
+
+  // Local working copy. We only commit on Save so users can edit freely
+  // without thrashing the server.
+  const [form, setForm] = useState<BrandIdentity | null>(null)
+  useEffect(() => {
+    if (data && !form) setForm(data)
+  }, [data, form])
+
+  const [pillarDraft, setPillarDraft] = useState('')
+  const [savedAt, setSavedAt] = useState<number | null>(null)
+  const [saveError, setSaveError] = useState<string>('')
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: BrandIdentity) => saveBrandIdentity(payload),
+    onSuccess: (saved) => {
+      setForm(saved)
+      setSavedAt(Date.now())
+      setSaveError('')
+      queryClient.invalidateQueries({ queryKey: ['auth', 'brand-identity'] })
+      // Brand voice change busts AI caches server-side; tell React Query to
+      // refetch the surfaces that show those caches so the user sees fresh
+      // output without a manual reload.
+      queryClient.invalidateQueries({ queryKey: ['ai-pages'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'insights'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'sentiment-summary'] })
+    },
+    onError: (err: unknown) => {
+      setSaveError(err instanceof Error ? err.message : t('brandIdentity.saveError'))
+    },
+  })
+
+  const detectMutation = useMutation({
+    mutationFn: () => detectBrandIdentity(),
+  })
+
+  if (isLoading || !form) {
+    return <div className="glass rounded-2xl p-6 text-sm text-foreground/60">…</div>
+  }
+
+  function update<K extends keyof BrandIdentity>(key: K, value: BrandIdentity[K]) {
+    setForm((prev) => (prev ? { ...prev, [key]: value } : prev))
+  }
+
+  function addPillar(raw: string) {
+    const trimmed = raw.trim()
+    if (!trimmed || !form) return
+    if (form.content_pillars.includes(trimmed)) return
+    if (form.content_pillars.length >= 5) return
+    update('content_pillars', [...form.content_pillars, trimmed].slice(0, 5))
+  }
+
+  function removePillar(idx: number) {
+    if (!form) return
+    update(
+      'content_pillars',
+      form.content_pillars.filter((_, i) => i !== idx),
+    )
+  }
+
+  function applyDetected(preview: DetectedBrandIdentity) {
+    if (!form) return
+    setForm({
+      ...form,
+      tone: preview.tone,
+      language_style: preview.language_style,
+      emoji_usage: preview.emoji_usage,
+      caption_length: preview.caption_length,
+      content_pillars: preview.content_pillars,
+      image_style: preview.image_style,
+      detected_from_posts: preview.detected_from_posts,
+    })
+    detectMutation.reset()
+  }
+
+  function handleSave() {
+    if (!form) return
+    if (!HEX_RE.test(form.primary_color) || !HEX_RE.test(form.secondary_color)) {
+      setSaveError(t('brandIdentity.invalidColor'))
+      return
+    }
+    saveMutation.mutate(form)
+  }
+
+  const detected = detectMutation.data
+  const showDetectBanner = totalPosts > 0
+
+  return (
+    <div className="space-y-6">
+      <div className="glass rounded-2xl p-6 space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold">{t('brandIdentity.title')}</h2>
+          <p className="text-sm text-foreground/60 mt-1">{t('brandIdentity.subtitle')}</p>
+        </div>
+
+        {/* Visual Identity */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground/60">
+            {t('brandIdentity.sectionVisual')}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <ColorField
+              label={t('brandIdentity.primaryColor')}
+              value={form.primary_color}
+              onChange={(v) => update('primary_color', v)}
+            />
+            <ColorField
+              label={t('brandIdentity.secondaryColor')}
+              value={form.secondary_color}
+              onChange={(v) => update('secondary_color', v)}
+            />
+          </div>
+        </section>
+
+        {/* Voice & Tone */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground/60">
+            {t('brandIdentity.sectionVoice')}
+          </h3>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">{t('brandIdentity.toneLabel')}</label>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {TONE_OPTIONS.map((tone) => (
+                <SelectableCard
+                  key={tone}
+                  selected={form.tone === tone}
+                  onClick={() => update('tone', tone)}
+                >
+                  <div className="text-2xl mb-1">{TONE_EMOJI[tone]}</div>
+                  <div className="text-sm font-medium">{t(`brandIdentity.tone.${tone}`)}</div>
+                </SelectableCard>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              {t('brandIdentity.languageStyleLabel')}
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {LANGUAGE_STYLE_OPTIONS.map((style) => (
+                <SelectableCard
+                  key={style}
+                  selected={form.language_style === style}
+                  onClick={() => update('language_style', style)}
+                >
+                  <div className="text-sm font-medium">
+                    {t(`brandIdentity.languageStyle.${style}`)}
+                  </div>
+                </SelectableCard>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              {t('brandIdentity.emojiUsageLabel')}
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {EMOJI_OPTIONS.map((opt) => (
+                <SelectableCard
+                  key={opt}
+                  selected={form.emoji_usage === opt}
+                  onClick={() => update('emoji_usage', opt)}
+                >
+                  <div className="text-sm font-medium">
+                    {t(`brandIdentity.emojiUsage.${opt}`)}
+                  </div>
+                </SelectableCard>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              {t('brandIdentity.captionLengthLabel')}
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {LENGTH_OPTIONS.map((opt) => (
+                <SelectableCard
+                  key={opt}
+                  selected={form.caption_length === opt}
+                  onClick={() => update('caption_length', opt)}
+                >
+                  <div className="text-sm font-medium">
+                    {t(`brandIdentity.captionLength.${opt}`)}
+                  </div>
+                </SelectableCard>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Content pillars */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground/60">
+            {t('brandIdentity.sectionPillars')}
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {form.content_pillars.map((p, i) => (
+              <span
+                key={`${p}-${i}`}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-sm border border-primary/20"
+              >
+                {p}
+                <button
+                  type="button"
+                  onClick={() => removePillar(i)}
+                  className="hover:bg-primary/10 rounded-full p-0.5"
+                  aria-label={`remove ${p}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+            {form.content_pillars.length === 0 && (
+              <span className="text-sm text-foreground/50">
+                {t('brandIdentity.noPillars')}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={pillarDraft}
+              onChange={(e) => setPillarDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addPillar(pillarDraft)
+                  setPillarDraft('')
+                }
+              }}
+              placeholder={t('brandIdentity.pillarPlaceholder')}
+              maxLength={60}
+              className="flex-1 px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              disabled={form.content_pillars.length >= 5}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                addPillar(pillarDraft)
+                setPillarDraft('')
+              }}
+              disabled={form.content_pillars.length >= 5 || !pillarDraft.trim()}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50 inline-flex items-center gap-1"
+            >
+              <Plus className="w-4 h-4" />
+              {t('brandIdentity.addPillar')}
+            </button>
+          </div>
+          <div>
+            <p className="text-xs text-foreground/50 mb-2">{t('brandIdentity.suggestionLabel')}</p>
+            <div className="flex flex-wrap gap-2">
+              {PILLAR_SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => addPillar(s)}
+                  disabled={form.content_pillars.includes(s) || form.content_pillars.length >= 5}
+                  className="px-3 py-1 rounded-full text-xs border border-border bg-background hover:bg-muted disabled:opacity-40"
+                >
+                  + {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* Auto-detect banner */}
+      {showDetectBanner && (
+        <div className="glass rounded-2xl p-6 border border-primary/20 bg-primary/5 space-y-4">
+          <div className="flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <h3 className="font-semibold">{t('brandIdentity.detectTitle')}</h3>
+              <p className="text-sm text-foreground/70 mt-1">{t('brandIdentity.detectBody')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => detectMutation.mutate()}
+              disabled={detectMutation.isPending}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+            >
+              {detectMutation.isPending ? t('brandIdentity.detecting') : t('brandIdentity.detectButton')}
+            </button>
+          </div>
+          {detectMutation.isError && (
+            <p className="text-sm text-red-600">{t('brandIdentity.detectError')}</p>
+          )}
+          {detected && (
+            <div className="rounded-xl bg-background border border-border p-4 space-y-3">
+              <h4 className="font-medium text-sm">{t('brandIdentity.detectPreviewTitle')}</h4>
+              <ul className="text-sm space-y-1 text-foreground/80">
+                <li>{t('brandIdentity.toneLabel')}: {t(`brandIdentity.tone.${detected.tone}`)}</li>
+                <li>{t('brandIdentity.languageStyleLabel')}: {t(`brandIdentity.languageStyle.${detected.language_style}`)}</li>
+                <li>{t('brandIdentity.emojiUsageLabel')}: {t(`brandIdentity.emojiUsage.${detected.emoji_usage}`)}</li>
+                <li>{t('brandIdentity.captionLengthLabel')}: {t(`brandIdentity.captionLength.${detected.caption_length}`)}</li>
+                <li>{t('brandIdentity.sectionPillars')}: {detected.content_pillars.join(', ') || '—'}</li>
+              </ul>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyDetected(detected)}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium"
+                >
+                  {t('brandIdentity.applyDetected')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => detectMutation.reset()}
+                  className="px-4 py-2 rounded-lg border border-border text-sm"
+                >
+                  {t('brandIdentity.dismissDetected')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Save row */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveMutation.isPending}
+          className="px-6 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium disabled:opacity-50"
+        >
+          {saveMutation.isPending ? t('brandIdentity.saving') : t('brandIdentity.save')}
+        </button>
+        {savedAt && Date.now() - savedAt < 4000 && (
+          <span className="text-sm text-emerald-600 inline-flex items-center gap-1">
+            <CheckCircle2 className="w-4 h-4" /> {t('brandIdentity.savedToast')}
+          </span>
+        )}
+        {saveError && <span className="text-sm text-red-600">{saveError}</span>}
+      </div>
+    </div>
+  )
+}
+
+function ColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium block mb-2">{label}</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={HEX_RE.test(value) ? value : '#664FA1'}
+          onChange={(e) => onChange(e.target.value.toUpperCase())}
+          className="w-12 h-10 rounded-lg border border-border cursor-pointer"
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono"
+          placeholder="#RRGGBB"
+          maxLength={7}
+        />
+      </div>
+    </label>
+  )
+}
+
+function SelectableCard({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-xl border p-3 text-center transition-colors',
+        selected
+          ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+          : 'border-border bg-background hover:bg-muted',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function Settings() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabKey>('profile')
   const oauth = useInstagramOAuthResult()
+
+  // Read ?tab= on mount so the Get Started checklist on Home can deep-link
+  // straight to the right tab. Stripped from the URL so refresh doesn't keep
+  // forcing the same tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const requested = params.get('tab')
+    const validKeys = tabs.map((t) => t.key) as readonly string[]
+    if (requested && validKeys.includes(requested)) {
+      setActiveTab(requested as TabKey)
+      params.delete('tab')
+      const qs = params.toString()
+      const url =
+        window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+      window.history.replaceState({}, '', url)
+    }
+  }, [])
 
   // If we returned from Meta, jump straight to the Organization tab so the
   // newly-connected (or failed) account is in front of the user.
@@ -764,6 +1225,7 @@ export default function Settings() {
       {/* Tab Content */}
       {activeTab === 'profile' && <ProfileTab />}
       {activeTab === 'organization' && <OrganizationTab />}
+      {activeTab === 'brandIdentity' && <BrandIdentityTab />}
       {activeTab === 'notifications' && <NotificationsTab />}
       {activeTab === 'reports' && <ReportsTab />}
       {activeTab === 'billing' && <BillingTab />}
