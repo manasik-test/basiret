@@ -15,11 +15,11 @@ export default function CreatorsPage() {
         en: "Your job is to create. Basiret reads the numbers for you, spots what's landing, and tells you what to make next — across Instagram, TikTok, and beyond.",
         ar: "مهمتك هي الإبداع. بصيرة تقرأ الأرقام نيابة عنك، تكتشف ما ينجح، وتخبرك بما تصنع بعد ذلك — عبر انستقرام وتيك توك وما بعدها.",
       }}
-      heroImage="https://images.unsplash.com/photo-1548783307-f63adc3f200b?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Creator filming content at their desk",
-        ar: "مبدع يصور محتوى على مكتبه",
-      }}
+      stepImages={[
+        { src: "/marketing/myposts.png", alt: { en: "All your posts in one view", ar: "كل منشوراتك في عرض واحد" } },
+        { src: "/marketing/trends.png", alt: { en: "Trends and patterns", ar: "الاتجاهات والأنماط" } },
+        { src: "/marketing/audience.png", alt: { en: "Audience insights", ar: "رؤى الجمهور" } },
+      ]}
       steps={[
         {
           title: { en: "Sync every platform", ar: "زامن كل منصة" },

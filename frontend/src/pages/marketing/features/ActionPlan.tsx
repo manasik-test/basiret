@@ -15,11 +15,11 @@ export default function ActionPlanPage() {
         en: "Every morning, Basiret gives you exactly 3 things to do — with the data behind each one. No dashboards to decode. Just do them and watch your numbers move.",
         ar: "كل صباح، تعطيك بصيرة 3 أشياء للقيام بها بالضبط — مع البيانات وراء كل منها. لا لوحات تحكم لفك رموزها. فقط قم بها وشاهد أرقامك تتحرك.",
       }}
-      heroImage="https://images.unsplash.com/photo-1455849318743-b2233052fcff?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Morning coffee and a notebook",
-        ar: "قهوة الصباح ودفتر ملاحظات",
-      }}
+      stepImages={[
+        { src: "/marketing/prod-home.png", alt: { en: "Daily action plan home", ar: "الصفحة الرئيسية لخطة العمل" } },
+        { src: "/marketing/dashboard-1440.png", alt: { en: "Performance dashboard", ar: "لوحة الأداء" } },
+        { src: "/marketing/myposts.png", alt: { en: "My posts performance", ar: "أداء منشوراتي" } },
+      ]}
       steps={[
         {
           title: { en: "Morning scan", ar: "فحص الصباح" },

@@ -5,7 +5,7 @@ import { Problem } from "@/components/landing/problem";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { Features } from "@/components/landing/features";
 import { SocialProof } from "@/components/landing/social-proof";
-import { CTABanner } from "@/components/landing/cta-banner";
+import { CTAMarquee } from "@/components/landing/cta-marquee";
 
 export default function Home() {
   return (
@@ -17,7 +17,7 @@ export default function Home() {
       <HowItWorks />
       <Features />
       <SocialProof />
-      <CTABanner />
+      <CTAMarquee />
     </main>
   );
 }

@@ -15,11 +15,11 @@ export default function ContentPlannerPage() {
         en: "A calendar that tells you what to post and when. Drag, drop, schedule — or let Basiret suggest the whole week based on what your audience actually responds to.",
         ar: "تقويم يخبرك بما تنشر ومتى. اسحب، أسقط، جدول — أو دع بصيرة تقترح الأسبوع كاملاً بناءً على ما يستجيب له جمهورك فعلاً.",
       }}
-      heroImage="https://images.unsplash.com/photo-1493552152660-f915ab47ae9d?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Desk with planner and phone",
-        ar: "مكتب به مخطط وهاتف",
-      }}
+      stepImages={[
+        { src: "/marketing/dashboard-1440.png", alt: { en: "Content calendar", ar: "تقويم المحتوى" } },
+        { src: "/marketing/myposts.png", alt: { en: "Posts overview", ar: "نظرة عامة على المنشورات" } },
+        { src: "/marketing/sentiment.png", alt: { en: "Audience response", ar: "استجابة الجمهور" } },
+      ]}
       steps={[
         {
           title: { en: "Pick your pillars", ar: "اختر محاورك" },

@@ -27,6 +27,7 @@ const Home = lazy(() => import('./pages/marketing/Home'))
 const PricingPage = lazy(() => import('./pages/marketing/Pricing'))
 const PrivacyPage = lazy(() => import('./pages/marketing/Privacy'))
 const TermsPage = lazy(() => import('./pages/marketing/Terms'))
+const AboutPage = lazy(() => import('./pages/marketing/About'))
 const BlogIndexPage = lazy(() => import('./pages/marketing/blog/BlogIndex'))
 const BlogPostPage = lazy(() => import('./pages/marketing/blog/BlogPost'))
 const InstagramChannel = lazy(() => import('./pages/marketing/channels/Instagram'))
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
+            <Route path="/about" element={<AboutPage />} />
             <Route path="/blog" element={<BlogIndexPage />} />
             <Route path="/blog/:slug" element={<BlogPostPage />} />
             <Route path="/channels/instagram" element={<InstagramChannel />} />

@@ -167,7 +167,16 @@ function AnalyzeAnimation() {
   );
 }
 
-const smallFeatures = [
+type SmallFeature = {
+  icon: typeof Calendar;
+  color: string;
+  image?: string;
+  imageAlt?: { en: string; ar: string };
+  en: { title: string; desc: string };
+  ar: { title: string; desc: string };
+};
+
+const smallFeatures: readonly SmallFeature[] = [
   {
     icon: Calendar,
     color: "text-violet-600 bg-violet-100",
@@ -177,6 +186,11 @@ const smallFeatures = [
   {
     icon: Users,
     color: "text-pink-600 bg-pink-100",
+    image: "/marketing/team-collab.png",
+    imageAlt: {
+      en: "Team members collaborating across chats and shared posts",
+      ar: "أعضاء الفريق يتعاونون عبر المحادثات والمنشورات المشتركة",
+    },
     en: { title: "Team Collaboration", desc: "Review and approve posts together" },
     ar: { title: "تعاون الفريق", desc: "مراجعة واعتماد المنشورات معاً" },
   },
@@ -188,7 +202,7 @@ export function Features() {
   const inView = useInView(ref, { once: true, margin: "-80px" });
 
   return (
-    <section id="features" dir={dir} className="bg-[#F5F3FF] py-16 sm:py-24">
+    <section id="features" dir={dir} className="bg-white py-16 sm:py-24">
       <div ref={ref} className="mx-auto max-w-6xl px-4 sm:px-6">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -330,6 +344,7 @@ export function Features() {
           <div className="flex flex-col gap-4">
             {smallFeatures.map((feat, i) => {
               const Icon = feat.icon;
+              const hasImage = Boolean(feat.image);
               return (
                 <motion.div
                   key={i}
@@ -339,17 +354,32 @@ export function Features() {
                     boxShadow: "0 20px 50px -15px rgba(0, 0, 0, 0.08)",
                     transition: { type: "spring", stiffness: 400, damping: 17 },
                   }}
-                  className="flex-1 cursor-default rounded-2xl border border-gray-200 bg-white p-6 transition-colors hover:border-gray-300"
+                  className={`relative flex-1 cursor-default overflow-hidden rounded-2xl border border-gray-200 transition-colors hover:border-gray-300 ${
+                    hasImage ? "" : "bg-white p-6"
+                  }`}
                 >
-                  <div className={`mb-3 flex size-10 items-center justify-center rounded-xl ${feat.color}`}>
-                    <Icon className="size-5" />
+                  {hasImage && feat.image && (
+                    <img
+                      src={feat.image}
+                      alt={feat.imageAlt ? t(feat.imageAlt.en, feat.imageAlt.ar) : ""}
+                      loading="lazy"
+                      decoding="async"
+                      className="absolute inset-0 size-full object-cover"
+                    />
+                  )}
+                  <div className={hasImage ? "relative z-10 max-w-[55%] py-6 pe-6 ps-12" : ""}>
+                    {!hasImage && (
+                      <div className={`mb-3 flex size-10 items-center justify-center rounded-xl ${feat.color}`}>
+                        <Icon className="size-5" />
+                      </div>
+                    )}
+                    <h3 className="text-base font-bold text-[#484848]">
+                      {t(feat.en.title, feat.ar.title)}
+                    </h3>
+                    <p className="mt-1.5 text-sm text-gray-500 leading-relaxed">
+                      {t(feat.en.desc, feat.ar.desc)}
+                    </p>
                   </div>
-                  <h3 className="text-base font-bold text-[#484848]">
-                    {t(feat.en.title, feat.ar.title)}
-                  </h3>
-                  <p className="mt-1.5 text-sm text-gray-500 leading-relaxed">
-                    {t(feat.en.desc, feat.ar.desc)}
-                  </p>
                 </motion.div>
               );
             })}

@@ -41,6 +41,7 @@ const sections: FooterSection[] = [
     ar: "الموارد",
     links: [
       { en: "Blog", ar: "المدونة", href: "/blog" },
+      { en: "About us", ar: "من نحن", href: "/about" },
       { en: "Privacy", ar: "الخصوصية", href: "/privacy" },
       { en: "Terms", ar: "الشروط", href: "/terms" },
     ],

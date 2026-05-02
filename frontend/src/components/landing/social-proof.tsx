@@ -169,7 +169,7 @@ export function SocialProof() {
   }));
 
   return (
-    <section dir={dir} className="bg-[#F5F3FF] py-16 sm:py-28">
+    <section dir={dir} className="bg-white py-16 sm:py-28">
       <div ref={ref} className="mx-auto max-w-7xl px-4 sm:px-6">
         <motion.div
           initial={{ opacity: 0, y: 30 }}

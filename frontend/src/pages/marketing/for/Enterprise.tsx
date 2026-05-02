@@ -15,11 +15,11 @@ export default function EnterprisePage() {
         en: "Regional brands, multi-market teams, compliance-heavy industries — Basiret gives you the same clarity on 200 accounts as we do on 2.",
         ar: "العلامات الإقليمية، الفرق متعددة الأسواق، الصناعات ذات المتطلبات التنظيمية — بصيرة تمنحك نفس الوضوح على 200 حساب كما على 2.",
       }}
-      heroImage="https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Enterprise analytics dashboard",
-        ar: "لوحة تحليلات مؤسسية",
-      }}
+      stepImages={[
+        { src: "/marketing/dashboard-1440.png", alt: { en: "Enterprise dashboard", ar: "لوحة المؤسسة" } },
+        { src: "/marketing/audience.png", alt: { en: "Audience governance", ar: "حوكمة الجمهور" } },
+        { src: "/marketing/competitors.png", alt: { en: "Strategic intelligence", ar: "الذكاء الاستراتيجي" } },
+      ]}
       steps={[
         {
           title: { en: "Dedicated onboarding", ar: "إعداد مخصص" },

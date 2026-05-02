@@ -143,7 +143,7 @@ export function Pricing() {
   const [isYearly, setIsYearly] = useState(false);
 
   return (
-    <section id="pricing" dir={dir} className="bg-[#F5F3FF] py-16 sm:py-24">
+    <section id="pricing" dir={dir} className="bg-white py-16 sm:py-24">
       <div ref={ref} className="mx-auto max-w-6xl px-4 sm:px-6">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -212,25 +212,15 @@ export function Pricing() {
               <motion.div
                 key={i}
                 variants={cardVariants}
-                whileHover={{
-                  scale: 1.02,
-                  boxShadow: p
-                    ? "0 30px 80px -20px rgba(84, 51, 194, 0.25)"
-                    : "0 25px 60px -15px rgba(0, 0, 0, 0.08)",
-                  transition: { type: "spring", stiffness: 400, damping: 17 },
-                }}
-                className={`relative overflow-hidden rounded-2xl p-6 cursor-default sm:p-8 ${
+                className={`relative overflow-hidden rounded-2xl p-6 cursor-default transition-shadow sm:p-8 ${
                   p
-                    ? "border-2 border-[#5433c2] bg-white shadow-lg"
-                    : "border border-gray-200 bg-white"
+                    ? "border-2 border-[#5433c2] bg-white shadow-xl shadow-[#5433c2]/10"
+                    : "border border-gray-200 bg-white hover:shadow-md"
                 }`}
               >
                 {p && (
-                  <div className="absolute -top-px left-0 right-0 h-1 bg-gradient-to-r from-[#5433c2] via-[#BF499B] to-[#5433c2]" />
-                )}
-                {p && (
-                  <div className="mb-4">
-                    <Badge className="bg-[#5433c2]/10 text-[#5433c2] font-semibold hover:bg-[#5433c2]/15 border-[#5433c2]/20 px-3 py-0.5 cursor-default">
+                  <div className="mb-4 flex justify-center">
+                    <Badge className="bg-[#5433c2] text-white font-semibold hover:bg-[#5433c2] border-transparent px-3 py-1 cursor-default uppercase tracking-wider text-[10px]">
                       {t("Most Popular", "الأكثر شعبية")}
                     </Badge>
                   </div>

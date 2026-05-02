@@ -15,11 +15,11 @@ export default function AudiencePage() {
         en: "Basiret reads your audience like a detective — their age, interests, when they scroll, and what makes them hit follow. Real behavior, not vanity metrics.",
         ar: "بصيرة تقرأ جمهورك كمحقق — أعمارهم، اهتماماتهم، متى يتصفحون، وما يجعلهم يضغطون على المتابعة. سلوك حقيقي، لا مقاييس سطحية.",
       }}
-      heroImage="https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Analytics dashboard on a laptop",
-        ar: "لوحة تحليلات على حاسوب محمول",
-      }}
+      stepImages={[
+        { src: "/marketing/audience.png", alt: { en: "Audience persona dashboard", ar: "لوحة شخصيات الجمهور" } },
+        { src: "/marketing/sentiment.png", alt: { en: "Sentiment analysis feed", ar: "خلاصة تحليل المشاعر" } },
+        { src: "/marketing/trends.png", alt: { en: "Trends overview", ar: "نظرة عامة على الاتجاهات" } },
+      ]}
       steps={[
         {
           title: { en: "Connect your accounts", ar: "اربط حساباتك" },

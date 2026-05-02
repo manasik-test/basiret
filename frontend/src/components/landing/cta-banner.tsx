@@ -21,7 +21,7 @@ export function CTABanner() {
   const { t, dir } = useI18n();
 
   return (
-    <section dir={dir} className="bg-[#F5F3FF] py-16 sm:py-24">
+    <section dir={dir} className="bg-white py-16 sm:py-24">
       <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-10 px-4 py-4 sm:px-6 md:grid-cols-2 md:gap-12">
         <ContainerStagger className="text-center md:text-left rtl:md:text-right">
           <ContainerAnimated className="mb-4 block text-xs font-semibold uppercase tracking-[0.2em] text-[#5433c2] md:text-sm">

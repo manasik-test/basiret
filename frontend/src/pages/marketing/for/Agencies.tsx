@@ -15,11 +15,11 @@ export default function AgenciesPage() {
         en: "Hand your account managers a single place to see every client's performance — with the next action already lined up for them.",
         ar: "امنح مديري حساباتك مكاناً واحداً لمشاهدة أداء كل عميل — مع الإجراء التالي جاهزاً لهم.",
       }}
-      heroImage="https://images.unsplash.com/photo-1552664730-d307ca884978?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Agency team reviewing client work",
-        ar: "فريق وكالة يراجع عمل العملاء",
-      }}
+      stepImages={[
+        { src: "/marketing/dashboard-1440.png", alt: { en: "Multi-client dashboard", ar: "لوحة عملاء متعددين" } },
+        { src: "/marketing/competitors.png", alt: { en: "Competitor tracking", ar: "تتبع المنافسين" } },
+        { src: "/marketing/audience.png", alt: { en: "Client-ready reports", ar: "تقارير جاهزة للعملاء" } },
+      ]}
       steps={[
         {
           title: { en: "Create a workspace per client", ar: "أنشئ مساحة عمل لكل عميل" },

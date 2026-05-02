@@ -15,11 +15,11 @@ export default function SmallBusinessPage() {
         en: "You run the shop, answer DMs, handle suppliers, AND post online? Basiret cuts social media down to 5 focused minutes a day. You'll still know exactly what to do.",
         ar: "أنت تدير المحل، تردّ على الرسائل، تتعامل مع الموردين، وتنشر أيضاً؟ بصيرة تختصر وسائل التواصل إلى 5 دقائق مركّزة يومياً. وستظل تعرف بالضبط ما تفعله.",
       }}
-      heroImage="https://images.unsplash.com/photo-1703622377707-29bc9409aaf2?q=80&w=2000&auto=format&fit=crop"
-      heroImageAlt={{
-        en: "Small business owner managing their shop",
-        ar: "صاحب عمل صغير يدير محله",
-      }}
+      stepImages={[
+        { src: "/marketing/prod-home.png", alt: { en: "Daily action plan", ar: "خطة العمل اليومية" } },
+        { src: "/marketing/audience.png", alt: { en: "Local audience insights", ar: "رؤى الجمهور المحلي" } },
+        { src: "/marketing/sentiment.png", alt: { en: "Customer sentiment", ar: "مشاعر العملاء" } },
+      ]}
       steps={[
         {
           title: { en: "Set up in 10 minutes", ar: "جهّز في 10 دقائق" },

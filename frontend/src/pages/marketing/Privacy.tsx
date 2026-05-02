@@ -206,7 +206,15 @@ Right of erasure ("right to be forgotten"). You can delete your account and all 
 
 Right of withdrawal. You can disconnect your Instagram account at any time from Settings → Organization, or revoke Basiret's permissions from your Facebook / Instagram settings. Either action stops new data ingestion immediately.
 
-Right of portability. We provide a machine-readable export of your account data (including Instagram-derived data) on request via contact@basiret.co.`,
+Right of portability. We provide a machine-readable export of your account data (including Instagram-derived data) on request via contact@basiret.co.
+
+Right of restriction (GDPR Art. 18). You can ask us to pause processing of your data — for example while you contest its accuracy or while we investigate a deletion request — without deleting it. Email contact@basiret.co with the word "restrict" in the subject line.
+
+Right to object (GDPR Art. 21). You can object to specific processing activities, including any processing we carry out for our legitimate interests (such as product analytics or fraud prevention). We will stop unless we can demonstrate compelling legitimate grounds that override your objection.
+
+Right to lodge a complaint with a supervisory authority (GDPR Art. 77). If you are based in the EU/EEA and believe we have mishandled your personal data, you have the right to complain directly to your national data-protection authority. A directory of EU supervisory authorities is published at edpb.europa.eu/about-edpb/board/members_en. UK users can complain to the Information Commissioner's Office (ICO) at ico.org.uk. You do not need to contact us first, but we appreciate the chance to address concerns directly via contact@basiret.co.
+
+Lawful basis for processing (GDPR Art. 6). We rely on three legal grounds: (a) performance of a contract — operating the service you signed up for; (b) legal obligation — keeping minimal billing records as required by Omani tax law; and (c) your consent — for any optional analytics or marketing communications, which you can withdraw at any time from Settings → Notifications.`,
             ar: `لديك الحقوق التالية على البيانات الشخصية التي نحتفظ بها عنك. لممارسة أيٍّ منها، راسلنا على contact@basiret.co — نرد خلال 30 يوماً.
 
 حق الاطلاع. يمكنك طلب نسخة من جميع البيانات الشخصية التي نحتفظ بها عنك.
@@ -220,7 +228,15 @@ Right of portability. We provide a machine-readable export of your account data 
 
 حق الانسحاب. يمكنك فصل حساب Instagram في أي وقت من الإعدادات → المؤسسة، أو إلغاء صلاحيات بصيرة من إعدادات Facebook / Instagram. أيٌّ من الإجراءين يوقف استيعاب البيانات الجديدة فوراً.
 
-حق النقل. نُقدِّم تصديراً قابلاً للقراءة آلياً لبيانات حسابك (بما في ذلك البيانات المشتقة من Instagram) عند الطلب عبر contact@basiret.co.`,
+حق النقل. نُقدِّم تصديراً قابلاً للقراءة آلياً لبيانات حسابك (بما في ذلك البيانات المشتقة من Instagram) عند الطلب عبر contact@basiret.co.
+
+حق تقييد المعالجة (المادة 18 من اللائحة الأوروبية GDPR). يمكنك أن تطلب منا إيقاف معالجة بياناتك مؤقتاً — مثلاً أثناء اعتراضك على دقّتها أو أثناء مراجعتنا لطلب حذف — دون حذفها. راسلنا على contact@basiret.co مع كلمة "تقييد" في الموضوع.
+
+حق الاعتراض (المادة 21). يمكنك الاعتراض على أنشطة معالجة محدّدة، بما في ذلك أي معالجة نقوم بها استناداً إلى مصالحنا المشروعة (مثل تحليلات المنتج أو منع الاحتيال). سنتوقّف ما لم نُثبت أسباباً مشروعة قاهرة تتجاوز اعتراضك.
+
+حق تقديم شكوى إلى سلطة رقابية (المادة 77). إذا كنت مقيماً في الاتحاد الأوروبي/المنطقة الاقتصادية الأوروبية وتعتقد أننا أسأنا التعامل مع بياناتك الشخصية، فلك الحق في تقديم شكوى مباشرة إلى السلطة الوطنية لحماية البيانات في بلدك. يمكنك الاطلاع على دليل السلطات الرقابية الأوروبية على edpb.europa.eu/about-edpb/board/members_en. يمكن للمستخدمين في المملكة المتحدة تقديم شكوى إلى مكتب مفوض المعلومات (ICO) على ico.org.uk. لست مُلزَماً بمراسلتنا أولاً، لكن نُقدِّر فرصة معالجة المخاوف مباشرةً عبر contact@basiret.co.
+
+الأساس القانوني للمعالجة (المادة 6). نعتمد على ثلاثة أسس قانونية: (أ) تنفيذ العقد — تشغيل الخدمة التي اشتركت فيها؛ (ب) الالتزام القانوني — الاحتفاظ بسجلات فوترة لازمة بموجب قانون الضرائب العُماني؛ (ج) موافقتك — لأي تحليلات اختيارية أو رسائل تسويقية، ويمكنك سحبها في أي وقت من الإعدادات → التنبيهات.`,
           },
         },
         {

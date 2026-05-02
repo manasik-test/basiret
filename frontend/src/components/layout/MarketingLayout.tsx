@@ -9,7 +9,7 @@ import { ScrollProgress } from "@/components/landing/scroll-progress";
  */
 export default function MarketingLayout() {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-white text-[#484848]">
+    <div className="min-h-screen overflow-x-clip bg-white text-[#484848]">
       <ScrollProgress />
       <Navbar />
       <Outlet />
