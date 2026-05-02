@@ -241,6 +241,7 @@ function KpiStrip({
   sentiment,
   breakdown,
   timeline,
+  sparkTimeline,
   insightScore,
   insightChange,
   consistencyValue,
@@ -253,6 +254,7 @@ function KpiStrip({
   sentiment: SentimentData | undefined
   breakdown: PostsBreakdownData | undefined
   timeline: EngagementTimelineEntry[] | undefined
+  sparkTimeline: EngagementTimelineEntry[] | undefined
   insightScore: number | null
   insightChange: number
   consistencyValue: number
@@ -292,13 +294,17 @@ function KpiStrip({
         ? breakdownPostCount
         : overview?.total_posts ?? 0
 
-  const engBuckets = sparkFromTimeline(timeline, 'engagement')
-  const reachBuckets = sparkFromTimeline(timeline, 'reach')
-  const postBuckets = sparkFromTimeline(timeline, 'posts')
+  // Sparklines pull from the wider 365d window so a creator who posts
+  // monthly (or who has stale recent activity) still sees varied bars
+  // rather than 12 flat dashes.
+  const sparkSource = sparkTimeline ?? timeline
+  const engBuckets = sparkFromTimeline(sparkSource, 'engagement')
+  const reachBuckets = sparkFromTimeline(sparkSource, 'reach')
+  const postBuckets = sparkFromTimeline(sparkSource, 'posts')
 
-  const engDelta = periodDelta(timeline, 'engagement')
-  const reachDelta = periodDelta(timeline, 'reach')
-  const postDelta = periodDelta(timeline, 'posts')
+  const engDelta = periodDelta(sparkSource, 'engagement')
+  const reachDelta = periodDelta(sparkSource, 'reach')
+  const postDelta = periodDelta(sparkSource, 'posts')
 
   // Honest empty state: the connected account has nothing to summarize yet.
   // Trigger only when overview is loaded AND every aggregate is zero — avoids
@@ -726,6 +732,11 @@ export default function Dashboard() {
   const [range, setRange] = useState<'7d' | '30d' | '90d'>('30d')
   const timelineDays = range === '7d' ? 7 : range === '90d' ? 90 : 30
   const timeline = useEngagementTimeline(timelineDays)
+  // Sparklines + period deltas always pull a year of data so a creator who
+  // posts once a quarter still sees varied bars instead of an all-zero
+  // "flat dashes" timeline. The user-selected `range` above stays for any
+  // future per-range chart that lands on this page.
+  const sparkTimeline = useEngagementTimeline(365)
   const { t, i18n } = useTranslation()
   const isAr = i18n.language?.startsWith('ar') ?? false
 
@@ -816,6 +827,7 @@ export default function Dashboard() {
           sentiment={sentiment.data}
           breakdown={breakdown.data}
           timeline={timeline.data?.timeline}
+          sparkTimeline={sparkTimeline.data?.timeline}
           insightScore={insightScore}
           insightChange={insightChange}
           consistencyValue={consistency}

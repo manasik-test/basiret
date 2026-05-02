@@ -966,7 +966,11 @@ def engagement_timeline(
     ``{ "timeline": [{"date": "YYYY-MM-DD", "likes": N, "comments": N,
     "reach": N, "engagement": N, "posts": N}, ...] }``
     """
-    days = max(1, min(int(days), 90))
+    # 365-day cap accommodates accounts that post infrequently — the Home
+    # KPI sparklines need a wide enough window to actually show bars when an
+    # account has a few posts spread across the year. The DB query is still
+    # cheap (group-by-date over <2K rows).
+    days = max(1, min(int(days), 365))
     account_ids = [
         a.id for a in db.query(SocialAccount.id).filter(
             SocialAccount.organization_id == user.organization_id,
