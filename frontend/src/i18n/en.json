@@ -690,6 +690,8 @@
       "next": "Next month",
       "dayLabel": "Day {{d}}",
       "empty": "No scheduled posts yet — create your first post to see it here.",
+      "noCaption": "(no caption yet)",
+      "detailTitle": "Post details",
       "filter": {
         "all": "All",
         "scheduled": "Scheduled",
@@ -699,11 +701,75 @@
     },
     "drafts": {
       "title": "No drafts yet",
-      "body": "Create a post and save it as a draft to find it here."
+      "body": "Create a post and save it as a draft to find it here.",
+      "expiresIn": "Expires in {{n}} days"
     },
     "published": {
       "title": "Nothing published yet",
       "body": "Posts you publish through Basiret will appear here with their performance metrics."
+    },
+    "createFromDay": "Create post for this day",
+    "delete": {
+      "action": "Delete",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "confirmTitle": "Delete this post?",
+      "confirmBody": "This cannot be undone."
+    }
+  },
+  "creator": {
+    "title": "Create post",
+    "cta": "✦ Create post",
+    "back": "Back",
+    "next": "Next",
+    "aiSoon": "AI media generation is coming soon — upload your own for now.",
+    "steps": {
+      "media": "Media",
+      "caption": "Caption",
+      "preview": "Preview",
+      "schedule": "Schedule"
+    },
+    "media": {
+      "uploadTitle": "Upload your own",
+      "uploadSubtitle": "Drop a file here or click to browse.",
+      "dropHere": "Drop your media here",
+      "allowedTypes": "JPG, PNG, WEBP, MP4, MOV — up to 50 MB",
+      "uploading": "Uploading…",
+      "uploadError": "Upload failed. Please try again.",
+      "maxItems": "You can add up to 10 items per carousel.",
+      "aiTitle": "Generate with AI",
+      "aiSubtitle": "Describe what you want and Basiret will create the visual.",
+      "ratioTitle": "Aspect ratio"
+    },
+    "caption": {
+      "title": "Write your caption",
+      "placeholder": "Type your caption here…",
+      "hashtagsLabel": "Hashtags",
+      "hashtagPlaceholder": "Add hashtag and press Enter",
+      "aiTitle": "Let Basiret write it",
+      "aiSubtitle": "We'll match your brand voice and the post topic.",
+      "generate": "Generate caption",
+      "generating": "Writing…",
+      "aiError": "Couldn't generate a caption right now. Try again in a moment.",
+      "tonePill": "Writing in: {{tone}}"
+    },
+    "preview": {
+      "feed": "Feed",
+      "story": "Story",
+      "more": " more",
+      "noCaption": "Your caption will appear here."
+    },
+    "schedule": {
+      "postNow": "Post now",
+      "date": "Date",
+      "time": "Time",
+      "estReach": "Estimated reach: {{n}}",
+      "saveDraft": "Save as draft",
+      "schedule": "Schedule",
+      "postNowAction": "Post now",
+      "saveError": "Couldn't save your post. Please try again.",
+      "noAccount": "Connect Instagram before publishing.",
+      "dateRequired": "Please pick a date and time."
     }
   },
   "sentiment": {

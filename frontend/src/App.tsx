@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Analytics from './pages/Analytics'
 import Audience from './pages/Audience'
 import Recommendations from './pages/Recommendations'
+const PostCreator = lazy(() => import('./pages/PostCreator'))
 import Sentiment from './pages/Sentiment'
 import Competitors from './pages/Competitors'
 import Trends from './pages/Trends'
@@ -138,6 +139,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AppLayout><Recommendations /></AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/create"
+            element={
+              <ProtectedRoute>
+                <AppLayout><PostCreator /></AppLayout>
               </ProtectedRoute>
             }
           />

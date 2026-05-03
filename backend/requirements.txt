@@ -28,3 +28,6 @@ openai==1.54.3
 reportlab==4.2.2
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
+# Post Creator — multipart uploads + R2 (S3-compatible) storage.
+python-multipart==0.0.9
+boto3==1.34.34

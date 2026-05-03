@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     RAPIDAPI_KEY: str = ""
     RAPIDAPI_INSTAGRAM_HOST: str = "instagram-scraper-api2.p.rapidapi.com"
 
+    # Cloudflare R2 — S3-compatible object storage for Post Creator media.
+    # When R2_ACCOUNT_ID is empty the storage helper falls back to writing
+    # files under /tmp/basiret-media/ and serving them via /api/v1/media/.
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET_NAME: str = "basiret-media"
+    R2_PUBLIC_URL: str = ""
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

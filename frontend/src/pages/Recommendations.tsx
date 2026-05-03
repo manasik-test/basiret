@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import {
   useContentPlan,
   useGenerateCaption,
@@ -9,6 +10,9 @@ import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
 import { Icon, I, TypeIcon, normalizeContentType } from '../components/redesign/icons'
 import type { ContentPlanDay } from '../api/analytics'
+import { usePosts, useCalendar, useDeletePost } from '../hooks/useCreator'
+import type { ScheduledPost } from '../api/creator'
+import { cn } from '../lib/utils'
 
 /* ---------------- helpers ---------------- */
 
@@ -46,6 +50,7 @@ const TYPE_THUMB_BG: Record<string, string> = {
 
 function ContentPlanContent() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
   const isAr = !!i18n.language?.startsWith('ar')
   const { data, isLoading } = useContentPlan()
   const { data: accounts } = useAccounts()
@@ -187,10 +192,7 @@ function ContentPlanContent() {
           <button
             className="cp-create"
             type="button"
-            // No-op until Sprint 3 lands the Post Creator. The button is
-            // already rendered + styled so the layout doesn't shift when
-            // the handler is wired up.
-            onClick={() => undefined}
+            onClick={() => navigate('/create')}
           >
             <Icon path={I.spark} size={14} />
             <span>{t('contentPlanPage.createPost')}</span>
@@ -396,9 +398,22 @@ function ContentPlanContent() {
           </div>
 
           <div className="cp-prev-actions">
-            <button className="cp-ghost">
-              <Icon path={I.pencil} size={14} />
-              {t('contentPlanPage.editAction')}
+            <button
+              className="cp-ghost"
+              onClick={() => {
+                // Pre-fill the wizard from this AI Plan day so the user
+                // doesn't have to retype topic / type / time.
+                const params = new URLSearchParams({
+                  date: sel.date,
+                  topic: sel.topic ?? '',
+                  time: sel.best_time ?? '',
+                  type: normalizeContentType(sel.content_type),
+                })
+                navigate(`/create?${params.toString()}`)
+              }}
+            >
+              <Icon path={I.spark} size={14} />
+              {t('contentPlanPage.createFromDay')}
             </button>
             <button
               className="cp-cta"
@@ -470,14 +485,32 @@ export default function Recommendations() {
 
 type CalendarFilter = 'all' | 'scheduled' | 'published' | 'draft'
 
+const STATUS_COLOR: Record<string, string> = {
+  draft: '#94a3b8',       // slate
+  scheduled: '#5433c2',   // primary purple
+  publishing: '#f59e0b',  // amber
+  published: '#10b981',   // emerald
+  failed: '#ef4444',      // red
+  cancelled: '#9ca3af',   // gray
+}
+
 function CalendarTab() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
   const isAr = !!i18n.language?.startsWith('ar')
   const [cursor, setCursor] = useState<Date>(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
   const [filter, setFilter] = useState<CalendarFilter>('all')
+  const [openPost, setOpenPost] = useState<ScheduledPost | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<ScheduledPost | null>(null)
+
+  const accountsQ = useAccounts()
+  const accountId = accountsQ.data?.[0]?.id
+  const monthKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
+  const calendar = useCalendar(monthKey, accountId)
+  const deleteMut = useDeletePost()
 
   const today = new Date()
   const todayY = today.getFullYear()
@@ -492,24 +525,23 @@ function CalendarTab() {
   )
 
   // Build a Sunday-first 6×7 grid covering the displayed month.
-  // First-of-month's weekday tells us how many leading blanks to render.
   const firstWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const cells: Array<{ day: number | null; isToday: boolean }> = []
-  for (let i = 0; i < firstWeekday; i++) cells.push({ day: null, isToday: false })
+  type Cell = { day: number | null; isToday: boolean; iso: string | null }
+  const cells: Cell[] = []
+  for (let i = 0; i < firstWeekday; i++) cells.push({ day: null, isToday: false, iso: null })
   for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     cells.push({
       day: d,
       isToday: year === todayY && month === todayM && d === todayD,
+      iso,
     })
   }
-  while (cells.length % 7 !== 0) cells.push({ day: null, isToday: false })
+  while (cells.length % 7 !== 0) cells.push({ day: null, isToday: false, iso: null })
 
-  // Localized weekday header. Use a fixed Sunday in 2024 (a known Sun) +
-  // increment, so the labels respect the active locale and show as
-  // "Sun Mon Tue …" / "أحد إثنين ثلاثاء …".
   const weekdayLabels = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(2024, 0, 7 + i) // Jan 7 2024 was a Sunday
+    const d = new Date(2024, 0, 7 + i)
     return d.toLocaleDateString(
       isAr ? 'ar-EG-u-ca-gregory' : 'en-US',
       { weekday: 'short' },
@@ -517,7 +549,22 @@ function CalendarTab() {
   })
 
   const filterKeys: CalendarFilter[] = ['all', 'scheduled', 'published', 'draft']
-  void filter // filter is wired to the pills today; counts/data hook up in Sprint 3.
+  function filterPosts(posts: ScheduledPost[]): ScheduledPost[] {
+    if (filter === 'all') return posts
+    return posts.filter((p) => p.status === filter)
+  }
+
+  function dayPosts(iso: string | null): ScheduledPost[] {
+    if (!iso || !calendar.data) return []
+    return filterPosts(calendar.data[iso]?.posts ?? [])
+  }
+
+  // Show the centered empty-state hint only when the visible month is
+  // entirely empty after filtering — once the user has any posts, we let
+  // the cards speak for themselves.
+  const monthHasContent = calendar.data
+    ? Object.values(calendar.data).some((d) => filterPosts(d.posts ?? []).length > 0)
+    : false
 
   return (
     <div className="cp-cal">
@@ -562,28 +609,83 @@ function CalendarTab() {
           ))}
         </div>
         <div className="cp-cal-grid cp-cal-days">
-          {cells.map((cell, i) =>
-            cell.day === null ? (
-              <div key={i} className="cp-cal-cell is-blank" aria-hidden />
-            ) : (
+          {cells.map((cell, i) => {
+            if (cell.day === null) {
+              return <div key={i} className="cp-cal-cell is-blank" aria-hidden />
+            }
+            const posts = dayPosts(cell.iso)
+            return (
               <button
                 key={i}
                 type="button"
-                className={cell.isToday ? 'cp-cal-cell is-today' : 'cp-cal-cell'}
-                // No-op until Sprint 3 — clicking a day will open the
-                // Post Creator pre-filled with that date.
-                onClick={() => undefined}
+                className={cn(
+                  'cp-cal-cell',
+                  cell.isToday && 'is-today',
+                  posts.length > 0 && 'has-posts',
+                )}
+                onClick={() => {
+                  if (posts.length === 0) {
+                    navigate(`/create?date=${cell.iso}`)
+                  } else {
+                    // Open the most recent post; multi-post days could
+                    // surface a stacked picker in a follow-up.
+                    setOpenPost(posts[0]!)
+                  }
+                }}
                 aria-label={t('contentPlanPage.calendar.dayLabel', { d: cell.day })}
               >
                 <span className="cp-cal-num num">{cell.day}</span>
+                {posts.slice(0, 2).map((p) => (
+                  <span
+                    key={p.id}
+                    className="cp-cal-card"
+                    style={{ borderInlineStartColor: STATUS_COLOR[p.status] ?? '#94a3b8' }}
+                    dir="auto"
+                  >
+                    {(p.caption_en || p.caption_ar || t('contentPlanPage.calendar.noCaption'))
+                      .split(/\s+/)
+                      .slice(0, 3)
+                      .join(' ')}
+                  </span>
+                ))}
+                {posts.length > 2 && (
+                  <span className="cp-cal-more">+{posts.length - 2}</span>
+                )}
               </button>
-            ),
-          )}
+            )
+          })}
         </div>
-        <div className="cp-cal-empty" aria-live="polite">
-          {t('contentPlanPage.calendar.empty')}
-        </div>
+        {!monthHasContent && (
+          <div className="cp-cal-empty" aria-live="polite">
+            {t('contentPlanPage.calendar.empty')}
+          </div>
+        )}
       </div>
+
+      {openPost && (
+        <PostDetailPanel
+          post={openPost}
+          onClose={() => setOpenPost(null)}
+          onEdit={(p) => {
+            // Edit re-uses the wizard with the post's date pre-filled.
+            const iso = p.scheduled_at?.slice(0, 10) ?? ''
+            navigate(`/create${iso ? `?date=${iso}` : ''}`)
+          }}
+          onDelete={(p) => setConfirmDelete(p)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDeleteDialog
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const id = confirmDelete.id
+            setConfirmDelete(null)
+            setOpenPost(null)
+            await deleteMut.mutateAsync(id)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -592,25 +694,99 @@ function CalendarTab() {
 
 function DraftsTab() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const list = usePosts('draft')
+  const deleteMut = useDeletePost()
+  const [confirmDelete, setConfirmDelete] = useState<ScheduledPost | null>(null)
+
+  if (list.isLoading) {
+    return <div className="cp-loading">{t('contentPlanPage.loading')}</div>
+  }
+  if (!list.data || list.data.length === 0) {
+    return (
+      <EmptyListTab
+        iconPath={I.pencil}
+        title={t('contentPlanPage.drafts.title')}
+        body={t('contentPlanPage.drafts.body')}
+        cta={t('contentPlanPage.createPost')}
+        onCta={() => navigate('/create')}
+      />
+    )
+  }
+
   return (
-    <EmptyListTab
-      iconPath={I.pencil}
-      title={t('contentPlanPage.drafts.title')}
-      body={t('contentPlanPage.drafts.body')}
-      cta={t('contentPlanPage.createPost')}
-    />
+    <>
+      <div className="cp-list-card">
+        {list.data.map((p) => (
+          <PostRow
+            key={p.id}
+            post={p}
+            mode="draft"
+            onEdit={() => navigate('/create')}
+            onDelete={() => setConfirmDelete(p)}
+          />
+        ))}
+      </div>
+      {confirmDelete && (
+        <ConfirmDeleteDialog
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const id = confirmDelete.id
+            setConfirmDelete(null)
+            await deleteMut.mutateAsync(id)
+          }}
+        />
+      )}
+    </>
   )
 }
 
 function PublishedTab() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const list = usePosts('published')
+  const deleteMut = useDeletePost()
+  const [confirmDelete, setConfirmDelete] = useState<ScheduledPost | null>(null)
+
+  if (list.isLoading) {
+    return <div className="cp-loading">{t('contentPlanPage.loading')}</div>
+  }
+  if (!list.data || list.data.length === 0) {
+    return (
+      <EmptyListTab
+        iconPath={I.trend}
+        title={t('contentPlanPage.published.title')}
+        body={t('contentPlanPage.published.body')}
+        cta={t('contentPlanPage.createPost')}
+        onCta={() => navigate('/create')}
+      />
+    )
+  }
+
   return (
-    <EmptyListTab
-      iconPath={I.trend}
-      title={t('contentPlanPage.published.title')}
-      body={t('contentPlanPage.published.body')}
-      cta={t('contentPlanPage.createPost')}
-    />
+    <>
+      <div className="cp-list-card">
+        {list.data.map((p) => (
+          <PostRow
+            key={p.id}
+            post={p}
+            mode="published"
+            onEdit={() => navigate('/create')}
+            onDelete={() => setConfirmDelete(p)}
+          />
+        ))}
+      </div>
+      {confirmDelete && (
+        <ConfirmDeleteDialog
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const id = confirmDelete.id
+            setConfirmDelete(null)
+            await deleteMut.mutateAsync(id)
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -619,11 +795,13 @@ function EmptyListTab({
   title,
   body,
   cta,
+  onCta,
 }: {
   iconPath: React.ReactNode
   title: string
   body: string
   cta: string
+  onCta?: () => void
 }) {
   return (
     <div className="cp-empty-card">
@@ -635,12 +813,155 @@ function EmptyListTab({
       <button
         type="button"
         className="cp-create"
-        // No-op for now; Sprint 3 wires the Post Creator.
-        onClick={() => undefined}
+        onClick={() => onCta?.()}
       >
         <Icon path={I.spark} size={14} />
         <span>{cta}</span>
       </button>
+    </div>
+  )
+}
+
+/* ---------------- Shared row + panel + delete dialog ---------------- */
+
+function PostRow({
+  post,
+  mode,
+  onEdit,
+  onDelete,
+}: {
+  post: ScheduledPost
+  mode: 'draft' | 'published'
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const { t, i18n } = useTranslation()
+  const isAr = !!i18n.language?.startsWith('ar')
+  const caption = post.caption_en || post.caption_ar || t('contentPlanPage.calendar.noCaption')
+  const captionShort = caption.length > 80 ? `${caption.slice(0, 80).trim()}…` : caption
+  const thumb = post.media_urls?.[0] ?? null
+
+  let helper: string = ''
+  let helperTone = ''
+  if (mode === 'draft' && post.draft_expires_at) {
+    const days = Math.max(
+      0,
+      Math.ceil(
+        (new Date(post.draft_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+      ),
+    )
+    helper = t('contentPlanPage.drafts.expiresIn', { n: days })
+    helperTone = days <= 2 ? 'is-bad' : days <= 5 ? 'is-warn' : ''
+  } else if (mode === 'published' && post.published_at) {
+    helper = new Date(post.published_at).toLocaleDateString(
+      isAr ? 'ar-EG-u-ca-gregory' : 'en-US',
+      { month: 'short', day: 'numeric', year: 'numeric' },
+    )
+  }
+
+  return (
+    <div className="cp-row-card">
+      <div className="cp-row-thumb">
+        {thumb ? <img src={thumb} alt="" /> : <Icon path={I.calendar} size={20} />}
+      </div>
+      <div className="cp-row-body">
+        <p className="cp-row-cap" dir="auto">{captionShort}</p>
+        {helper && <span className={cn('cp-row-helper', helperTone)}>{helper}</span>}
+      </div>
+      <div className="cp-row-actions">
+        <button onClick={onEdit} className="cp-ghost">
+          <Icon path={I.pencil} size={14} />
+          {t('contentPlanPage.editAction')}
+        </button>
+        <button onClick={onDelete} className="cp-row-delete" aria-label={t('contentPlanPage.delete.action')}>
+          <Icon path={I.warn} size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PostDetailPanel({
+  post,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  post: ScheduledPost
+  onClose: () => void
+  onEdit: (post: ScheduledPost) => void
+  onDelete: (post: ScheduledPost) => void
+}) {
+  const { t } = useTranslation()
+  const caption = post.caption_en || post.caption_ar || ''
+  return (
+    <div className="cp-panel-back" onClick={onClose}>
+      <aside className="cp-panel" onClick={(e) => e.stopPropagation()} dir="auto">
+        <div className="cp-panel-head">
+          <h3 className="cp-panel-title">{t('contentPlanPage.calendar.detailTitle')}</h3>
+          <button onClick={onClose} aria-label="close" className="cp-panel-close">
+            <Icon path={I.chevR} size={16} />
+          </button>
+        </div>
+        {post.media_urls?.[0] && (
+          <img src={post.media_urls[0]} alt="" className="cp-panel-img" />
+        )}
+        <div className="cp-panel-meta">
+          <span
+            className="cp-panel-status"
+            style={{ background: STATUS_COLOR[post.status] ?? '#94a3b8' }}
+          >
+            {t(`contentPlanPage.calendar.filter.${post.status === 'published' ? 'published' : post.status === 'scheduled' ? 'scheduled' : 'draft'}`)}
+          </span>
+          {post.scheduled_at && (
+            <span className="cp-panel-time num">
+              {new Date(post.scheduled_at).toLocaleString()}
+            </span>
+          )}
+        </div>
+        <p className="cp-panel-caption" dir="auto">{caption || t('contentPlanPage.calendar.noCaption')}</p>
+        {post.hashtags?.length > 0 && (
+          <p className="cp-panel-tags" dir="auto">
+            {post.hashtags.map((h) => `#${h}`).join(' ')}
+          </p>
+        )}
+        <div className="cp-panel-actions">
+          <button onClick={() => onEdit(post)} className="cp-ghost">
+            <Icon path={I.pencil} size={14} />
+            {t('contentPlanPage.editAction')}
+          </button>
+          <button onClick={() => onDelete(post)} className="cp-row-delete">
+            <Icon path={I.warn} size={14} />
+            {t('contentPlanPage.delete.action')}
+          </button>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function ConfirmDeleteDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void
+  onConfirm: () => void | Promise<void>
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="cp-modal-back" onClick={onCancel} role="dialog" aria-modal="true">
+      <div className="cp-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="cp-modal-title">{t('contentPlanPage.delete.confirmTitle')}</h3>
+        <p className="cp-modal-body">{t('contentPlanPage.delete.confirmBody')}</p>
+        <div className="cp-modal-actions">
+          <button onClick={onCancel} className="cp-ghost">
+            {t('contentPlanPage.delete.cancel')}
+          </button>
+          <button onClick={() => onConfirm()} className="cp-modal-danger">
+            {t('contentPlanPage.delete.confirm')}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -812,4 +1133,49 @@ const CP_TAB_STYLES = `
 .cp-empty-icon { width:64px; height:64px; border-radius:16px; background:var(--purple-50); color:var(--purple-700); display:grid; place-items:center; }
 .cp-empty-title { font-size:18px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; }
 .cp-empty-body { font-size:13.5px; color:var(--ink-500); max-width:420px; line-height:1.6; }
+
+/* Calendar day-cell post chips */
+.cp-cal-cell.has-posts { background:var(--surface); border-color:var(--line); }
+.cp-cal-cell { flex-direction:column; align-items:stretch; gap:4px; }
+.cp-cal-card { font-size:10.5px; font-weight:500; color:var(--ink-700); padding:3px 6px; border-inline-start:3px solid #94a3b8; background:var(--ink-50); border-radius:4px; line-height:1.3; text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-cal-more { font-size:10.5px; color:var(--ink-500); font-weight:600; padding:0 6px; }
+
+/* Drafts + Published list rows */
+.cp-list-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; overflow:hidden; }
+.cp-row-card { display:flex; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line); transition:background .1s; }
+.cp-row-card:last-child { border-bottom:0; }
+.cp-row-card:hover { background:var(--ink-50); }
+.cp-row-thumb { width:56px; height:56px; border-radius:10px; background:var(--ink-100); display:grid; place-items:center; color:var(--ink-500); flex-shrink:0; overflow:hidden; }
+.cp-row-thumb img { width:100%; height:100%; object-fit:cover; }
+.cp-row-body { flex:1; display:flex; flex-direction:column; gap:4px; min-width:0; }
+.cp-row-cap { font-size:13.5px; color:var(--ink-900); font-weight:500; line-height:1.4; overflow:hidden; text-overflow:ellipsis; }
+.cp-row-helper { font-size:11.5px; color:var(--ink-500); font-weight:500; }
+.cp-row-helper.is-warn { color:#b45309; }
+.cp-row-helper.is-bad { color:#b91c1c; }
+.cp-row-actions { display:flex; gap:6px; flex-shrink:0; }
+.cp-row-delete { display:inline-flex; align-items:center; gap:5px; padding:8px 10px; background:transparent; color:#b91c1c; border-radius:8px; font-size:12px; font-weight:600; transition:background .12s; }
+.cp-row-delete:hover { background:rgba(185, 28, 28, 0.08); }
+
+/* Slide-in detail panel for Calendar */
+.cp-panel-back { position:fixed; inset:0; background:rgba(20,16,40,.4); z-index:50; display:flex; justify-content:flex-end; }
+.cp-panel { width:min(420px, 92vw); height:100%; background:var(--surface); padding:22px; overflow-y:auto; display:flex; flex-direction:column; gap:14px; }
+.cp-panel-head { display:flex; align-items:center; justify-content:space-between; }
+.cp-panel-title { font-size:15px; font-weight:700; color:var(--ink-950); }
+.cp-panel-close { width:30px; height:30px; border-radius:8px; display:grid; place-items:center; background:var(--ink-100); color:var(--ink-700); }
+.cp-panel-img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:12px; background:var(--ink-100); }
+.cp-panel-meta { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.cp-panel-status { padding:3px 10px; border-radius:99px; color:#fff; font-size:11px; font-weight:600; text-transform:capitalize; }
+.cp-panel-time { font-size:12px; color:var(--ink-600); font-variant-numeric:tabular-nums; }
+.cp-panel-caption { font-size:13.5px; color:var(--ink-900); line-height:1.55; white-space:pre-wrap; }
+.cp-panel-tags { font-size:12.5px; color:var(--purple-700); font-weight:500; }
+.cp-panel-actions { display:flex; gap:8px; padding-top:14px; border-top:1px solid var(--line); }
+
+/* Delete confirmation modal */
+.cp-modal-back { position:fixed; inset:0; background:rgba(20,16,40,.45); z-index:60; display:grid; place-items:center; padding:18px; }
+.cp-modal { background:var(--surface); border-radius:14px; padding:22px; max-width:380px; width:100%; display:flex; flex-direction:column; gap:12px; }
+.cp-modal-title { font-size:16px; font-weight:700; color:var(--ink-950); }
+.cp-modal-body { font-size:13.5px; color:var(--ink-600); line-height:1.55; }
+.cp-modal-actions { display:flex; gap:8px; justify-content:flex-end; padding-top:6px; }
+.cp-modal-danger { padding:9px 16px; background:#dc2626; color:#fff; border-radius:8px; font-size:13px; font-weight:600; transition:background .12s; }
+.cp-modal-danger:hover { background:#b91c1c; }
 `

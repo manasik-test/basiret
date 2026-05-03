@@ -25,6 +25,7 @@ celery.conf.update(
         "app.tasks.segmentation",
         "app.tasks.insights",
         "app.tasks.account_deletion",
+        "app.tasks.draft_cleanup",
     ],
 )
 
@@ -38,5 +39,16 @@ celery.conf.beat_schedule = {
     "daily-instagram-sync": {
         "task": "sync_all_active_accounts",
         "schedule": crontab(hour=2, minute=0),
+    },
+    # Post Creator drafts have a 15-day TTL. Cleanup at 02:00 UTC reclaims
+    # both the DB row and the R2 media; warn at 09:00 UTC fires a log line
+    # for drafts within their last 3 days.
+    "daily-cleanup-expired-drafts": {
+        "task": "cleanup_expired_drafts",
+        "schedule": crontab(hour=2, minute=0),
+    },
+    "daily-warn-expiring-drafts": {
+        "task": "warn_expiring_drafts",
+        "schedule": crontab(hour=9, minute=0),
     },
 }

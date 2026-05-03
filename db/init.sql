@@ -281,3 +281,34 @@ CREATE INDEX idx_user_org ON "user"(organization_id);
 CREATE INDEX idx_social_account_org ON social_account(organization_id);
 CREATE INDEX idx_insight_account ON insight_result(social_account_id);
 CREATE INDEX idx_insight_account_lang ON insight_result(social_account_id, language);
+
+-- ─────────────────────────────────────────
+-- SCHEDULED POST (drafts, scheduled, published from Basiret Post Creator)
+-- ─────────────────────────────────────────
+CREATE TABLE scheduled_post (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    media_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+    media_type VARCHAR(20),
+    caption_ar TEXT,
+    caption_en TEXT,
+    hashtags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ratio VARCHAR(10),
+    scheduled_at TIMESTAMPTZ,
+    published_at TIMESTAMPTZ,
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    platform_post_id VARCHAR(255),
+    ai_generated_media BOOLEAN NOT NULL DEFAULT FALSE,
+    ai_generated_caption BOOLEAN NOT NULL DEFAULT FALSE,
+    source_image_url TEXT,
+    content_plan_day DATE,
+    draft_expires_at TIMESTAMPTZ,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_scheduled_post_org_status ON scheduled_post(organization_id, status);
+CREATE INDEX idx_scheduled_post_account_scheduled ON scheduled_post(social_account_id, scheduled_at);
+CREATE INDEX idx_scheduled_post_status_expires ON scheduled_post(status, draft_expires_at);
