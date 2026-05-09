@@ -448,6 +448,14 @@ export async function fetchPostsInsights(language: 'en' | 'ar' = 'en'): Promise<
   return res.data
 }
 
+export interface ImageAnalysis {
+  product_description: string
+  detected_style: string
+  dominant_colors: string[]
+  suggested_tone: string
+  content_suggestions: string[]
+}
+
 export interface GenerateCaptionRequest {
   content_type?: string
   topic?: string
@@ -455,6 +463,10 @@ export interface GenerateCaptionRequest {
   reference_caption?: string
   post_id?: string
   image_ratio?: '1:1' | '4:5' | '16:9'
+  // Optional GPT-4o Vision analysis of the post image. When supplied, the
+  // backend prepends an IMAGE ANALYSIS block to the prompt so the caption
+  // describes what's pictured.
+  image_analysis?: ImageAnalysis
   // Client-only: used to key the sessionStorage cache so multiple connected
   // accounts don't share captions. Not sent to the backend (backend scopes
   // by user's org automatically).
@@ -468,6 +480,14 @@ export interface GenerateCaptionRequest {
 function captionCacheKey(req: GenerateCaptionRequest): string | null {
   if (typeof window === 'undefined' || !req.account_id) return null
   const day = new Date().toISOString().slice(0, 10)
+  // Compact image-analysis fingerprint — same shape we use server-side.
+  const ia = req.image_analysis
+    ? [
+        req.image_analysis.product_description,
+        req.image_analysis.detected_style,
+        req.image_analysis.suggested_tone,
+      ].join('|')
+    : ''
   return [
     'basiret',
     'caption',
@@ -477,6 +497,7 @@ function captionCacheKey(req: GenerateCaptionRequest): string | null {
     req.topic ?? '',
     req.post_id ?? '',
     req.image_ratio ?? '',
+    ia,
     req.language,
   ].join(':')
 }

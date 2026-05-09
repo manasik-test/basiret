@@ -739,6 +739,17 @@
       "maxItems": "You can add up to 10 items per carousel.",
       "aiTitle": "Generate with AI",
       "aiSubtitle": "Describe what you want and Basiret will create the visual.",
+      "aiDescriptionLabel": "Describe your product or topic",
+      "aiDescriptionPlaceholder": "A glass bottle of rose perfume on a marble surface…",
+      "aiDescriptionRequired": "Please describe what you want to generate.",
+      "aiStyleLabel": "Style",
+      "aiGenerate": "✦ Generate image",
+      "aiRegenerate": "Regenerate",
+      "aiGenerating": "Generating image…",
+      "aiRemaining": "{{n}} generations remaining",
+      "aiLimit": "You've used all {{n}} AI generations for this post.",
+      "aiError": "Couldn't generate the image. Try a different description.",
+      "aiBadge": "AI generated",
       "ratioTitle": "Aspect ratio"
     },
     "caption": {
@@ -751,7 +762,10 @@
       "generate": "Generate caption",
       "generating": "Writing…",
       "aiError": "Couldn't generate a caption right now. Try again in a moment.",
-      "tonePill": "Writing in: {{tone}}"
+      "tonePill": "Writing in: {{tone}} tone",
+      "analyzing": "Analyzing your image…",
+      "detectedPill": "Detected: {{desc}}",
+      "basedOn": "Based on your image: {{desc}}"
     },
     "preview": {
       "feed": "Feed",
@@ -863,6 +877,13 @@
       "short": "Short (<50 words)",
       "medium": "Medium (50–100 words)",
       "long": "Long (100+ words)"
+    },
+    "imageStyle": {
+      "clean": "Clean",
+      "vibrant": "Vibrant",
+      "minimal": "Minimal",
+      "luxurious": "Luxurious",
+      "playful": "Playful"
     },
     "noPillars": "No pillars yet — add up to 5 themes you post about.",
     "pillarPlaceholder": "Add a pillar (e.g. New arrivals)",

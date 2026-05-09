@@ -1,15 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  analyzeImage,
   createPost,
   deletePost,
   fetchCalendar,
   fetchPost,
   fetchPosts,
+  generateImage,
   updatePost,
   uploadMedia,
   type CalendarResponse,
   type CreatePostBody,
+  type GenerateImageRequest,
   type PostStatus,
   type ScheduledPost,
   type UpdatePostBody,
@@ -75,4 +78,12 @@ export function useDeletePost() {
       qc.invalidateQueries({ queryKey: ROOT_KEY })
     },
   })
+}
+
+export function useAnalyzeImage() {
+  return useMutation({ mutationFn: (imageUrl: string) => analyzeImage(imageUrl) })
+}
+
+export function useGenerateImage() {
+  return useMutation({ mutationFn: (req: GenerateImageRequest) => generateImage(req) })
 }

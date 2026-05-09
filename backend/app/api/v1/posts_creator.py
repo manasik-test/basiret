@@ -19,11 +19,18 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID as PyUUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.ai_degradation import degraded_no_cache_response
+from app.core.ai_image import (
+    analyze_image_url as openai_analyze_image_url,
+    dalle_size_for_ratio,
+    generate_dalle_image,
+)
+from app.core.ai_provider import AIProviderError
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.storage import (
@@ -32,6 +39,7 @@ from app.core.storage import (
     is_r2_configured,
     upload_media,
 )
+from app.models.organization import Organization
 from app.models.scheduled_post import ScheduledPost
 from app.models.social_account import SocialAccount
 from app.models.user import User
@@ -74,6 +82,7 @@ class CreatePostRequest(BaseModel):
     ai_generated_media: bool = False
     ai_generated_caption: bool = False
     source_image_url: Optional[str] = None
+    image_analysis: Optional[dict] = None
 
 
 class UpdatePostRequest(BaseModel):
@@ -86,6 +95,7 @@ class UpdatePostRequest(BaseModel):
     scheduled_at: Optional[datetime] = None
     status: Optional[ValidStatus] = None
     error_message: Optional[str] = None
+    image_analysis: Optional[dict] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -110,6 +120,7 @@ def _serialize(post: ScheduledPost) -> dict:
         "ai_generated_media": post.ai_generated_media,
         "ai_generated_caption": post.ai_generated_caption,
         "source_image_url": post.source_image_url,
+        "image_analysis": post.image_analysis,
         "content_plan_day": post.content_plan_day.isoformat() if post.content_plan_day else None,
         "draft_expires_at": (
             post.draft_expires_at.isoformat() if post.draft_expires_at else None
@@ -225,6 +236,211 @@ async def upload(
     }
 
 
+class AnalyzeImageRequest(BaseModel):
+    image_url: str = Field(..., min_length=8)
+
+
+@router.post("/creator/analyze-image")
+def analyze_image(
+    body: AnalyzeImageRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Analyze a previously-uploaded image with GPT-4o Vision.
+
+    The image must already be reachable at the supplied URL (typically the URL
+    returned by `POST /creator/upload`). Returns the structured product
+    description used by the caption generator. AI failures degrade with the
+    standard `meta.status='degraded'` envelope so the wizard can still proceed
+    with empty analysis instead of erroring out.
+    """
+    primary_account_id = _resolve_primary_account_id(db, user)
+    try:
+        result = openai_analyze_image_url(
+            body.image_url,
+            account_id=primary_account_id,
+            source="user",
+        )
+    except AIProviderError as exc:
+        return degraded_no_cache_response(exc)
+
+    logger.info(
+        "creator analyze-image by user=%s account=%s style=%s",
+        user.id, primary_account_id, result.get("detected_style"),
+    )
+    return {
+        "success": True,
+        "data": result,
+        "meta": {"status": "fresh"},
+    }
+
+
+class GenerateImageRequest(BaseModel):
+    description: str = Field(..., min_length=3, max_length=2000)
+    ratio: Literal["1:1", "4:5", "16:9"] = "1:1"
+    account_id: Optional[str] = None
+
+
+@router.post("/creator/generate-image")
+def generate_image(
+    body: GenerateImageRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a brand-aware image via DALL-E 3, persist it on R2, return URL.
+
+    Brand identity (primary color, image style, tone) and business profile
+    (industry, city) are folded into the DALL-E prompt so generated images
+    match the rest of the account's content. The generated URL hosted by
+    OpenAI expires within ~1 hour so we download + re-upload to R2 inside
+    this request — the URL we return points at our storage backend.
+    """
+    primary_account_id = _resolve_primary_account_id(db, user, body.account_id)
+
+    org = (
+        db.query(Organization)
+        .filter(Organization.id == user.organization_id)
+        .first()
+    )
+    brand = (org.brand_identity if org else None) or {}
+    bp = (org.business_profile if org else None) or {}
+
+    prompt = _build_dalle_prompt(body.description, body.ratio, brand, bp)
+
+    try:
+        gen = generate_dalle_image(
+            prompt,
+            ratio=body.ratio,
+            account_id=primary_account_id,
+            source="user",
+        )
+    except AIProviderError as exc:
+        return degraded_no_cache_response(exc)
+
+    # Download the generated bytes immediately — the temporary OpenAI URL
+    # expires inside an hour, so we re-host on R2 to keep the post stable.
+    try:
+        import httpx
+        with httpx.Client(timeout=60) as http:
+            r = http.get(gen["url"])
+            r.raise_for_status()
+            payload = r.content
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("DALL-E download failed url=%s", gen.get("url"))
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to download generated image",
+        ) from exc
+
+    final_url = upload_media(payload, "ai-generated.png", "image/png")
+    logger.info(
+        "creator generate-image by user=%s account=%s ratio=%s size=%s",
+        user.id, primary_account_id, body.ratio, gen.get("size"),
+    )
+    return {
+        "success": True,
+        "data": {
+            "url": final_url,
+            "prompt_used": prompt,
+            "revised_prompt": gen.get("revised_prompt"),
+            "ratio": body.ratio,
+            "size": gen.get("size") or dalle_size_for_ratio(body.ratio),
+        },
+        "meta": {"status": "fresh"},
+    }
+
+
+def _build_dalle_prompt(
+    description: str,
+    ratio: str,
+    brand: dict,
+    business_profile: dict,
+) -> str:
+    """Compose the DALL-E 3 prompt from the user description + account context.
+
+    Layered: user's own description first (their intent dominates), then style
+    cues from brand identity, then business context (industry / city), then
+    a final instruction about social-feed framing. Empty fields are skipped.
+    """
+    parts: list[str] = [description.strip()]
+
+    style = (brand.get("image_style") or "").strip().lower()
+    tone = (brand.get("tone") or "").strip().lower()
+    primary_color = (brand.get("primary_color") or "").strip()
+
+    style_descriptors = {
+        "luxurious": "luxurious, refined, high-end product photography, soft directional light, premium materials",
+        "luxury": "luxurious, refined, high-end product photography, soft directional light, premium materials",
+        "minimal": "minimal, clean composition, generous negative space, neutral palette, soft natural light",
+        "vibrant": "vibrant, saturated colors, energetic composition, contemporary lighting",
+        "playful": "playful, joyful, candid composition, warm color palette, lively styling",
+        "clean": "clean studio aesthetic, even lighting, uncluttered background, professional product styling",
+    }
+    if style in style_descriptors:
+        parts.append(style_descriptors[style])
+
+    if tone and tone not in ("", "friendly"):
+        parts.append(f"{tone} mood")
+
+    if primary_color:
+        parts.append(f"complement the brand color {primary_color}")
+
+    industry = (business_profile.get("industry") or "").strip()
+    city = (business_profile.get("city") or "").strip()
+    if industry:
+        parts.append(f"Created for a {industry} brand")
+    if city:
+        parts.append(f"based in {city}")
+
+    aspect = {
+        "1:1": "square 1:1 framing for an Instagram feed post",
+        "4:5": "portrait 4:5 framing for an Instagram feed post",
+        "16:9": "landscape 16:9 framing suitable for an Instagram cover",
+    }.get(ratio, "square 1:1 framing for an Instagram feed post")
+    parts.append(aspect)
+
+    parts.append(
+        "Photorealistic, sharp focus, no text, no watermarks, no logos, no people's faces."
+    )
+    return ". ".join(p for p in parts if p)
+
+
+def _resolve_primary_account_id(
+    db: Session, user: User, requested: Optional[str] = None,
+) -> Optional[str]:
+    """Return the social_account_id used for AI usage logging.
+
+    Mirrors `_resolve_account_id` but returns `str` (or None when the org has
+    no connected accounts). Doesn't 422 on empty — analyze + generate should
+    still work for a brand-new user before they've connected Instagram.
+    """
+    if requested:
+        try:
+            requested_uuid = PyUUID(requested)
+        except ValueError:
+            return None
+        account = (
+            db.query(SocialAccount)
+            .filter(
+                SocialAccount.id == requested_uuid,
+                SocialAccount.organization_id == user.organization_id,
+            )
+            .first()
+        )
+        return str(account.id) if account else None
+
+    account = (
+        db.query(SocialAccount)
+        .filter(
+            SocialAccount.organization_id == user.organization_id,
+            SocialAccount.is_active.is_(True),
+        )
+        .order_by(SocialAccount.connected_at.asc())
+        .first()
+    )
+    return str(account.id) if account else None
+
+
 @router.post("/creator/posts")
 def create_post(
     body: CreatePostRequest,
@@ -262,6 +478,7 @@ def create_post(
         ai_generated_media=body.ai_generated_media,
         ai_generated_caption=body.ai_generated_caption,
         source_image_url=body.source_image_url,
+        image_analysis=body.image_analysis,
         content_plan_day=body.content_plan_day,
         draft_expires_at=draft_expires_at,
     )

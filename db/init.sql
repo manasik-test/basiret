@@ -302,6 +302,7 @@ CREATE TABLE scheduled_post (
     ai_generated_media BOOLEAN NOT NULL DEFAULT FALSE,
     ai_generated_caption BOOLEAN NOT NULL DEFAULT FALSE,
     source_image_url TEXT,
+    image_analysis JSONB,
     content_plan_day DATE,
     draft_expires_at TIMESTAMPTZ,
     error_message TEXT,

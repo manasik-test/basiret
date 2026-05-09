@@ -563,6 +563,11 @@ class CaptionRequest(BaseModel):
     # format; landscape (16:9) is typically a video/IGTV cross-post and gets
     # a different CTA framing. Omitted → no ratio guidance in the prompt.
     image_ratio: Literal["1:1", "4:5", "16:9"] | None = None
+    # Optional GPT-4o Vision analysis of the image the caption accompanies.
+    # When supplied, the caption can describe what's actually pictured —
+    # this is the difference between "Check out our latest!" generic copy
+    # and "This rose perfume's gold cap catches the morning light…".
+    image_analysis: dict | None = None
 
 
 @router.post("/generate-caption")
@@ -595,6 +600,16 @@ def generate_caption(
         if post:
             reference = post.caption or ""
 
+    # Compact, stable summary of the image analysis so the cache key changes
+    # when the picture itself does, but doesn't churn on incidental dict-key
+    # ordering noise from the upstream JSON.
+    ia = body.image_analysis or {}
+    ia_summary = (
+        f"{(ia.get('product_description') or '').strip()}|"
+        f"{(ia.get('detected_style') or '').strip()}|"
+        f"{(ia.get('suggested_tone') or '').strip()}"
+    ) if ia else ""
+
     cache_payload = json.dumps(
         {
             "content_type": body.content_type,
@@ -602,6 +617,7 @@ def generate_caption(
             "post_id": body.post_id or "",
             "reference": reference[:300],
             "image_ratio": body.image_ratio or "",
+            "image_analysis": ia_summary,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -663,6 +679,21 @@ def generate_caption(
         else ""
     )
 
+    # IMAGE ANALYSIS block — only added when the caller passed a vision result.
+    # Helps the model write copy that describes what's actually in the image
+    # instead of falling back to generic "check out our latest!" content.
+    image_block = ""
+    if ia and ia.get("product_description"):
+        suggestions = ia.get("content_suggestions") or []
+        first_suggestion = suggestions[0] if suggestions else ""
+        image_block = (
+            "IMAGE ANALYSIS:\n"
+            f"- Product: {ia.get('product_description', '')}\n"
+            f"- Style: {(ia.get('detected_style') or '').title() or 'Unspecified'}\n"
+            f"- Suggested tone: {(ia.get('suggested_tone') or '').title() or 'Unspecified'}\n"
+            + (f"- Content angle: {first_suggestion}\n" if first_suggestion else "")
+        )
+
     sys = (
         f"You are an Instagram copywriter. Write a single caption ENTIRELY in {lang_label}. "
         f"This is a hard requirement — even if the reference caption is in a different language, "
@@ -679,6 +710,13 @@ def generate_caption(
             else ""
         )
         + (f"\n\n{brand_block}\n" if brand_block else "")
+        + (f"\n{image_block}\n" if image_block else "")
+        + (
+            "Reference the actual product or scene visible in the image. "
+            "Make the copy feel anchored to what is pictured — do not write generic copy. "
+            if image_block
+            else ""
+        )
         + f"{hashtag_rule} "
         f"{emoji_rule} "
         "No quotation marks around the caption. No preamble like 'Here is...'. "

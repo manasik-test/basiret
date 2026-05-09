@@ -34,7 +34,15 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-AITask = Literal["captions", "insights", "personas", "pages", "ask"]
+AITask = Literal[
+    "captions",
+    "insights",
+    "personas",
+    "pages",
+    "ask",
+    "vision",
+    "image_generation",
+]
 AISource = Literal["user", "background"]
 
 # One turn in a multi-turn conversation. `assistant` is normalized to the

@@ -64,6 +64,7 @@ class ScheduledPost(Base):
     ai_generated_media = Column(Boolean, nullable=False, default=False, server_default="false")
     ai_generated_caption = Column(Boolean, nullable=False, default=False, server_default="false")
     source_image_url = Column(Text)
+    image_analysis = Column(JSONB)
     content_plan_day = Column(Date)
     draft_expires_at = Column(DateTime(timezone=True))
     error_message = Column(Text)

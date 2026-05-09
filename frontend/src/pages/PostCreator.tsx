@@ -24,18 +24,24 @@ import {
   Globe,
   Image as ImageIcon,
   Loader2,
+  RefreshCw,
+  ScanEye,
   Sparkles,
   UploadCloud,
+  Wand2,
   X,
 } from 'lucide-react'
 
 import { useAccounts, useAudienceInsights, useGenerateCaption, usePostsBreakdown } from '../hooks/useAnalytics'
-import { useCreatePost, useUploadMedia } from '../hooks/useCreator'
-import { fetchBrandIdentity, type BrandIdentity } from '../api/auth'
+import { useAnalyzeImage, useCreatePost, useGenerateImage, useUploadMedia } from '../hooks/useCreator'
+import { fetchBrandIdentity, type BrandIdentity, type BrandImageStyle } from '../api/auth'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
 import type { CreatePostBody, ImageRatio, MediaType, PostStatus } from '../api/creator'
+import type { ImageAnalysis } from '../api/analytics'
 import { cn } from '../lib/utils'
+
+const MAX_AI_IMAGE_GENERATIONS = 3
 
 const STEPS = ['media', 'caption', 'preview', 'schedule'] as const
 type Step = (typeof STEPS)[number]
@@ -52,6 +58,10 @@ interface DraftPost {
   scheduled_time: string  // HH:MM
   post_now: boolean
   ai_generated_caption: boolean
+  ai_generated_media: boolean
+  // GPT-4o Vision analysis of the post image (uploaded or AI-generated). Set
+  // automatically when the user moves from Step 1 to Step 2.
+  image_analysis: ImageAnalysis | null
   // Pre-fill metadata from the URL (read-only after mount).
   prefilled_topic: string
   content_plan_day: string | null
@@ -124,6 +134,8 @@ function PostCreatorBody() {
       scheduled_time: time,
       post_now: false,
       ai_generated_caption: false,
+      ai_generated_media: false,
+      image_analysis: null,
       prefilled_topic: topic,
       content_plan_day: date || null,
     }
@@ -131,6 +143,7 @@ function PostCreatorBody() {
   }, [])
 
   const [draft, setDraft] = useState<DraftPost>(initialDraft)
+  const analyzeImage = useAnalyzeImage()
 
   // Once audience insights load, fill in the schedule defaults — but only
   // when the user hasn't typed anything (don't clobber a deep-link).
@@ -154,6 +167,20 @@ function PostCreatorBody() {
   function next() {
     const idx = STEPS.indexOf(step)
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]!)
+    // When leaving the Media step into Caption, trigger a background image
+    // analysis on the first image (if not already done). The Caption step
+    // shows a "Analyzing your image…" hint while it runs.
+    if (step === 'media' && draft.media_urls[0] && !draft.image_analysis && !analyzeImage.isPending) {
+      const firstUrl = draft.media_urls[0]
+      const isImage = draft.media_type !== 'video'
+      if (isImage) {
+        analyzeImage.mutate(firstUrl, {
+          onSuccess: (result) => {
+            setDraft((d) => ({ ...d, image_analysis: result }))
+          },
+        })
+      }
+    }
   }
   function prev() {
     const idx = STEPS.indexOf(step)
@@ -181,7 +208,11 @@ function PostCreatorBody() {
             <StepMedia draft={draft} patch={patch} />
           )}
           {step === 'caption' && (
-            <StepCaption draft={draft} patch={patch} />
+            <StepCaption
+              draft={draft}
+              patch={patch}
+              analyzing={analyzeImage.isPending}
+            />
           )}
           {step === 'preview' && (
             <StepPreview draft={draft} accountUsername={accounts.data?.[0]?.account_name ?? 'your_handle'} />
@@ -253,9 +284,27 @@ function StepIndicator({ step }: { step: Step }) {
 function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<DraftPost>) => void }) {
   const { t } = useTranslation()
   const upload = useUploadMedia()
+  const generate = useGenerateImage()
+  const accounts = useAccounts()
+  const brand = useQuery<BrandIdentity>({
+    queryKey: ['auth', 'brand-identity'],
+    queryFn: fetchBrandIdentity,
+    staleTime: 60_000,
+  })
   const fileRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string>('')
   const [dragOver, setDragOver] = useState(false)
+  const [aiDescription, setAiDescription] = useState<string>('')
+  const [aiStyle, setAiStyle] = useState<BrandImageStyle>('clean')
+  const [aiCount, setAiCount] = useState<number>(0)
+  const [aiError, setAiError] = useState<string>('')
+
+  // Default the AI style selector to the brand's image_style on first load.
+  useEffect(() => {
+    if (brand.data?.image_style) {
+      setAiStyle(brand.data.image_style)
+    }
+  }, [brand.data?.image_style])
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -273,10 +322,45 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
           media_type: updated.length > 1
             ? 'carousel'
             : (result.media_type as MediaType),
+          // A user-uploaded image clears any prior AI flag — analyze runs
+          // on Next, fresh per upload.
+          ai_generated_media: false,
+          image_analysis: null,
         })
       } catch (err) {
         setError(err instanceof Error ? err.message : t('creator.media.uploadError'))
       }
+    }
+  }
+
+  async function handleGenerate() {
+    setAiError('')
+    if (!aiDescription.trim()) {
+      setAiError(t('creator.media.aiDescriptionRequired'))
+      return
+    }
+    if (aiCount >= MAX_AI_IMAGE_GENERATIONS) {
+      setAiError(t('creator.media.aiLimit', { n: MAX_AI_IMAGE_GENERATIONS }))
+      return
+    }
+    try {
+      // Compose the description with the chosen style so multiple regenerates
+      // with different style picks actually change the result.
+      const styledDescription = `${aiDescription.trim()}. Style: ${aiStyle}.`
+      const result = await generate.mutateAsync({
+        description: styledDescription,
+        ratio: draft.ratio,
+        account_id: accounts.data?.[0]?.id,
+      })
+      patch({
+        media_urls: [result.url],
+        media_type: 'image',
+        ai_generated_media: true,
+        image_analysis: null,  // re-analyze on Next.
+      })
+      setAiCount((c) => c + 1)
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : t('creator.media.aiError'))
     }
   }
 
@@ -343,6 +427,12 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
             {draft.media_urls.map((url, i) => (
               <div className="creator-thumb" key={`${url}-${i}`}>
                 <img src={url} alt="" />
+                {i === 0 && draft.ai_generated_media && (
+                  <span className="creator-thumb-aibadge">
+                    <Sparkles className="w-3 h-3" />
+                    {t('creator.media.aiBadge')}
+                  </span>
+                )}
                 <div className="creator-thumb-actions">
                   <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="up">
                     <ChevronUp className="w-3 h-3" />
@@ -364,14 +454,66 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
         )}
       </section>
 
-      {/* AI generate stub */}
-      <section className="creator-card creator-card-muted">
-        <h3>{t('creator.media.aiTitle')}</h3>
-        <p className="creator-sub">{t('creator.media.aiSubtitle')}</p>
-        <div className="creator-ai-stub">
-          <Sparkles className="w-6 h-6 text-primary" />
-          <p>{t('creator.aiSoon')}</p>
+      {/* AI generate panel */}
+      <section className="creator-card">
+        <div className="creator-ai-head">
+          <h3>{t('creator.media.aiTitle')}</h3>
+          <span className="creator-ai-counter">
+            {t('creator.media.aiRemaining', {
+              n: Math.max(0, MAX_AI_IMAGE_GENERATIONS - aiCount),
+            })}
+          </span>
         </div>
+        <p className="creator-sub">{t('creator.media.aiSubtitle')}</p>
+
+        <label className="creator-label">{t('creator.media.aiDescriptionLabel')}</label>
+        <textarea
+          className="creator-textarea"
+          rows={3}
+          placeholder={t('creator.media.aiDescriptionPlaceholder')}
+          value={aiDescription}
+          onChange={(e) => setAiDescription(e.target.value)}
+          dir="auto"
+        />
+
+        <label className="creator-label">{t('creator.media.aiStyleLabel')}</label>
+        <div className="creator-ratio">
+          {(['clean', 'vibrant', 'minimal', 'luxurious', 'playful'] as const).map((s) => (
+            <button
+              key={s}
+              className={cn('creator-ratio-btn', aiStyle === s && 'is-on')}
+              onClick={() => setAiStyle(s)}
+              type="button"
+            >
+              {t(`brandIdentity.imageStyle.${s}`, { defaultValue: s })}
+            </button>
+          ))}
+        </div>
+
+        <button
+          className="creator-btn-primary creator-ai-go"
+          onClick={handleGenerate}
+          disabled={generate.isPending || aiCount >= MAX_AI_IMAGE_GENERATIONS || !aiDescription.trim()}
+          type="button"
+        >
+          {generate.isPending ? (
+            <>
+              <Sparkles className="w-4 h-4 animate-pulse" />
+              {t('creator.media.aiGenerating')}
+            </>
+          ) : aiCount > 0 ? (
+            <>
+              <RefreshCw className="w-4 h-4" />
+              {t('creator.media.aiRegenerate')}
+            </>
+          ) : (
+            <>
+              <Wand2 className="w-4 h-4" />
+              {t('creator.media.aiGenerate')}
+            </>
+          )}
+        </button>
+        {aiError && <p className="creator-error">{aiError}</p>}
       </section>
 
       {/* Ratio selector — applies to both columns */}
@@ -395,7 +537,15 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
 
 /* ─────────────────── Step 2: Caption ─────────────────── */
 
-function StepCaption({ draft, patch }: { draft: DraftPost; patch: (p: Partial<DraftPost>) => void }) {
+function StepCaption({
+  draft,
+  patch,
+  analyzing,
+}: {
+  draft: DraftPost
+  patch: (p: Partial<DraftPost>) => void
+  analyzing: boolean
+}) {
   const { t } = useTranslation()
   const generate = useGenerateCaption()
   const accounts = useAccounts()
@@ -416,6 +566,7 @@ function StepCaption({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Dr
       language: draft.caption_lang,
       image_ratio: draft.ratio,
       account_id: accountId,
+      image_analysis: draft.image_analysis ?? undefined,
     })
     const text = result?.caption ?? ''
     // Extract hashtags so they live in the dedicated chip editor — keeps
@@ -452,17 +603,50 @@ function StepCaption({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Dr
       <section className="creator-card creator-card-wide">
         <div className="creator-caption-head">
           <h3>{t('creator.caption.title')}</h3>
-          <div className="creator-lang-toggle">
-            <button
-              className={cn('creator-lang', draft.caption_lang === 'en' && 'is-on')}
-              onClick={() => patch({ caption_lang: 'en' })}
-            >EN</button>
-            <button
-              className={cn('creator-lang', draft.caption_lang === 'ar' && 'is-on')}
-              onClick={() => patch({ caption_lang: 'ar' })}
-            >AR</button>
+          <div className="creator-caption-meta">
+            {draft.image_analysis?.product_description && (
+              <span
+                className="creator-detected-pill"
+                title={draft.image_analysis.product_description}
+              >
+                <ScanEye className="w-3.5 h-3.5" />
+                {t('creator.caption.detectedPill', {
+                  desc: draft.image_analysis.product_description,
+                })}
+              </span>
+            )}
+            {analyzing && !draft.image_analysis && (
+              <span className="creator-analyzing-pill">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                {t('creator.caption.analyzing')}
+              </span>
+            )}
+            {draft.ai_generated_media && (
+              <span className="creator-aigen-pill">
+                <Sparkles className="w-3.5 h-3.5" />
+                {t('creator.media.aiBadge')}
+              </span>
+            )}
+            <div className="creator-lang-toggle">
+              <button
+                className={cn('creator-lang', draft.caption_lang === 'en' && 'is-on')}
+                onClick={() => patch({ caption_lang: 'en' })}
+              >EN</button>
+              <button
+                className={cn('creator-lang', draft.caption_lang === 'ar' && 'is-on')}
+                onClick={() => patch({ caption_lang: 'ar' })}
+              >AR</button>
+            </div>
           </div>
         </div>
+
+        {draft.image_analysis?.product_description && (
+          <p className="creator-context-line" dir="auto">
+            {t('creator.caption.basedOn', {
+              desc: draft.image_analysis.product_description,
+            })}
+          </p>
+        )}
 
         <textarea
           dir={draft.caption_lang === 'ar' ? 'rtl' : 'auto'}
@@ -654,6 +838,8 @@ function StepSchedule({
       scheduled_at: scheduledIso,
       content_plan_day: draft.content_plan_day ?? undefined,
       ai_generated_caption: draft.ai_generated_caption,
+      ai_generated_media: draft.ai_generated_media,
+      image_analysis: draft.image_analysis ?? undefined,
     }
     try {
       await create.mutateAsync(body)
@@ -851,5 +1037,18 @@ const CREATOR_STYLES = `
 .creator-btn-cta { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:11px 20px; background:#BF499B; color:#fff; border-radius:10px; font-size:13.5px; font-weight:600; box-shadow:0 6px 16px -6px rgba(191,73,155,.55); transition:background .12s, transform .12s; }
 .creator-btn-cta:hover:not(:disabled) { background:#A83B85; transform:translateY(-1px); }
 .creator-btn-cta:disabled { opacity:.5; cursor:not-allowed; }
+
+/* AI image generation panel */
+.creator-ai-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.creator-ai-counter { font-size:11.5px; font-weight:600; color:var(--purple-700); background:var(--purple-50); padding:3px 9px; border-radius:99px; }
+.creator-ai-go { align-self:flex-start; margin-top:6px; }
+.creator-thumb-aibadge { position:absolute; top:6px; inset-inline-start:6px; display:inline-flex; align-items:center; gap:4px; padding:3px 7px; background:linear-gradient(135deg,#5433c2,#BF499B); color:#fff; border-radius:99px; font-size:10px; font-weight:700; box-shadow:0 4px 10px -3px rgba(84,51,194,.45); }
+
+/* Step 2 image-analysis surface */
+.creator-caption-meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.creator-detected-pill { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; background:var(--purple-50); color:var(--purple-700); border-radius:99px; font-size:11.5px; font-weight:500; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.creator-analyzing-pill { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; background:var(--ink-100); color:var(--ink-600); border-radius:99px; font-size:11.5px; font-weight:500; }
+.creator-aigen-pill { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; background:linear-gradient(135deg, rgba(84,51,194,.1), rgba(191,73,155,.1)); color:var(--purple-700); border-radius:99px; font-size:11.5px; font-weight:600; }
+.creator-context-line { font-size:12.5px; color:var(--ink-600); padding:8px 12px; background:var(--ink-50); border-radius:8px; line-height:1.5; }
 `
 

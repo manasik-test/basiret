@@ -5,6 +5,7 @@
  * (`{ success, data }`) and lets React Query unwrap with `.data`.
  */
 import api from './client'
+import type { ImageAnalysis } from './analytics'
 
 export type PostStatus =
   | 'draft'
@@ -35,6 +36,7 @@ export interface ScheduledPost {
   ai_generated_media: boolean
   ai_generated_caption: boolean
   source_image_url: string | null
+  image_analysis: ImageAnalysis | null
   content_plan_day: string | null
   draft_expires_at: string | null
   error_message: string | null
@@ -67,6 +69,7 @@ export interface CreatePostBody {
   ai_generated_media?: boolean
   ai_generated_caption?: boolean
   source_image_url?: string
+  image_analysis?: ImageAnalysis
 }
 
 export interface UpdatePostBody {
@@ -145,6 +148,38 @@ export async function fetchCalendar(opts: {
   if (opts.account_id) params.set('account_id', opts.account_id)
   const res = await api.get<unknown, { success: boolean; data: CalendarResponse }>(
     `/creator/calendar?${params.toString()}`,
+  )
+  return res.data
+}
+
+export async function analyzeImage(image_url: string): Promise<ImageAnalysis> {
+  const res = await api.post<unknown, { success: boolean; data: ImageAnalysis }>(
+    '/creator/analyze-image',
+    { image_url },
+  )
+  return res.data
+}
+
+export interface GenerateImageRequest {
+  description: string
+  ratio: ImageRatio
+  account_id?: string
+}
+
+export interface GenerateImageResponse {
+  url: string
+  prompt_used: string
+  revised_prompt?: string
+  ratio: ImageRatio
+  size: string
+}
+
+export async function generateImage(
+  req: GenerateImageRequest,
+): Promise<GenerateImageResponse> {
+  const res = await api.post<unknown, { success: boolean; data: GenerateImageResponse }>(
+    '/creator/generate-image',
+    req,
   )
   return res.data
 }
