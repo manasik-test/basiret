@@ -86,12 +86,17 @@ export interface UpdatePostBody {
 export async function uploadMedia(file: File): Promise<UploadResponse> {
   const form = new FormData()
   form.append('file', file)
-  // Don't set Content-Type — axios + the browser pick the right
-  // `multipart/form-data; boundary=...` header automatically. Forcing
-  // the bare type drops the boundary and the backend can't parse it.
+  // The shared axios instance (`api`) sets a default `Content-Type:
+  // application/json`. axios won't override an explicit instance default
+  // for FormData, so without the override below the request goes out as
+  // application/json and FastAPI's `File(...)` can't extract the file —
+  // surfacing as a 422 with `{loc:["body","file"], msg:"Field required"}`.
+  // Setting the per-request header to `undefined` lets axios + the browser
+  // emit the correct `multipart/form-data; boundary=...` header.
   const res = await api.post<unknown, { success: boolean; data: UploadResponse }>(
     '/creator/upload',
     form,
+    { headers: { 'Content-Type': undefined } },
   )
   return res.data
 }
