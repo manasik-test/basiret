@@ -154,18 +154,6 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* Magenta CTA — kicks off the Post Creator wizard. Sits above the
-            nav so it's always visible without scrolling, and uses the brand
-            CTA color so it stands out from the purple nav active-state. */}
-        <Link
-          to="/create"
-          className="flex items-center justify-center gap-2 px-3 py-2.5 mb-3 rounded-[10px] text-sm font-semibold text-white transition-colors"
-          style={{ background: '#BF499B' }}
-        >
-          <Sparkles className="w-[16px] h-[16px] shrink-0" />
-          <span>{t('creator.cta')}</span>
-        </Link>
-
         {/* Nav — 2px gap, 10/12 item padding, 18px icons */}
         <nav className="flex-1 flex flex-col gap-0.5 mt-1">
           {navItems.map(({ key, icon: Icon, href }) => {
