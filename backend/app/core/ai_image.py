@@ -23,6 +23,7 @@ import logging
 from typing import Any
 
 from app.core.ai_provider import (
+    AIBillingLimitError,
     AIInvalidResponseError,
     AIProviderError,
     AIProviderUnavailableError,
@@ -67,7 +68,14 @@ def _openai_client():
 def _map_openai_exception(exc: Exception) -> AIProviderError:
     cls_name = exc.__class__.__name__
     msg = str(exc)
-    if cls_name == "RateLimitError" or "429" in msg or "rate_limit" in msg.lower():
+    msg_lower = msg.lower()
+    # Billing-cap errors come back as BadRequestError; route to a dedicated
+    # exception so the user sees a tailored message ("billing limit reached")
+    # instead of the generic "service temporarily unreachable" 503 — retrying
+    # tomorrow doesn't help when the cap is the issue.
+    if "billing_hard_limit_reached" in msg_lower or "billing_not_active" in msg_lower:
+        return AIBillingLimitError(msg, provider="openai")
+    if cls_name == "RateLimitError" or "429" in msg or "rate_limit" in msg_lower:
         return AIQuotaExceededError(msg, provider="openai")
     if cls_name in (
         "APITimeoutError",
@@ -80,7 +88,7 @@ def _map_openai_exception(exc: Exception) -> AIProviderError:
         return AIProviderUnavailableError(
             "OpenAI authentication failed", provider="openai",
         )
-    if "timeout" in msg.lower() or "connection" in msg.lower():
+    if "timeout" in msg_lower or "connection" in msg_lower:
         return AIProviderUnavailableError(msg, provider="openai")
     logger.warning("OpenAI image/vision call failed (%s): %s", cls_name, exc)
     return AIProviderUnavailableError(msg, provider="openai")

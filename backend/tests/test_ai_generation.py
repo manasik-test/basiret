@@ -6,12 +6,18 @@ Covers:
     `app.core.ai_image.openai_analyze_image_url`-equivalent boundary so we
     don't hit the network.
   * POST /creator/generate-image — DALL-E 3 prompt assembly + R2 upload +
-    ai_usage_log row.
+    ai_usage_log row + billing-limit error mapping.
   * POST /ai-pages/generate-caption — IMAGE ANALYSIS block injected into
     the Gemini system prompt when `image_analysis` is supplied.
 """
 from unittest.mock import MagicMock, patch
 
+from app.core.ai_image import _map_openai_exception
+from app.core.ai_provider import (
+    AIBillingLimitError,
+    AIProviderUnavailableError,
+    AIQuotaExceededError,
+)
 from app.core.config import settings
 from app.models.ai_usage_log import AiUsageLog
 from app.models.organization import Organization
@@ -273,3 +279,82 @@ def test_caption_with_image_analysis(client, starter_user):
     assert "Luxurious" in system
     # Content angle drawn from content_suggestions[0].
     assert "Product showcase" in system
+
+
+# ── Error mapping ─────────────────────────────────────────────────────────
+
+
+class _FakeBadRequestError(Exception):
+    """Stand-in for openai.BadRequestError — we don't import the SDK class
+    in tests because the mapper goes by class name, not by isinstance."""
+
+
+_FakeBadRequestError.__name__ = "BadRequestError"
+
+
+class _FakeRateLimit(Exception):
+    pass
+
+
+_FakeRateLimit.__name__ = "RateLimitError"
+
+
+def test_billing_hard_limit_maps_to_billing_limit_error():
+    """The exact OpenAI message we saw in prod logs must map to
+    AIBillingLimitError, not the generic AIProviderUnavailableError."""
+    exc = _FakeBadRequestError(
+        "Error code: 400 - {'error': {'message': 'Billing hard limit has been "
+        "reached', 'type': 'image_generation_user_error', 'param': None, "
+        "'code': 'billing_hard_limit_reached'}}"
+    )
+    mapped = _map_openai_exception(exc)
+    assert isinstance(mapped, AIBillingLimitError)
+    assert "billing limit" in mapped.user_message.lower()
+
+
+def test_rate_limit_still_maps_correctly():
+    """Sanity check: rate-limit errors continue to map to AIQuotaExceededError
+    (not the new billing bucket)."""
+    exc = _FakeRateLimit("Rate limit reached")
+    mapped = _map_openai_exception(exc)
+    assert isinstance(mapped, AIQuotaExceededError)
+
+
+def test_generate_image_billing_limit_returns_specific_message(client, insights_user, db):
+    """End-to-end: when DALL-E returns a billing_hard_limit_reached error, the
+    endpoint surfaces a 503 with the tailored billing-limit message — NOT the
+    generic 'service temporarily unreachable' that confused users."""
+    _, org, token = insights_user
+    seed_social_account_with_posts(db, org.id)
+
+    fake_openai = MagicMock()
+    fake_openai.images.generate = MagicMock(
+        side_effect=_FakeBadRequestError(
+            "Error code: 400 - {'error': {'message': 'Billing hard limit has "
+            "been reached', 'code': 'billing_hard_limit_reached'}}"
+        ),
+    )
+
+    prior_key = settings.OPENAI_API_KEY
+    settings.OPENAI_API_KEY = "test-key"
+    try:
+        with patch("app.core.ai_image._openai_client", return_value=fake_openai):
+            res = client.post(
+                "/api/v1/creator/generate-image",
+                json={"description": "Anything", "ratio": "1:1"},
+                headers=_auth(token),
+            )
+    finally:
+        settings.OPENAI_API_KEY = prior_key
+
+    assert res.status_code == 503
+    body = res.json()
+    assert body["success"] is False
+    assert body["meta"]["status"] == "degraded"
+    msg = body["meta"]["message"].lower()
+    assert "billing limit" in msg, f"expected billing-specific message, got: {msg}"
+    # Must NOT be the generic unavailability message — that's what users saw
+    # before this fix and is what we're regression-testing against.
+    assert "temporarily unreachable" not in msg
+    # Sanity: ensure AIProviderUnavailableError is not what got returned.
+    assert AIProviderUnavailableError.user_message.lower() not in msg

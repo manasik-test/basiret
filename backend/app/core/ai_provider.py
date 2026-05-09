@@ -87,6 +87,20 @@ class AIInvalidResponseError(AIProviderError):
     retry_after_hours = None
 
 
+class AIBillingLimitError(AIProviderError):
+    """The provider account has hit its billing/spend cap. Distinct from
+    `AIQuotaExceededError` (rate-limit) because retrying tomorrow doesn't
+    help — only raising the limit on the provider dashboard does. Surfaced
+    with a specific message so users understand it's a server-side cap, not
+    a problem with their input."""
+
+    user_message = (
+        "AI image generation has reached its monthly billing limit. "
+        "Please try again later or contact support."
+    )
+    retry_after_hours = None
+
+
 # ── Usage logging + rate limiting ────────────────────────────────────────
 
 
@@ -427,7 +441,14 @@ class OpenAIProvider(AIProvider):
     def _map_exception(self, exc: Exception) -> AIProviderError:
         cls_name = exc.__class__.__name__
         msg = str(exc)
-        if cls_name in ("RateLimitError",) or "429" in msg or "rate_limit" in msg.lower():
+        msg_lower = msg.lower()
+        # Billing-cap errors arrive as BadRequestError with a specific code.
+        # They're NOT rate-limit errors (waiting won't help) and NOT
+        # availability errors (service is fine) — they need their own bucket
+        # so the user sees an accurate message.
+        if "billing_hard_limit_reached" in msg_lower or "billing_not_active" in msg_lower:
+            return AIBillingLimitError(msg, provider=self.name)
+        if cls_name in ("RateLimitError",) or "429" in msg or "rate_limit" in msg_lower:
             return AIQuotaExceededError(msg, provider=self.name)
         if cls_name in (
             "APITimeoutError",
@@ -440,7 +461,7 @@ class OpenAIProvider(AIProvider):
             return AIProviderUnavailableError(
                 "OpenAI authentication failed", provider=self.name,
             )
-        if "timeout" in msg.lower() or "connection" in msg.lower():
+        if "timeout" in msg_lower or "connection" in msg_lower:
             return AIProviderUnavailableError(msg, provider=self.name)
         logger.warning("OpenAI call failed (unmapped: %s): %s", cls_name, exc)
         return AIProviderUnavailableError(msg, provider=self.name)
