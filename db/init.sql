@@ -64,6 +64,7 @@ CREATE TABLE social_account (
     access_token_encrypted TEXT,
     token_expires_at TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT TRUE,
+    needs_reauth BOOLEAN NOT NULL DEFAULT FALSE,
     connected_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(organization_id, platform, platform_account_id)

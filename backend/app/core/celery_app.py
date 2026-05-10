@@ -26,6 +26,7 @@ celery.conf.update(
         "app.tasks.insights",
         "app.tasks.account_deletion",
         "app.tasks.draft_cleanup",
+        "app.tasks.post_publisher",
     ],
 )
 
@@ -50,5 +51,13 @@ celery.conf.beat_schedule = {
     "daily-warn-expiring-drafts": {
         "task": "warn_expiring_drafts",
         "schedule": crontab(hour=9, minute=0),
+    },
+    # Sprint 5: dispatcher polls scheduled_post every minute and queues
+    # `publish_scheduled_post.delay(...)` for any due rows + any "Post now"
+    # rows the API parked at status='publishing'. Capped at DISPATCH_BATCH_LIMIT
+    # per tick to stay under Instagram's per-token publishing rate limit.
+    "dispatch-due-posts": {
+        "task": "dispatch_due_posts",
+        "schedule": crontab(minute="*"),
     },
 }

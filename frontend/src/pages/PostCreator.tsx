@@ -42,6 +42,7 @@ import {
   useUpdatePost,
   useUploadMedia,
 } from '../hooks/useCreator'
+import { fetchPost } from '../api/creator'
 import { fetchBrandIdentity, type BrandIdentity, type BrandImageStyle } from '../api/auth'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
@@ -1219,7 +1220,16 @@ function StepSchedule({
   const update = useUpdatePost()
   const breakdown = usePostsBreakdown()
   const [error, setError] = useState<string>('')
-  const isPending = create.isPending || update.isPending
+  // Post-now publishing state. While publishing we lock the form and poll
+  // GET /creator/posts/{id} every 3s until the row's status flips to
+  // published (success → permalink) or failed (show backend error_message).
+  const [publishing, setPublishing] = useState<{
+    postId: string
+    status: 'pending' | 'success' | 'failed'
+    permalink?: string | null
+    errorMessage?: string | null
+  } | null>(null)
+  const isPending = create.isPending || update.isPending || publishing?.status === 'pending'
 
   // Estimated reach: average reach across posts on the same weekday.
   // Falls back to the per-post average when day-specific data is sparse.
@@ -1253,6 +1263,7 @@ function StepSchedule({
       : undefined
 
     try {
+      let savedPost: ScheduledPost
       if (editId) {
         // Edit mode: PUT only the mutable fields. social_account_id and
         // content_plan_day are intentionally omitted — they're set on
@@ -1271,7 +1282,7 @@ function StepSchedule({
           source_image_url: sourceImageUrl,
           image_analysis: draft.image_analysis ?? undefined,
         }
-        await update.mutateAsync({ id: editId, body: updateBody })
+        savedPost = await update.mutateAsync({ id: editId, body: updateBody })
       } else {
         const body: CreatePostBody = {
           social_account_id: accountId,
@@ -1291,13 +1302,74 @@ function StepSchedule({
           source_image_url: sourceImageUrl,
           image_analysis: draft.image_analysis ?? undefined,
         }
-        await create.mutateAsync(body)
+        savedPost = await create.mutateAsync(body)
       }
-      onPosted(status === 'publishing' ? 'publishing' : status === 'scheduled' ? 'scheduled' : 'draft')
+
+      if (status === 'publishing') {
+        // Stay on the page and poll until the publisher Celery task settles.
+        // The backend dispatches the task immediately on save, so the DB row
+        // typically flips to published or failed within a few seconds for
+        // images and ~10-30s for videos (Instagram ingest).
+        setPublishing({ postId: savedPost.id, status: 'pending' })
+        return
+      }
+
+      onPosted(status === 'scheduled' ? 'scheduled' : 'draft')
     } catch (err) {
       setError(err instanceof Error ? err.message : t('creator.schedule.saveError'))
     }
   }
+
+  // Poll the saved post every 3s while it's publishing. Stops on terminal
+  // states (published / failed) and on unmount. Capped at 60 attempts (3
+  // minutes) so a stuck publishing row doesn't keep polling forever — the
+  // user can refresh later to see the eventual result.
+  useEffect(() => {
+    if (!publishing || publishing.status !== 'pending') return
+    let cancelled = false
+    let attempts = 0
+    const tick = async () => {
+      attempts += 1
+      try {
+        const post = await fetchPost(publishing.postId)
+        if (cancelled) return
+        if (post.status === 'published') {
+          const permalink = post.platform_post_id
+            ? `https://www.instagram.com/p/${post.platform_post_id}/`
+            : null
+          setPublishing({ postId: publishing.postId, status: 'success', permalink })
+          return
+        }
+        if (post.status === 'failed') {
+          setPublishing({
+            postId: publishing.postId,
+            status: 'failed',
+            errorMessage: post.error_message,
+          })
+          return
+        }
+        if (attempts >= 60) {
+          setPublishing({
+            postId: publishing.postId,
+            status: 'failed',
+            errorMessage: t('creator.schedule.publishTimeout'),
+          })
+          return
+        }
+        timer = window.setTimeout(tick, 3000)
+      } catch {
+        // Network blip while polling — retry on the next tick.
+        if (!cancelled && attempts < 60) {
+          timer = window.setTimeout(tick, 3000)
+        }
+      }
+    }
+    let timer = window.setTimeout(tick, 3000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [publishing?.postId, publishing?.status, t])
 
   return (
     <div className="creator-card creator-schedule">
@@ -1343,6 +1415,17 @@ function StepSchedule({
 
       {error && <p className="creator-error">{error}</p>}
 
+      {publishing && (
+        <PublishingModal
+          state={publishing}
+          onClose={() => {
+            const final = publishing.status
+            setPublishing(null)
+            if (final === 'success') onPosted('publishing')
+          }}
+        />
+      )}
+
       <div className="creator-schedule-actions">
         <button
           className="creator-btn-ghost"
@@ -1372,6 +1455,68 @@ function StepSchedule({
           >
             {t('creator.schedule.postNowAction')}
           </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────── Publishing modal ─────────────────── */
+
+function PublishingModal({
+  state,
+  onClose,
+}: {
+  state: {
+    postId: string
+    status: 'pending' | 'success' | 'failed'
+    permalink?: string | null
+    errorMessage?: string | null
+  }
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="creator-publish-back" onClick={state.status !== 'pending' ? onClose : undefined}>
+      <div className="creator-publish-card" onClick={(e) => e.stopPropagation()}>
+        {state.status === 'pending' && (
+          <>
+            <Loader2 className="w-10 h-10 text-primary animate-spin" />
+            <h3 className="creator-publish-title">{t('creator.schedule.publishingTitle')}</h3>
+            <p className="creator-publish-body">{t('creator.schedule.publishingBody')}</p>
+          </>
+        )}
+        {state.status === 'success' && (
+          <>
+            <Check className="w-10 h-10 text-emerald-500" />
+            <h3 className="creator-publish-title">{t('creator.schedule.publishedTitle')}</h3>
+            <p className="creator-publish-body">{t('creator.schedule.publishedBody')}</p>
+            {state.permalink && (
+              <a
+                className="creator-publish-link"
+                href={state.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('creator.schedule.viewOnInstagram')} →
+              </a>
+            )}
+            <button className="creator-btn-primary" onClick={onClose}>
+              {t('creator.schedule.publishedDone')}
+            </button>
+          </>
+        )}
+        {state.status === 'failed' && (
+          <>
+            <X className="w-10 h-10 text-rose-500" />
+            <h3 className="creator-publish-title">{t('creator.schedule.publishFailedTitle')}</h3>
+            <p className="creator-publish-body" dir="auto">
+              {state.errorMessage || t('creator.schedule.publishFailedBody')}
+            </p>
+            <button className="creator-btn-ghost" onClick={onClose}>
+              {t('creator.schedule.publishFailedDismiss')}
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -1415,6 +1560,14 @@ const CREATOR_STYLES = `
 
 .creator-uploading { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-600); }
 .creator-error { font-size:12.5px; color:#bf2b2b; margin:0; }
+
+/* Post-now publishing modal */
+.creator-publish-back { position:fixed; inset:0; background:rgba(15,15,30,.55); backdrop-filter:blur(4px); z-index:80; display:grid; place-items:center; padding:20px; }
+.creator-publish-card { background:#fff; border-radius:18px; padding:32px 28px; max-width:420px; width:100%; display:flex; flex-direction:column; align-items:center; gap:14px; box-shadow:0 20px 50px -10px rgba(0,0,0,.35); text-align:center; }
+.creator-publish-title { font-size:18px; font-weight:700; color:var(--ink-950); margin:6px 0 0; }
+.creator-publish-body { font-size:13.5px; color:var(--ink-600); margin:0; }
+.creator-publish-link { display:inline-flex; align-items:center; gap:4px; font-size:13.5px; font-weight:600; color:var(--purple-600); text-decoration:none; padding:6px 10px; border-radius:8px; }
+.creator-publish-link:hover { background:var(--purple-100); }
 
 .creator-thumbs { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; }
 .creator-thumb { position:relative; aspect-ratio:1; border-radius:12px; overflow:hidden; background:var(--ink-100); }

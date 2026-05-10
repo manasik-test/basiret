@@ -36,7 +36,8 @@ from app.core.ai_image import (
 from app.core.ai_provider import AIProviderError
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_system_admin
+from app.core.instagram_publisher import PublishError, publish_post
 from app.core.storage import (
     LOCAL_MEDIA_DIR,
     delete_media,
@@ -47,6 +48,7 @@ from app.models.organization import Organization
 from app.models.scheduled_post import ScheduledPost
 from app.models.social_account import SocialAccount
 from app.models.user import User
+from app.tasks.post_publisher import publish_scheduled_post
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -646,6 +648,18 @@ def create_post(
     db.add(post)
     db.commit()
     db.refresh(post)
+
+    # "Post now" path — frontend posts with status='publishing' to mean
+    # "publish immediately." Hand off to the Celery worker right away so
+    # the user sees a result within seconds (not just at the next 60s
+    # dispatcher tick). The dispatcher still picks this row up if Celery
+    # is down, so this is an optimization, not the only path.
+    if post.status == "publishing":
+        try:
+            publish_scheduled_post.delay(str(post.id))
+        except Exception:  # noqa: BLE001
+            logger.exception("post-now delay failed for post=%s", post.id)
+
     return {"success": True, "data": _serialize(post)}
 
 
@@ -674,7 +688,14 @@ def list_posts(
             raise HTTPException(status_code=422, detail="Invalid account_id") from exc
         q = q.filter(ScheduledPost.social_account_id == account_uuid)
 
-    rows = q.order_by(ScheduledPost.created_at.desc()).all()
+    # Published tab gets the most-recently-published first; everything
+    # else (drafts, scheduled, failed) sorts by creation order so the
+    # newest in-progress work bubbles to the top.
+    if status_filter == "published":
+        q = q.order_by(ScheduledPost.published_at.desc().nullslast())
+    else:
+        q = q.order_by(ScheduledPost.created_at.desc())
+    rows = q.all()
     return {"success": True, "data": [_serialize(p) for p in rows]}
 
 
@@ -720,6 +741,15 @@ def update_post(
     post.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(post)
+
+    # Same "Post now" handoff as the create path — the user can also reach
+    # publishing by editing an existing draft and choosing Post now.
+    if new_status == "publishing":
+        try:
+            publish_scheduled_post.delay(str(post.id))
+        except Exception:  # noqa: BLE001
+            logger.exception("post-now delay failed for post=%s", post.id)
+
     return {"success": True, "data": _serialize(post)}
 
 
@@ -805,6 +835,72 @@ def calendar_view(
     return {
         "success": True,
         "data": {date_key: {"posts": posts} for date_key, posts in grouped.items()},
+    }
+
+
+class TestPublishRequest(BaseModel):
+    post_id: str
+    account_id: Optional[str] = None
+
+
+@router.post("/creator/test-publish")
+async def test_publish(
+    body: TestPublishRequest,
+    user: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """Run the full publish flow against a real Instagram account, capturing
+    the API trace. Recorded for the Meta App Review demo video — production
+    publishing always goes through Celery, but for the review screencast we
+    need a synchronous response that shows each Graph call.
+
+    Returns either the new platform_post_id or the structured PublishError
+    fields (code/subcode/message) so the reviewer can see exactly which
+    Graph call failed and why.
+    """
+    post = _scoped_post_or_404(db, user, body.post_id)
+    account_id = body.account_id or str(post.social_account_id)
+    account = (
+        db.query(SocialAccount)
+        .filter(
+            SocialAccount.id == account_id,
+            SocialAccount.organization_id == user.organization_id,
+        )
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    try:
+        platform_post_id = await publish_post(account, post, db)
+    except PublishError as exc:
+        return {
+            "success": False,
+            "data": {
+                "started_at": started_at,
+                "post_id": body.post_id,
+                "account_id": account_id,
+                "error": {
+                    "message": str(exc),
+                    "code": exc.code,
+                    "subcode": exc.subcode,
+                    "is_token_expired": exc.is_token_expired,
+                    "is_rate_limited": exc.is_rate_limited,
+                    "is_retryable": exc.is_retryable,
+                },
+            },
+        }
+
+    return {
+        "success": True,
+        "data": {
+            "started_at": started_at,
+            "post_id": body.post_id,
+            "account_id": account_id,
+            "platform_post_id": platform_post_id,
+            "published_at": post.published_at.isoformat() if post.published_at else None,
+        },
     }
 
 

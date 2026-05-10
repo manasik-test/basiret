@@ -696,7 +696,8 @@
         "all": "All",
         "scheduled": "Scheduled",
         "published": "Published",
-        "draft": "Draft"
+        "draft": "Draft",
+        "failed": "Failed"
       }
     },
     "drafts": {
@@ -708,6 +709,15 @@
       "title": "Nothing published yet",
       "body": "Posts you publish through Basiret will appear here with their performance metrics."
     },
+    "status": {
+      "draft": "Draft",
+      "scheduled": "Scheduled",
+      "publishing": "Publishing…",
+      "published": "Published",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "viewOnInstagram": "View on Instagram",
     "createFromDay": "Create post for this day",
     "delete": {
       "action": "Delete",
@@ -803,7 +813,17 @@
       "postNowAction": "Post now",
       "saveError": "Couldn't save your post. Please try again.",
       "noAccount": "Connect Instagram before publishing.",
-      "dateRequired": "Please pick a date and time."
+      "dateRequired": "Please pick a date and time.",
+      "publishingTitle": "Publishing to Instagram…",
+      "publishingBody": "We're sending your post to Instagram. This usually takes a few seconds.",
+      "publishedTitle": "Posted to Instagram!",
+      "publishedBody": "Your post is live and your followers can see it now.",
+      "publishedDone": "Done",
+      "viewOnInstagram": "View post on Instagram",
+      "publishFailedTitle": "Couldn't publish",
+      "publishFailedBody": "Instagram rejected this post. Check the message below and try again.",
+      "publishFailedDismiss": "Dismiss",
+      "publishTimeout": "Publishing is taking longer than expected. Refresh the Published tab in a minute to see the result."
     }
   },
   "sentiment": {

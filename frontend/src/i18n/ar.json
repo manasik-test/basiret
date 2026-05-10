@@ -696,7 +696,8 @@
         "all": "الكل",
         "scheduled": "مجدول",
         "published": "منشور",
-        "draft": "مسودة"
+        "draft": "مسودة",
+        "failed": "فشل"
       }
     },
     "drafts": {
@@ -708,6 +709,15 @@
       "title": "لا توجد منشورات بعد",
       "body": "المنشورات التي تنشرها عبر بصيرة ستظهر هنا مع مؤشرات أدائها."
     },
+    "status": {
+      "draft": "مسودة",
+      "scheduled": "مجدول",
+      "publishing": "جاري النشر…",
+      "published": "منشور",
+      "failed": "فشل",
+      "cancelled": "ملغى"
+    },
+    "viewOnInstagram": "عرض على إنستغرام",
     "createFromDay": "إنشاء منشور لهذا اليوم",
     "delete": {
       "action": "حذف",
@@ -803,7 +813,17 @@
       "postNowAction": "نشر الآن",
       "saveError": "تعذّر حفظ المنشور. حاول مرة أخرى.",
       "noAccount": "اربط حساب إنستغرام قبل النشر.",
-      "dateRequired": "يرجى اختيار التاريخ والوقت."
+      "dateRequired": "يرجى اختيار التاريخ والوقت.",
+      "publishingTitle": "جاري النشر إلى إنستغرام…",
+      "publishingBody": "نقوم بإرسال منشورك إلى إنستغرام. عادةً ما يستغرق ذلك بضع ثوانٍ.",
+      "publishedTitle": "تم النشر على إنستغرام!",
+      "publishedBody": "منشورك متاح الآن ويمكن لمتابعيك مشاهدته.",
+      "publishedDone": "تم",
+      "viewOnInstagram": "عرض المنشور على إنستغرام",
+      "publishFailedTitle": "تعذّر النشر",
+      "publishFailedBody": "رفض إنستغرام هذا المنشور. راجع الرسالة أدناه وحاول مجدداً.",
+      "publishFailedDismiss": "إغلاق",
+      "publishTimeout": "النشر يستغرق وقتاً أطول من المتوقع. حدّث تبويب \"المنشور\" بعد دقيقة لرؤية النتيجة."
     }
   },
   "sentiment": {

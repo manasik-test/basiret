@@ -483,7 +483,7 @@ export default function Recommendations() {
 
 /* ---------------- Calendar tab ---------------- */
 
-type CalendarFilter = 'all' | 'scheduled' | 'published' | 'draft'
+type CalendarFilter = 'all' | 'scheduled' | 'published' | 'draft' | 'failed'
 
 const STATUS_COLOR: Record<string, string> = {
   draft: '#94a3b8',       // slate
@@ -548,7 +548,7 @@ function CalendarTab() {
     )
   })
 
-  const filterKeys: CalendarFilter[] = ['all', 'scheduled', 'published', 'draft']
+  const filterKeys: CalendarFilter[] = ['all', 'scheduled', 'published', 'draft', 'failed']
   function filterPosts(posts: ScheduledPost[]): ScheduledPost[] {
     if (filter === 'all') return posts
     return posts.filter((p) => p.status === filter)
@@ -642,6 +642,11 @@ function CalendarTab() {
                     style={{ borderInlineStartColor: STATUS_COLOR[p.status] ?? '#94a3b8' }}
                     dir="auto"
                   >
+                    <span
+                      className={cn('cp-cal-dot', p.status === 'publishing' && 'is-pulsing')}
+                      style={{ background: STATUS_COLOR[p.status] ?? '#94a3b8' }}
+                      aria-hidden="true"
+                    />
                     {(p.caption_en || p.caption_ar || t('contentPlanPage.calendar.noCaption'))
                       .split(/\s+/)
                       .slice(0, 3)
@@ -859,6 +864,10 @@ function PostRow({
     )
   }
 
+  const permalink = post.platform_post_id
+    ? `https://www.instagram.com/p/${post.platform_post_id}/`
+    : null
+
   return (
     <div className="cp-row-card">
       <div className="cp-row-thumb">
@@ -866,9 +875,33 @@ function PostRow({
       </div>
       <div className="cp-row-body">
         <p className="cp-row-cap" dir="auto">{captionShort}</p>
-        {helper && <span className={cn('cp-row-helper', helperTone)}>{helper}</span>}
+        <div className="cp-row-meta">
+          <span
+            className={cn('cp-row-status', `is-${post.status}`)}
+            style={{ background: STATUS_COLOR[post.status] ?? '#94a3b8' }}
+          >
+            {t(`contentPlanPage.status.${post.status}`, { defaultValue: post.status })}
+          </span>
+          {helper && <span className={cn('cp-row-helper', helperTone)}>{helper}</span>}
+          {post.status === 'failed' && post.error_message && (
+            <span className="cp-row-helper is-bad" dir="auto" title={post.error_message}>
+              {post.error_message.slice(0, 60)}
+            </span>
+          )}
+        </div>
       </div>
       <div className="cp-row-actions">
+        {mode === 'published' && permalink && (
+          <a
+            href={permalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="cp-ghost"
+          >
+            <Icon path={I.trend} size={14} />
+            {t('contentPlanPage.viewOnInstagram')}
+          </a>
+        )}
         <button onClick={onEdit} className="cp-ghost">
           <Icon path={I.pencil} size={14} />
           {t('contentPlanPage.editAction')}
@@ -1137,7 +1170,10 @@ const CP_TAB_STYLES = `
 /* Calendar day-cell post chips */
 .cp-cal-cell.has-posts { background:var(--surface); border-color:var(--line); }
 .cp-cal-cell { flex-direction:column; align-items:stretch; gap:4px; }
-.cp-cal-card { font-size:10.5px; font-weight:500; color:var(--ink-700); padding:3px 6px; border-inline-start:3px solid #94a3b8; background:var(--ink-50); border-radius:4px; line-height:1.3; text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-cal-card { font-size:10.5px; font-weight:500; color:var(--ink-700); padding:3px 6px; border-inline-start:3px solid #94a3b8; background:var(--ink-50); border-radius:4px; line-height:1.3; text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:5px; }
+.cp-cal-dot { display:inline-block; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.cp-cal-dot.is-pulsing { animation: cp-pulse 1.4s ease-in-out infinite; }
+@keyframes cp-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.4; transform:scale(.6); } }
 .cp-cal-more { font-size:10.5px; color:var(--ink-500); font-weight:600; padding:0 6px; }
 
 /* Drafts + Published list rows */
@@ -1152,6 +1188,8 @@ const CP_TAB_STYLES = `
 .cp-row-helper { font-size:11.5px; color:var(--ink-500); font-weight:500; }
 .cp-row-helper.is-warn { color:#b45309; }
 .cp-row-helper.is-bad { color:#b91c1c; }
+.cp-row-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px; }
+.cp-row-status { font-size:10.5px; font-weight:600; color:#fff; padding:2px 8px; border-radius:99px; text-transform:capitalize; }
 .cp-row-actions { display:flex; gap:6px; flex-shrink:0; }
 .cp-row-delete { display:inline-flex; align-items:center; gap:5px; padding:8px 10px; background:transparent; color:#b91c1c; border-radius:8px; font-size:12px; font-weight:600; transition:background .12s; }
 .cp-row-delete:hover { background:rgba(185, 28, 28, 0.08); }
