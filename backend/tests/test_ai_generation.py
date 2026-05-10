@@ -320,6 +320,115 @@ def test_rate_limit_still_maps_correctly():
     assert isinstance(mapped, AIQuotaExceededError)
 
 
+def test_generate_image_uses_gemini_when_available(client, insights_user, db):
+    """With Gemini configured, /creator/generate-image picks the Gemini path,
+    skips DALL-E entirely, uploads bytes to our storage internally, and the
+    caller short-circuits the redundant download/re-upload because the URL
+    already points at our storage. ai_usage_log gets a row with
+    provider='gemini'."""
+    _, org, token = insights_user
+    account = seed_social_account_with_posts(db, org.id)
+
+    db.query(AiUsageLog).filter(AiUsageLog.social_account_id == account.id).delete()
+    db.commit()
+
+    fake_image_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+    def _stub_gemini(prompt, *, account_id, source):
+        from app.core.ai_provider import _log_usage
+        _log_usage(
+            provider="gemini", task="image_generation",
+            account_id=account_id, source=source, tokens_used=42,
+        )
+        return fake_image_bytes
+
+    dalle_called = MagicMock()
+
+    with patch(
+        "app.core.ai_image._gemini_generate_image_bytes",
+        side_effect=_stub_gemini,
+    ), patch(
+        "app.core.ai_image._openai_client",
+        side_effect=dalle_called,
+    ), patch(
+        "app.core.ai_image.upload_media",
+        return_value="/api/v1/media/abc-ai-generated.png",
+    ) as mock_upload:
+        res = client.post(
+            "/api/v1/creator/generate-image",
+            json={"description": "Rose perfume on marble", "ratio": "4:5"},
+            headers=_auth(token),
+        )
+
+    assert res.status_code == 200, res.text
+    body = res.json()["data"]
+    # URL is the persistent one returned by upload_media — caller did NOT
+    # round-trip download + re-upload (would be a duplicate object).
+    assert body["url"] == "/api/v1/media/abc-ai-generated.png"
+    assert mock_upload.call_count == 1
+    # DALL-E client never instantiated.
+    assert dalle_called.call_count == 0
+
+    rows = (
+        db.query(AiUsageLog)
+        .filter(AiUsageLog.social_account_id == account.id)
+        .all()
+    )
+    providers = [r.provider for r in rows if r.task == "image_generation"]
+    assert providers == ["gemini"], (
+        f"expected exactly one gemini image_generation log, got: {providers}"
+    )
+
+
+def test_generate_image_falls_back_to_dalle_when_gemini_fails(client, insights_user, db):
+    """When Gemini raises any AIProviderError, the dispatcher falls back to
+    DALL-E. The user sees a successful 200; only the OpenAI path logs."""
+    _, org, token = insights_user
+    account = seed_social_account_with_posts(db, org.id)
+    db.query(AiUsageLog).filter(AiUsageLog.social_account_id == account.id).delete()
+    db.commit()
+
+    fake_resp = MagicMock()
+    fake_resp.data = [MagicMock(url="https://openai.example/dalle.png", revised_prompt="x")]
+    fake_openai = MagicMock()
+    fake_openai.images.generate = MagicMock(return_value=fake_resp)
+
+    fake_http_resp = MagicMock()
+    fake_http_resp.content = b"png-bytes"
+    fake_http_resp.raise_for_status = MagicMock()
+    fake_http_client = MagicMock()
+    fake_http_client.__enter__ = MagicMock(return_value=fake_http_client)
+    fake_http_client.__exit__ = MagicMock(return_value=False)
+    fake_http_client.get = MagicMock(return_value=fake_http_resp)
+
+    prior_key = settings.OPENAI_API_KEY
+    settings.OPENAI_API_KEY = "test-key"
+    try:
+        with patch(
+            "app.core.ai_image._gemini_generate_image_bytes",
+            side_effect=AIProviderUnavailableError("gemini boom", provider="gemini"),
+        ), patch("app.core.ai_image._openai_client", return_value=fake_openai), \
+             patch("app.api.v1.posts_creator.upload_media", return_value="https://cdn.example/r2/x.png"), \
+             patch("httpx.Client", return_value=fake_http_client):
+            res = client.post(
+                "/api/v1/creator/generate-image",
+                json={"description": "Anything", "ratio": "1:1"},
+                headers=_auth(token),
+            )
+    finally:
+        settings.OPENAI_API_KEY = prior_key
+
+    assert res.status_code == 200, res.text
+    rows = (
+        db.query(AiUsageLog)
+        .filter(AiUsageLog.social_account_id == account.id)
+        .all()
+    )
+    providers = sorted({r.provider for r in rows if r.task == "image_generation"})
+    # Gemini failed before logging; only DALL-E logs on the fallback path.
+    assert providers == ["openai"], f"expected openai-only log, got {providers}"
+
+
 def test_generate_image_billing_limit_returns_specific_message(client, insights_user, db):
     """End-to-end: when DALL-E returns a billing_hard_limit_reached error, the
     endpoint surfaces a 503 with the tailored billing-limit message — NOT the

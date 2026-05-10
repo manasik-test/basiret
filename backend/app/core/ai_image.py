@@ -4,17 +4,20 @@ Vision + image-generation helpers, layered on top of `ai_provider`.
 `analyze_image_url(url)` runs OpenAI GPT-4o Vision against a public image URL
 and returns a structured product description used by the caption generator.
 
-`generate_dalle_image(prompt, ratio)` calls DALL-E 3 and returns the temporary
-hosted URL (caller is responsible for downloading + re-uploading to R2 before
-the URL expires).
+`generate_dalle_image(prompt, ratio)` is the image-generation entry point.
+Despite the name, it tries Gemini 2.0 Flash image generation
+(`gemini-2.0-flash-exp-image-generation`) first and falls back to DALL-E 3
+when Gemini fails — so callers don't need to know which provider produced
+the image. The function uploads the bytes to R2 internally on the Gemini
+path and returns a persistent URL; the DALL-E fallback returns OpenAI's
+ephemeral URL and relies on the caller to re-upload.
 
 Both helpers share the same exception taxonomy as `ai_provider` — quota
-errors, transient failures, and bad-response cases all surface as
-`AIProviderError` subclasses so endpoints can degrade uniformly. Every
-successful call is logged in `ai_usage_log`, identical to the text/json path.
-
-Vision and image-generation calls go through the same per-account rate-limit
-gate as the text providers (OpenAI bucket).
+errors, billing limits, transient failures, and bad-response cases all
+surface as `AIProviderError` subclasses so endpoints can degrade uniformly.
+Every successful call is logged in `ai_usage_log`, identical to the
+text/json path; the `provider` column distinguishes which backend served
+the request.
 """
 from __future__ import annotations
 
@@ -33,6 +36,7 @@ from app.core.ai_provider import (
     _log_usage,
 )
 from app.core.config import settings
+from app.core.storage import upload_media
 
 logger = logging.getLogger(__name__)
 
@@ -199,25 +203,119 @@ def analyze_image_url(
     return normalized
 
 
-# ── Image generation: DALL-E 3 ───────────────────────────────────────────
+# ── Gemini exception mapping (mirrors GeminiProvider._map_exception) ─────
 
 
-def generate_dalle_image(
+def _map_gemini_exception(exc: Exception) -> AIProviderError:
+    cls_name = exc.__class__.__name__
+    msg = str(exc)
+    msg_lower = msg.lower()
+    if cls_name == "ResourceExhausted" or "429" in msg or "quota" in msg_lower:
+        return AIQuotaExceededError(msg, provider="gemini")
+    if cls_name in ("DeadlineExceeded", "ServiceUnavailable", "InternalServerError"):
+        return AIProviderUnavailableError(msg, provider="gemini")
+    if cls_name in ("RetryError", "GoogleAPIError", "GoogleAPICallError"):
+        return AIProviderUnavailableError(msg, provider="gemini")
+    if "timeout" in msg_lower or "connection" in msg_lower:
+        return AIProviderUnavailableError(msg, provider="gemini")
+    logger.warning("Gemini image call failed (unmapped: %s): %s", cls_name, exc)
+    return AIProviderUnavailableError(msg, provider="gemini")
+
+
+# ── Gemini image generation (primary path) ───────────────────────────────
+
+
+GEMINI_IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation"
+
+
+def _gemini_generate_image_bytes(
     prompt: str,
     *,
-    ratio: str = "1:1",
-    account_id: str | None = None,
-    source: AISource = "user",
-) -> dict[str, Any]:
-    """Call DALL-E 3 with `prompt` + a size derived from `ratio`. Returns
-    `{"url": <temporary OpenAI-hosted URL>, "revised_prompt": <str>}`.
+    account_id: str | None,
+    source: AISource,
+) -> bytes:
+    """Call Gemini 2.0 Flash image generation, return the raw image bytes.
 
-    The returned URL expires within ~1 hour — callers are expected to download
-    the bytes immediately and re-upload to R2 (see `posts_creator.generate_image`).
-
-    Logs a single ai_usage_log row with `tokens_used=0` (DALL-E charges per
-    image, not per token, so the existing tokens column is left empty).
+    Gemini returns the image inline as `inline_data` on a content part, so
+    there's no temporary URL to download — we get the bytes directly off the
+    response. Logs `provider='gemini'` in ai_usage_log so the admin dashboard
+    can distinguish Gemini-served from DALL-E-served generations.
     """
+    if source == "user":
+        _check_rate_limit(
+            provider="gemini", account_id=account_id, task="image_generation",
+        )
+
+    if not settings.GEMINI_API_KEY:
+        raise AIProviderUnavailableError(
+            "GEMINI_API_KEY not configured", provider="gemini",
+        )
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(GEMINI_IMAGE_MODEL)
+        # `response_modalities` belongs in generation_config. Passing it as a
+        # plain dict (not GenerationConfig) keeps us forward-compatible with
+        # SDK versions that haven't surfaced the dataclass field yet.
+        resp = model.generate_content(
+            prompt,
+            generation_config={"response_modalities": ["IMAGE"]},
+        )
+    except AIProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise _map_gemini_exception(exc) from exc
+
+    # Walk the candidates → parts → inline_data tree. The image bytes live on
+    # the first part with `inline_data`; the SDK may or may not also include
+    # a text part depending on the modality config.
+    candidates = getattr(resp, "candidates", None) or []
+    image_bytes: bytes | None = None
+    for cand in candidates:
+        content = getattr(cand, "content", None)
+        if not content:
+            continue
+        for part in (getattr(content, "parts", None) or []):
+            inline = getattr(part, "inline_data", None)
+            data = getattr(inline, "data", None) if inline else None
+            if data:
+                # `data` is already raw bytes in current SDK versions; older
+                # ones may hand back base64 — guard for both.
+                if isinstance(data, str):
+                    import base64
+                    image_bytes = base64.b64decode(data)
+                else:
+                    image_bytes = bytes(data)
+                break
+        if image_bytes:
+            break
+
+    if not image_bytes:
+        raise AIInvalidResponseError(
+            "Gemini returned no inline image data", provider="gemini",
+        )
+
+    tokens = getattr(getattr(resp, "usage_metadata", None), "total_token_count", None)
+    _log_usage(
+        provider="gemini", task="image_generation",
+        account_id=account_id, source=source, tokens_used=tokens,
+    )
+    return image_bytes
+
+
+# ── DALL-E 3 (fallback path) ─────────────────────────────────────────────
+
+
+def _dalle_generate_image(
+    prompt: str,
+    *,
+    ratio: str,
+    account_id: str | None,
+    source: AISource,
+) -> dict[str, Any]:
+    """Call DALL-E 3, return `{url, revised_prompt, size}`. URL is OpenAI-hosted
+    and expires within ~1 hour — callers must download promptly."""
     if source == "user":
         _check_rate_limit(
             provider="openai", account_id=account_id, task="image_generation",
@@ -253,10 +351,59 @@ def generate_dalle_image(
             "DALL-E returned empty url", provider="openai",
         )
 
-    # DALL-E doesn't bill per token; log the call with tokens_used=0 so the
-    # admin dashboard still shows the call volume per account.
     _log_usage(
         provider="openai", task="image_generation", account_id=account_id,
         source=source, tokens_used=0,
     )
     return {"url": url, "revised_prompt": revised, "size": size}
+
+
+# ── Public entry point: Gemini-first, DALL-E fallback ────────────────────
+
+
+def generate_dalle_image(
+    prompt: str,
+    *,
+    ratio: str = "1:1",
+    account_id: str | None = None,
+    source: AISource = "user",
+) -> dict[str, Any]:
+    """Generate an image. Tries Gemini 2.0 Flash image generation first; on
+    any AIProviderError (quota / billing / transport / parsing), falls back
+    to DALL-E 3. Returns the same `{url, revised_prompt, size}` shape
+    regardless of which backend served the call.
+
+    Gemini path: bytes come back inline, we upload them to R2 here and return
+    the persistent URL. Caller's existing post-processing pipeline still runs
+    (download + re-upload) but short-circuits when it recognizes one of our
+    own URLs — see `posts_creator.generate_image`.
+
+    DALL-E fallback path: same shape but the URL is OpenAI's ephemeral one,
+    so the caller still needs to download + re-upload before it expires.
+
+    Function name retained for compatibility with existing callers.
+    """
+    # Try Gemini first.
+    try:
+        image_bytes = _gemini_generate_image_bytes(
+            prompt, account_id=account_id, source=source,
+        )
+    except AIProviderError as gemini_exc:
+        logger.info(
+            "Gemini image generation failed, falling back to DALL-E: %s (%s)",
+            gemini_exc.__class__.__name__, gemini_exc,
+        )
+    else:
+        # Upload immediately so the persistent URL goes back to the caller.
+        url = upload_media(image_bytes, "ai-generated.png", "image/png")
+        return {
+            "url": url,
+            "revised_prompt": prompt,
+            "size": dalle_size_for_ratio(ratio),
+        }
+
+    # Fallback: DALL-E. If this also fails the AIProviderError propagates and
+    # the endpoint serves a 503 with the standard degraded envelope.
+    return _dalle_generate_image(
+        prompt, ratio=ratio, account_id=account_id, source=source,
+    )
