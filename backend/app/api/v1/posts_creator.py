@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session
 
 from app.core.ai_degradation import degraded_no_cache_response
 from app.core.ai_image import (
+    GEMINI_IMAGE_MODEL,
+    _gemini_generate_image_bytes,
     analyze_image_url as openai_analyze_image_url,
     dalle_size_for_ratio,
     generate_dalle_image,
@@ -458,6 +460,95 @@ def _resolve_primary_account_id(
         .first()
     )
     return str(account.id) if account else None
+
+
+@router.get("/creator/test-gemini-image")
+def test_gemini_image(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Diagnostic endpoint: try Gemini image generation in isolation.
+
+    Hits Gemini directly (bypassing the DALL-E fallback in
+    `generate_dalle_image`) with a hardcoded prompt and returns either
+    `{ok: true, model, bytes_len, r2_url}` on success or
+    `{ok: false, model, error_class, error_message, error_repr}` on
+    failure. Lets us verify model-name + API-key + connectivity in prod
+    without going through the whole Post Creator wizard.
+
+    Auth-gated like the rest of /creator/* — no anonymous abuse surface.
+    Logs at every stage so prod logs tell the full story even when the
+    HTTP response is consumed by a tool that doesn't surface bodies.
+    """
+    primary_account_id = _resolve_primary_account_id(db, user)
+    test_prompt = (
+        "A simple square photograph of a single ripe red apple on a plain "
+        "white background, soft natural lighting, photorealistic. No text, "
+        "no watermarks, no logos."
+    )
+
+    logger.info(
+        "test-gemini-image: starting model=%s account=%s user=%s",
+        GEMINI_IMAGE_MODEL, primary_account_id, user.id,
+    )
+
+    try:
+        image_bytes = _gemini_generate_image_bytes(
+            test_prompt,
+            account_id=primary_account_id,
+            source="user",
+        )
+    except AIProviderError as exc:
+        # Mapped error — message is user-safe.
+        logger.warning(
+            "test-gemini-image: AIProviderError model=%s class=%s message=%s",
+            GEMINI_IMAGE_MODEL, exc.__class__.__name__, str(exc),
+        )
+        return {
+            "ok": False,
+            "model": GEMINI_IMAGE_MODEL,
+            "error_class": exc.__class__.__name__,
+            "error_message": str(exc),
+            "user_message": exc.user_message,
+        }
+    except Exception as exc:  # noqa: BLE001
+        # Unmapped — bubble the raw exception details so we can adjust the
+        # mapper if a new failure class shows up.
+        logger.exception(
+            "test-gemini-image: unmapped exception model=%s class=%s",
+            GEMINI_IMAGE_MODEL, exc.__class__.__name__,
+        )
+        return {
+            "ok": False,
+            "model": GEMINI_IMAGE_MODEL,
+            "error_class": exc.__class__.__name__,
+            "error_message": str(exc),
+            "error_repr": repr(exc),
+        }
+
+    # Upload so the URL is shareable / inspectable in a browser.
+    try:
+        url = upload_media(image_bytes, "test-gemini.png", "image/png")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("test-gemini-image: storage upload failed")
+        return {
+            "ok": True,
+            "model": GEMINI_IMAGE_MODEL,
+            "bytes_len": len(image_bytes),
+            "r2_url": None,
+            "upload_error": str(exc),
+        }
+
+    logger.info(
+        "test-gemini-image: success model=%s bytes=%d url=%s",
+        GEMINI_IMAGE_MODEL, len(image_bytes), url,
+    )
+    return {
+        "ok": True,
+        "model": GEMINI_IMAGE_MODEL,
+        "bytes_len": len(image_bytes),
+        "r2_url": url,
+    }
 
 
 @router.post("/creator/posts")

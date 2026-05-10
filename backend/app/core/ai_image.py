@@ -225,7 +225,15 @@ def _map_gemini_exception(exc: Exception) -> AIProviderError:
 # ── Gemini image generation (primary path) ───────────────────────────────
 
 
-GEMINI_IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation"
+# Gemini image-generation model. The previous experimental name
+# `gemini-2.0-flash-exp-image-generation` was retired by Google and now 404s
+# silently — symptom is "service temporarily unreachable" with no upstream
+# explanation. `gemini-2.5-flash-image` is the GA model as of 2026-05-10
+# (per ai.google.dev/gemini-api/docs/image-generation). The TEXT+IMAGE
+# modality pair is what Google's own examples use; pure ["IMAGE"] is
+# rejected by some model versions.
+GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+GEMINI_IMAGE_MODALITIES = ["TEXT", "IMAGE"]
 
 
 def _gemini_generate_image_bytes(
@@ -234,12 +242,16 @@ def _gemini_generate_image_bytes(
     account_id: str | None,
     source: AISource,
 ) -> bytes:
-    """Call Gemini 2.0 Flash image generation, return the raw image bytes.
+    """Call Gemini image generation, return the raw image bytes.
 
     Gemini returns the image inline as `inline_data` on a content part, so
     there's no temporary URL to download — we get the bytes directly off the
     response. Logs `provider='gemini'` in ai_usage_log so the admin dashboard
     can distinguish Gemini-served from DALL-E-served generations.
+
+    Logs the exact exception class, repr, and message at every failure point
+    so prod diagnoses don't require code changes — see
+    `/creator/test-gemini-image` for an isolated reproduction surface.
     """
     if source == "user":
         _check_rate_limit(
@@ -247,9 +259,18 @@ def _gemini_generate_image_bytes(
         )
 
     if not settings.GEMINI_API_KEY:
+        logger.warning(
+            "Gemini image generation skipped: GEMINI_API_KEY not set",
+        )
         raise AIProviderUnavailableError(
             "GEMINI_API_KEY not configured", provider="gemini",
         )
+
+    logger.info(
+        "Gemini image-gen call: model=%s modalities=%s prompt_len=%d account=%s source=%s",
+        GEMINI_IMAGE_MODEL, GEMINI_IMAGE_MODALITIES, len(prompt or ""),
+        account_id, source,
+    )
 
     try:
         import google.generativeai as genai
@@ -260,11 +281,19 @@ def _gemini_generate_image_bytes(
         # SDK versions that haven't surfaced the dataclass field yet.
         resp = model.generate_content(
             prompt,
-            generation_config={"response_modalities": ["IMAGE"]},
+            generation_config={"response_modalities": GEMINI_IMAGE_MODALITIES},
         )
     except AIProviderError:
         raise
     except Exception as exc:  # noqa: BLE001
+        # Log everything we can about the upstream failure before mapping.
+        # `repr(exc)` includes the class name + args; `str(exc)` is the
+        # human-readable message. Both can be useful when the SDK wraps an
+        # underlying gRPC/HTTP error opaquely.
+        logger.warning(
+            "Gemini image-gen exception: model=%s class=%s repr=%r message=%s",
+            GEMINI_IMAGE_MODEL, exc.__class__.__name__, exc, str(exc),
+        )
         raise _map_gemini_exception(exc) from exc
 
     # Walk the candidates → parts → inline_data tree. The image bytes live on
@@ -272,12 +301,24 @@ def _gemini_generate_image_bytes(
     # a text part depending on the modality config.
     candidates = getattr(resp, "candidates", None) or []
     image_bytes: bytes | None = None
+    text_parts: list[str] = []
+    part_types: list[str] = []
     for cand in candidates:
         content = getattr(cand, "content", None)
         if not content:
             continue
         for part in (getattr(content, "parts", None) or []):
+            # Track what we saw for diagnostic logging if no image was found.
             inline = getattr(part, "inline_data", None)
+            text = getattr(part, "text", None)
+            if inline and getattr(inline, "data", None):
+                part_types.append(f"inline_data({getattr(inline, 'mime_type', '?')})")
+            elif text:
+                part_types.append("text")
+                text_parts.append(text)
+            else:
+                part_types.append(f"other({type(part).__name__})")
+
             data = getattr(inline, "data", None) if inline else None
             if data:
                 # `data` is already raw bytes in current SDK versions; older
@@ -292,11 +333,32 @@ def _gemini_generate_image_bytes(
             break
 
     if not image_bytes:
+        # Surface the safety/finish reason and any text the model returned —
+        # if Gemini blocked the prompt or ran into a content filter, this is
+        # where we find out.
+        finish_reasons = [
+            str(getattr(c, "finish_reason", None)) for c in candidates
+        ]
+        prompt_feedback = getattr(resp, "prompt_feedback", None)
+        block_reason = (
+            str(getattr(prompt_feedback, "block_reason", None))
+            if prompt_feedback else None
+        )
+        logger.warning(
+            "Gemini image-gen returned no image: model=%s candidates=%d "
+            "finish_reasons=%s block_reason=%s part_types=%s text_snippet=%r",
+            GEMINI_IMAGE_MODEL, len(candidates), finish_reasons, block_reason,
+            part_types, (text_parts[0][:200] if text_parts else None),
+        )
         raise AIInvalidResponseError(
             "Gemini returned no inline image data", provider="gemini",
         )
 
     tokens = getattr(getattr(resp, "usage_metadata", None), "total_token_count", None)
+    logger.info(
+        "Gemini image-gen success: model=%s bytes=%d tokens=%s account=%s",
+        GEMINI_IMAGE_MODEL, len(image_bytes), tokens, account_id,
+    )
     _log_usage(
         provider="gemini", task="image_generation",
         account_id=account_id, source=source, tokens_used=tokens,
