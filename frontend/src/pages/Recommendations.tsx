@@ -667,9 +667,9 @@ function CalendarTab() {
           post={openPost}
           onClose={() => setOpenPost(null)}
           onEdit={(p) => {
-            // Edit re-uses the wizard with the post's date pre-filled.
-            const iso = p.scheduled_at?.slice(0, 10) ?? ''
-            navigate(`/create${iso ? `?date=${iso}` : ''}`)
+            // Edit mode: load the saved post into the wizard so the user
+            // picks up where they left off instead of starting blank.
+            navigate(`/create?edit=${p.id}`)
           }}
           onDelete={(p) => setConfirmDelete(p)}
         />
@@ -722,7 +722,7 @@ function DraftsTab() {
             key={p.id}
             post={p}
             mode="draft"
-            onEdit={() => navigate('/create')}
+            onEdit={() => navigate(`/create?edit=${p.id}`)}
             onDelete={() => setConfirmDelete(p)}
           />
         ))}
@@ -771,7 +771,7 @@ function PublishedTab() {
             key={p.id}
             post={p}
             mode="published"
-            onEdit={() => navigate('/create')}
+            onEdit={() => navigate(`/create?edit=${p.id}`)}
             onDelete={() => setConfirmDelete(p)}
           />
         ))}

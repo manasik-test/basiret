@@ -100,6 +100,12 @@ class UpdatePostRequest(BaseModel):
     status: Optional[ValidStatus] = None
     error_message: Optional[str] = None
     image_analysis: Optional[dict] = None
+    # Edit flow needs these so swapping the photo or re-running the AI
+    # transform during edit keeps the badges + source pointer accurate.
+    ai_generated_media: Optional[bool] = None
+    ai_generated_caption: Optional[bool] = None
+    source_image_url: Optional[str] = None
+    content_plan_day: Optional[date] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────

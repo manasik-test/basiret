@@ -81,6 +81,11 @@ export interface UpdatePostBody {
   ratio?: ImageRatio
   scheduled_at?: string | null
   status?: PostStatus
+  ai_generated_media?: boolean
+  ai_generated_caption?: boolean
+  source_image_url?: string
+  content_plan_day?: string
+  image_analysis?: ImageAnalysis
 }
 
 export async function uploadMedia(file: File): Promise<UploadResponse> {

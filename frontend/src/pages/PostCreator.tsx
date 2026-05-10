@@ -34,11 +34,25 @@ import {
 } from 'lucide-react'
 
 import { useAccounts, useAudienceInsights, useGenerateCaption, usePostsBreakdown } from '../hooks/useAnalytics'
-import { useAnalyzeImage, useCreatePost, useGenerateImage, useUploadMedia } from '../hooks/useCreator'
+import {
+  useAnalyzeImage,
+  useCreatePost,
+  useGenerateImage,
+  usePost,
+  useUpdatePost,
+  useUploadMedia,
+} from '../hooks/useCreator'
 import { fetchBrandIdentity, type BrandIdentity, type BrandImageStyle } from '../api/auth'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
-import type { CreatePostBody, ImageRatio, MediaType, PostStatus } from '../api/creator'
+import type {
+  CreatePostBody,
+  ImageRatio,
+  MediaType,
+  PostStatus,
+  ScheduledPost,
+  UpdatePostBody,
+} from '../api/creator'
 import type { ImageAnalysis } from '../api/analytics'
 import { cn } from '../lib/utils'
 
@@ -109,6 +123,68 @@ function defaultIsoTime(audienceTime: string | undefined): string {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
+/* ─────────────────── Edit-mode hydration ─────────────────── */
+
+/**
+ * Map a saved `ScheduledPost` back into the wizard's `DraftPost` shape so
+ * Edit mode can pick up exactly where the user left off.
+ *
+ * Choices baked in:
+ *  • `caption_lang` defaults to whichever caption is non-empty (Arabic
+ *    first when both exist), falling back to the UI language. Avoids opening
+ *    Step 2 with an empty textarea on a draft that only has caption_ar.
+ *  • `original_url` and `transformed_url` are restored from `source_image_url`
+ *    when the post was saved as transformed — the comparison view picks back
+ *    up without burning another generation.
+ *  • `post_now` always reads false for edits — the user explicitly chooses
+ *    schedule vs. post-now again on the Schedule step.
+ */
+function draftFromPost(post: ScheduledPost, isAr: boolean): DraftPost {
+  const captionLang: 'en' | 'ar' = post.caption_ar
+    ? 'ar'
+    : post.caption_en
+    ? 'en'
+    : isAr
+    ? 'ar'
+    : 'en'
+
+  // ISO scheduled_at → split into the local <input type=date|time> format.
+  let scheduled_date = ''
+  let scheduled_time = ''
+  if (post.scheduled_at) {
+    const d = new Date(post.scheduled_at)
+    if (!Number.isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, '0')
+      scheduled_date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      scheduled_time = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    }
+  }
+
+  const isImage = post.media_type !== 'video' && post.media_type !== 'carousel'
+  const wasTransformed = !!post.source_image_url && isImage
+
+  return {
+    media_urls: [...(post.media_urls ?? [])],
+    media_type: post.media_type ?? null,
+    ratio: post.ratio ?? '1:1',
+    caption_lang: captionLang,
+    caption_en: post.caption_en ?? '',
+    caption_ar: post.caption_ar ?? '',
+    hashtags: [...(post.hashtags ?? [])],
+    scheduled_date,
+    scheduled_time,
+    post_now: false,
+    ai_generated_caption: !!post.ai_generated_caption,
+    ai_generated_media: !!post.ai_generated_media,
+    original_url: wasTransformed ? post.source_image_url : null,
+    transformed_url: wasTransformed && post.media_urls?.[0] ? post.media_urls[0] : null,
+    is_transformed: wasTransformed,
+    image_analysis: post.image_analysis ?? null,
+    prefilled_topic: '',
+    content_plan_day: post.content_plan_day ?? null,
+  }
+}
+
 /* ─────────────────── Page wrapper ─────────────────── */
 
 export default function PostCreator() {
@@ -132,7 +208,15 @@ function PostCreatorBody() {
 
   const [step, setStep] = useState<Step>('media')
 
-  // Initialize from URL once.
+  // ?edit=<post_id> puts the wizard in edit mode: we fetch the existing
+  // post, hydrate the draft from it, and the Schedule step writes back via
+  // PUT /creator/posts/{id} instead of POST /creator/posts.
+  const editId = params.get('edit')
+  const editPost = usePost(editId)
+  const isEditMode = !!editId
+
+  // Initialize from URL once. In edit mode we leave most fields blank — the
+  // hydrate-from-server effect below fills them in once the GET resolves.
   const initialDraft = useMemo<DraftPost>(() => {
     const date = params.get('date') ?? ''
     const topic = params.get('topic') ?? ''
@@ -163,9 +247,23 @@ function PostCreatorBody() {
   const [draft, setDraft] = useState<DraftPost>(initialDraft)
   const analyzeImage = useAnalyzeImage()
 
-  // Once audience insights load, fill in the schedule defaults — but only
-  // when the user hasn't typed anything (don't clobber a deep-link).
+  // Hydrate from the saved post once. The `hydratedFromServer` flag prevents
+  // a refetch (e.g. window-focus revalidation) from clobbering edits the
+  // user has already made in the wizard. Without it, returning to the tab
+  // would discard their typing.
+  const [hydratedFromServer, setHydratedFromServer] = useState(false)
   useEffect(() => {
+    if (!isEditMode || hydratedFromServer || !editPost.data) return
+    setDraft(draftFromPost(editPost.data, isAr))
+    setHydratedFromServer(true)
+  }, [isEditMode, hydratedFromServer, editPost.data, isAr])
+
+  // Once audience insights load, fill in the schedule defaults — but only
+  // when the user hasn't typed anything (don't clobber a deep-link). In edit
+  // mode this is suppressed entirely so the saved post's scheduled time
+  // stays put.
+  useEffect(() => {
+    if (isEditMode) return
     if (!audience.data) return
     const day = audience.data.best_time?.day?.toLowerCase() ?? ''
     const dow = DAY_NAME_TO_INDEX[day]
@@ -176,7 +274,7 @@ function PostCreatorBody() {
       scheduled_time: prev.scheduled_time
         || defaultIsoTime(audience.data?.best_time?.time),
     }))
-  }, [audience.data])
+  }, [audience.data, isEditMode])
 
   function patch(p: Partial<DraftPost>) {
     setDraft((prev) => ({ ...prev, ...p }))
@@ -221,7 +319,9 @@ function PostCreatorBody() {
             <ArrowLeft className="w-4 h-4" />
             <span>{t('creator.back')}</span>
           </button>
-          <h1 className="creator-title" dir="auto">{t('creator.title')}</h1>
+          <h1 className="creator-title" dir="auto">
+            {isEditMode ? t('creator.editingTitle') : t('creator.title')}
+          </h1>
           <div style={{ width: 80 }} />
         </header>
 
@@ -246,6 +346,7 @@ function PostCreatorBody() {
               draft={draft}
               patch={patch}
               accountId={accountId}
+              editId={editId}
               onPosted={(status) => {
                 navigate(
                   status === 'draft' ? '/content-plan?tab=drafts'
@@ -1104,17 +1205,21 @@ function StepSchedule({
   draft,
   patch,
   accountId,
+  editId,
   onPosted,
 }: {
   draft: DraftPost
   patch: (p: Partial<DraftPost>) => void
   accountId: string | undefined
+  editId: string | null
   onPosted: (status: 'draft' | 'scheduled' | 'publishing') => void
 }) {
   const { t } = useTranslation()
   const create = useCreatePost()
+  const update = useUpdatePost()
   const breakdown = usePostsBreakdown()
   const [error, setError] = useState<string>('')
+  const isPending = create.isPending || update.isPending
 
   // Estimated reach: average reach across posts on the same weekday.
   // Falls back to the per-post average when day-specific data is sparse.
@@ -1143,28 +1248,51 @@ function StepSchedule({
       ? new Date(`${draft.scheduled_date}T${draft.scheduled_time}:00`).toISOString()
       : undefined
 
-    const body: CreatePostBody = {
-      social_account_id: accountId,
-      media_urls: draft.media_urls,
-      media_type: draft.media_type ?? 'image',
-      caption_ar: draft.caption_ar || undefined,
-      caption_en: draft.caption_en || undefined,
-      hashtags: draft.hashtags,
-      ratio: draft.ratio,
-      status,
-      scheduled_at: scheduledIso,
-      content_plan_day: draft.content_plan_day ?? undefined,
-      ai_generated_caption: draft.ai_generated_caption,
-      ai_generated_media: draft.ai_generated_media,
-      // Persist the original-upload URL when the user transformed it via AI
-      // so the saved post still has a pointer back to what they uploaded.
-      source_image_url: draft.is_transformed
-        ? (draft.original_url ?? undefined)
-        : undefined,
-      image_analysis: draft.image_analysis ?? undefined,
-    }
+    const sourceImageUrl = draft.is_transformed
+      ? (draft.original_url ?? undefined)
+      : undefined
+
     try {
-      await create.mutateAsync(body)
+      if (editId) {
+        // Edit mode: PUT only the mutable fields. social_account_id and
+        // content_plan_day are intentionally omitted — they're set on
+        // creation and shouldn't move when a draft is edited.
+        const updateBody: UpdatePostBody = {
+          media_urls: draft.media_urls,
+          media_type: draft.media_type ?? 'image',
+          caption_ar: draft.caption_ar || undefined,
+          caption_en: draft.caption_en || undefined,
+          hashtags: draft.hashtags,
+          ratio: draft.ratio,
+          status,
+          scheduled_at: scheduledIso ?? null,
+          ai_generated_caption: draft.ai_generated_caption,
+          ai_generated_media: draft.ai_generated_media,
+          source_image_url: sourceImageUrl,
+          image_analysis: draft.image_analysis ?? undefined,
+        }
+        await update.mutateAsync({ id: editId, body: updateBody })
+      } else {
+        const body: CreatePostBody = {
+          social_account_id: accountId,
+          media_urls: draft.media_urls,
+          media_type: draft.media_type ?? 'image',
+          caption_ar: draft.caption_ar || undefined,
+          caption_en: draft.caption_en || undefined,
+          hashtags: draft.hashtags,
+          ratio: draft.ratio,
+          status,
+          scheduled_at: scheduledIso,
+          content_plan_day: draft.content_plan_day ?? undefined,
+          ai_generated_caption: draft.ai_generated_caption,
+          ai_generated_media: draft.ai_generated_media,
+          // Persist the original-upload URL when the user transformed it via AI
+          // so the saved post still has a pointer back to what they uploaded.
+          source_image_url: sourceImageUrl,
+          image_analysis: draft.image_analysis ?? undefined,
+        }
+        await create.mutateAsync(body)
+      }
       onPosted(status === 'publishing' ? 'publishing' : status === 'scheduled' ? 'scheduled' : 'draft')
     } catch (err) {
       setError(err instanceof Error ? err.message : t('creator.schedule.saveError'))
@@ -1219,24 +1347,28 @@ function StepSchedule({
         <button
           className="creator-btn-ghost"
           onClick={() => submit('draft')}
-          disabled={create.isPending}
+          disabled={isPending}
         >
-          {t('creator.schedule.saveDraft')}
+          {editId
+            ? t('creator.schedule.saveDraftEdit')
+            : t('creator.schedule.saveDraft')}
         </button>
         {!draft.post_now && (
           <button
             className="creator-btn-primary"
             onClick={() => submit('scheduled')}
-            disabled={create.isPending || !draft.scheduled_date || !draft.scheduled_time}
+            disabled={isPending || !draft.scheduled_date || !draft.scheduled_time}
           >
-            {t('creator.schedule.schedule')}
+            {editId
+              ? t('creator.schedule.scheduleEdit')
+              : t('creator.schedule.schedule')}
           </button>
         )}
         {draft.post_now && (
           <button
             className="creator-btn-cta"
             onClick={() => submit('publishing')}
-            disabled={create.isPending}
+            disabled={isPending}
           >
             {t('creator.schedule.postNowAction')}
           </button>

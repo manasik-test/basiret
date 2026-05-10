@@ -719,6 +719,7 @@
   },
   "creator": {
     "title": "Create post",
+    "editingTitle": "Editing draft",
     "cta": "✦ Create post",
     "back": "Back",
     "next": "Next",
@@ -796,7 +797,9 @@
       "time": "Time",
       "estReach": "Estimated reach: {{n}}",
       "saveDraft": "Save as draft",
+      "saveDraftEdit": "Save changes",
       "schedule": "Schedule",
+      "scheduleEdit": "Update & schedule",
       "postNowAction": "Post now",
       "saveError": "Couldn't save your post. Please try again.",
       "noAccount": "Connect Instagram before publishing.",
