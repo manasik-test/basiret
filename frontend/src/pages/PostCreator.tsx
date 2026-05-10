@@ -24,6 +24,7 @@ import {
   Globe,
   Image as ImageIcon,
   Loader2,
+  Maximize2,
   RefreshCw,
   ScanEye,
   Sparkles,
@@ -63,6 +64,11 @@ interface DraftPost {
   // Transform-with-AI run so the "Use original" revert button can restore it.
   // null when the user is in generate-from-scratch mode.
   original_url: string | null
+  // The AI-transformed version of `original_url`. Kept around even after the
+  // user reverts to original so the side-by-side comparison view can let them
+  // toggle back without burning another generation. null until the first
+  // Transform-with-AI run on this draft.
+  transformed_url: string | null
   // True when the current `media_urls[0]` is a Transform-with-AI output of
   // `original_url`. Drives the badge ("Transformed" vs "AI generated") and
   // shows the "Use original" button.
@@ -145,6 +151,7 @@ function PostCreatorBody() {
       ai_generated_caption: false,
       ai_generated_media: false,
       original_url: null,
+      transformed_url: null,
       is_transformed: false,
       image_analysis: null,
       prefilled_topic: topic,
@@ -315,6 +322,10 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
   const [aiStyle, setAiStyle] = useState<BrandImageStyle>('clean')
   const [aiCount, setAiCount] = useState<number>(0)
   const [aiError, setAiError] = useState<string>('')
+  // Full-size image lightbox: any image thumbnail in this step opens it.
+  // null = closed. Single state value works because we never need more than
+  // one image in view at a time.
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   // Default the AI style selector to the brand's image_style on first load.
   useEffect(() => {
@@ -346,6 +357,9 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
           // so a later Transform-with-AI run can revert to it.
           ai_generated_media: false,
           original_url: isFirstImage ? result.url : draft.original_url,
+          // Fresh upload as the first image discards any prior transformed
+          // version — the user has chosen a new source photo.
+          transformed_url: isFirstImage ? null : draft.transformed_url,
           is_transformed: false,
           image_analysis: null,
         })
@@ -384,6 +398,10 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
         media_type: 'image',
         ai_generated_media: true,
         is_transformed: true,
+        // Cache the transformed URL so the side-by-side comparison view can
+        // restore it after a "Use original" revert without burning another
+        // generation. A subsequent Transform-again call will overwrite it.
+        transformed_url: result.url,
         // Keep image_analysis null so Step-2's auto-analyze re-runs against
         // the ORIGINAL (which still has the brand/label readable).
         image_analysis: null,
@@ -417,8 +435,9 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
         media_urls: [result.url],
         media_type: 'image',
         ai_generated_media: true,
-        // No upload → no original to revert to.
+        // No upload → no original to revert to, no comparison view.
         original_url: null,
+        transformed_url: null,
         is_transformed: false,
         image_analysis: null,  // re-analyze on Next.
       })
@@ -429,6 +448,8 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
   }
 
   // Restore the user's original upload (after a Transform-with-AI run).
+  // Keeps `transformed_url` populated so the side-by-side picker can flip
+  // back to the AI version without re-running generation.
   function handleUseOriginal() {
     if (!draft.original_url) return
     patch({
@@ -440,6 +461,29 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
     })
   }
 
+  // Pick which side of the side-by-side comparison is the active image.
+  // Both URLs already exist in state — this is just a swap of `media_urls[0]`
+  // and the badge/source-image flags. No new AI call.
+  function selectComparison(which: 'original' | 'transformed') {
+    if (which === 'original' && draft.original_url) {
+      patch({
+        media_urls: [draft.original_url],
+        media_type: 'image',
+        ai_generated_media: false,
+        is_transformed: false,
+        image_analysis: null,
+      })
+    } else if (which === 'transformed' && draft.transformed_url) {
+      patch({
+        media_urls: [draft.transformed_url],
+        media_type: 'image',
+        ai_generated_media: true,
+        is_transformed: true,
+        image_analysis: null,
+      })
+    }
+  }
+
   function removeAt(i: number) {
     const remaining = draft.media_urls.filter((_, idx) => idx !== i)
     patch({
@@ -447,10 +491,12 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
       media_type: remaining.length === 0 ? null
         : remaining.length === 1 ? draft.media_type === 'video' ? 'video' : 'image'
         : 'carousel',
-      // Clearing the deck wipes the original-upload reference and any prior
-      // AI-transform / vision-analysis state — the next upload starts fresh.
+      // Clearing the deck wipes the original-upload reference, the cached
+      // transformed version, and any prior vision-analysis state — the next
+      // upload starts fresh.
       ...(remaining.length === 0 && {
         original_url: null,
+        transformed_url: null,
         is_transformed: false,
         ai_generated_media: false,
         image_analysis: null,
@@ -506,11 +552,72 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
         )}
         {error && <p className="creator-error">{error}</p>}
 
-        {draft.media_urls.length > 0 && (
+        {/* Side-by-side comparison: only when an upload AND an AI transform
+         *   both exist. Picking one swaps `media_urls[0]` (no new AI call).
+         *   The thumbnail body selects; the corner zoom button opens the
+         *   lightbox so the user can inspect either at full size. */}
+        {draft.original_url && draft.transformed_url && draft.media_urls.length === 1 ? (
+          <div className="creator-compare">
+            {([
+              { which: 'original' as const, url: draft.original_url, label: t('creator.media.compareOriginal') },
+              { which: 'transformed' as const, url: draft.transformed_url, label: t('creator.media.compareTransformed') },
+            ]).map(({ which, url, label }) => {
+              const active = draft.media_urls[0] === url
+              return (
+                <button
+                  type="button"
+                  key={which}
+                  className={cn('creator-compare-card', active && 'is-on')}
+                  onClick={() => selectComparison(which)}
+                  aria-pressed={active}
+                >
+                  <div className="creator-compare-media">
+                    <img src={url} alt={label} />
+                    {active && (
+                      <span className="creator-compare-check" aria-hidden>
+                        <Check className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="creator-compare-zoom"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setLightboxUrl(url)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setLightboxUrl(url)
+                        }
+                      }}
+                      aria-label={t('creator.media.lightboxOpen')}
+                    >
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                  <div className="creator-compare-label">
+                    <span>{label}</span>
+                    {active && <em>{t('creator.media.compareSelected')}</em>}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : draft.media_urls.length > 0 && (
           <div className="creator-thumbs">
             {draft.media_urls.map((url, i) => (
               <div className="creator-thumb" key={`${url}-${i}`}>
-                <img src={url} alt="" />
+                <button
+                  type="button"
+                  className="creator-thumb-trigger"
+                  onClick={() => setLightboxUrl(url)}
+                  aria-label={t('creator.media.lightboxOpen')}
+                >
+                  <img src={url} alt="" />
+                </button>
                 {i === 0 && draft.ai_generated_media && (
                   <span className="creator-thumb-aibadge">
                     <Sparkles className="w-3 h-3" />
@@ -539,6 +646,10 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
           </div>
         )}
       </section>
+
+      {lightboxUrl && (
+        <Lightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
+      )}
 
       {/* AI panel — bifurcates by upload state.
         *   No upload  → Generate-from-scratch (Gemini → DALL-E)
@@ -697,6 +808,46 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
           ))}
         </div>
       </section>
+    </div>
+  )
+}
+
+/* ─────────────────── Image Lightbox ─────────────────── */
+
+function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  // Escape closes — listener attached at the document level so focus inside
+  // any nested element still triggers it.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div
+      className="creator-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('creator.media.lightboxLabel')}
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        className="creator-lightbox-close"
+        onClick={onClose}
+        aria-label={t('creator.media.lightboxClose')}
+      >
+        <X className="w-5 h-5" />
+      </button>
+      <img
+        src={url}
+        alt=""
+        className="creator-lightbox-img"
+        onClick={(e) => e.stopPropagation()}
+      />
     </div>
   )
 }
@@ -1135,11 +1286,33 @@ const CREATOR_STYLES = `
 
 .creator-thumbs { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; }
 .creator-thumb { position:relative; aspect-ratio:1; border-radius:12px; overflow:hidden; background:var(--ink-100); }
-.creator-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.creator-thumb-actions { position:absolute; top:6px; inset-inline-end:6px; display:flex; flex-direction:column; gap:3px; }
+.creator-thumb-trigger { position:absolute; inset:0; padding:0; background:transparent; border:0; cursor:zoom-in; display:block; }
+.creator-thumb-trigger img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .25s; }
+.creator-thumb-trigger:hover img { transform:scale(1.04); }
+.creator-thumb-actions { position:absolute; top:6px; inset-inline-end:6px; display:flex; flex-direction:column; gap:3px; z-index:2; }
 .creator-thumb-actions button { width:22px; height:22px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; display:grid; place-items:center; transition:background .12s; }
 .creator-thumb-actions button:hover:not(:disabled) { background:rgba(0,0,0,.8); }
 .creator-thumb-actions button:disabled { opacity:.35; }
+
+/* Side-by-side comparison (Original vs Transformed) */
+.creator-compare { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.creator-compare-card { display:flex; flex-direction:column; gap:8px; padding:6px; background:transparent; border:2px solid var(--line); border-radius:14px; cursor:pointer; transition:border-color .12s, box-shadow .12s, transform .12s; }
+.creator-compare-card:hover { border-color:var(--purple-300); }
+.creator-compare-card.is-on { border-color:var(--purple-500); box-shadow:0 0 0 3px rgba(84,51,194,.15); }
+.creator-compare-media { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background:var(--ink-100); }
+.creator-compare-media img { width:100%; height:100%; object-fit:cover; display:block; }
+.creator-compare-check { position:absolute; top:6px; inset-inline-start:6px; width:22px; height:22px; border-radius:50%; background:var(--purple-600); color:#fff; display:grid; place-items:center; box-shadow:0 4px 10px -3px rgba(84,51,194,.5); }
+.creator-compare-zoom { position:absolute; top:6px; inset-inline-end:6px; width:24px; height:24px; border-radius:6px; background:rgba(0,0,0,.55); color:#fff; display:grid; place-items:center; cursor:zoom-in; transition:background .12s; }
+.creator-compare-zoom:hover { background:rgba(0,0,0,.8); }
+.creator-compare-label { display:flex; justify-content:space-between; align-items:center; padding:0 4px 4px; font-size:12.5px; font-weight:600; color:var(--ink-700); }
+.creator-compare-label em { font-style:normal; font-size:11px; font-weight:600; color:var(--purple-700); }
+
+/* Lightbox */
+.creator-lightbox { position:fixed; inset:0; z-index:90; background:rgba(20,16,40,.85); display:grid; place-items:center; padding:32px; cursor:zoom-out; backdrop-filter:blur(4px); animation:creator-lightbox-in .15s ease-out; }
+@keyframes creator-lightbox-in { from { opacity:0; } to { opacity:1; } }
+.creator-lightbox-img { max-width:min(1200px, 92vw); max-height:88vh; border-radius:12px; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); cursor:default; display:block; }
+.creator-lightbox-close { position:absolute; top:18px; inset-inline-end:18px; width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.12); color:#fff; display:grid; place-items:center; transition:background .12s; }
+.creator-lightbox-close:hover { background:rgba(255,255,255,.22); }
 
 .creator-ai-stub { padding:24px; border-radius:12px; background:var(--purple-50); display:flex; flex-direction:column; align-items:center; gap:8px; text-align:center; color:var(--purple-700); font-size:13px; font-weight:500; }
 

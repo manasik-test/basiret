@@ -761,7 +761,13 @@
       "transforming": "جاري التحويل…",
       "transformedBadge": "محوّلة",
       "useOriginal": "استخدم الأصلية",
-      "ratioTitle": "نسبة العرض إلى الارتفاع"
+      "ratioTitle": "نسبة العرض إلى الارتفاع",
+      "compareOriginal": "الأصلية",
+      "compareTransformed": "المحوّلة",
+      "compareSelected": "محددة",
+      "lightboxOpen": "عرض بالحجم الكامل",
+      "lightboxClose": "إغلاق",
+      "lightboxLabel": "معاينة الصورة"
     },
     "caption": {
       "title": "اكتب وصف منشورك",

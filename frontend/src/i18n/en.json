@@ -761,7 +761,13 @@
       "transforming": "Transforming…",
       "transformedBadge": "Transformed",
       "useOriginal": "Use original",
-      "ratioTitle": "Aspect ratio"
+      "ratioTitle": "Aspect ratio",
+      "compareOriginal": "Original",
+      "compareTransformed": "Transformed",
+      "compareSelected": "Selected",
+      "lightboxOpen": "View full size",
+      "lightboxClose": "Close",
+      "lightboxLabel": "Image preview"
     },
     "caption": {
       "title": "Write your caption",

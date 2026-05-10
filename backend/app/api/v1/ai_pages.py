@@ -656,6 +656,29 @@ def generate_caption(
             if c
         ]
 
+    # Top-5 captions by likes — fed back to the model as STYLE EXAMPLES so the
+    # generated caption sounds like the account owner wrote it. This is the
+    # single biggest lever for "feels human, not AI" output.
+    style_examples: list[str] = []
+    if account_ids:
+        style_rows = (
+            db.query(Post.caption)
+            .outerjoin(EngagementMetric, EngagementMetric.post_id == Post.id)
+            .filter(
+                Post.social_account_id.in_(account_ids),
+                Post.caption.isnot(None),
+            )
+            .group_by(Post.id, Post.caption)
+            .order_by(func.coalesce(func.sum(EngagementMetric.likes), 0).desc())
+            .limit(5)
+            .all()
+        )
+        style_examples = [
+            (r.caption or "").strip()
+            for r in style_rows
+            if r.caption and r.caption.strip()
+        ]
+
     top_hashtags = _extract_top_hashtags(account_captions, n=5)
     emoji_rate = _emoji_usage_rate(account_captions)
     allow_emojis = emoji_rate > 0.5
@@ -743,6 +766,17 @@ def generate_caption(
         "Write something a small business owner can paste directly into Instagram. "
         "Match Instagram's voice — short, punchy, scannable. "
         "1-3 lines, end with a clear question or call-to-action. "
+        # Natural-voice rule — the second-biggest lever after few-shot examples.
+        # Without this the model defaults to marketer-speak ('transform', 'oasis',
+        # 'dive in', '!!!'). The style examples below show the actual voice; this
+        # rule kills the fallback clichés the model reaches for when the examples
+        # don't cover a similar product/topic.
+        "Write in a natural, human voice. Avoid marketing clichés like: "
+        "transform, oasis, dive in, sparkling, crystal-clear, unleash, elevate, "
+        "indulge, discover, experience (unless the style examples below use them). "
+        "Do not use excessive exclamation marks — at most one. "
+        "Sound like a real business owner talking to their customers, not a marketer. "
+        "Match the tone of the style examples exactly. "
         + ratio_rule
         + (
             f"This caption is for: {bp_line}. Tailor language, references, and CTA to that "
@@ -776,6 +810,19 @@ def generate_caption(
         parts.append(f"Topic: {body.topic}")
     if top_hashtags:
         parts.append("Preferred hashtags (from this account's own posts): " + " ".join(top_hashtags))
+    if style_examples:
+        # The few-shot block. Capping each example at 280 chars keeps the
+        # prompt budget reasonable on accounts with very long captions and
+        # avoids the model copying entire captions verbatim instead of
+        # matching the voice.
+        examples_block = "\n".join(
+            f"{i + 1}. {ex[:280]}"
+            for i, ex in enumerate(style_examples)
+        )
+        parts.append(
+            "STYLE EXAMPLES FROM THIS ACCOUNT (write in a similar human voice, "
+            "do NOT copy them verbatim):\n" + examples_block
+        )
     if reference:
         parts.append(
             f"Reference (for tone only — rewrite in {lang_label}, do not copy):\n{reference[:300]}"
