@@ -210,11 +210,23 @@ def _map_gemini_exception(exc: Exception) -> AIProviderError:
     cls_name = exc.__class__.__name__
     msg = str(exc)
     msg_lower = msg.lower()
-    if cls_name == "ResourceExhausted" or "429" in msg or "quota" in msg_lower:
+    # 429 / quota — handle the legacy SDK's `ResourceExhausted` AND the
+    # newer `google-genai` SDK's `ClientError` / `APIError` shapes (both
+    # carry a 429 / RESOURCE_EXHAUSTED marker in the message).
+    if (
+        cls_name == "ResourceExhausted"
+        or "429" in msg
+        or "RESOURCE_EXHAUSTED" in msg
+        or "quota" in msg_lower
+    ):
         return AIQuotaExceededError(msg, provider="gemini")
     if cls_name in ("DeadlineExceeded", "ServiceUnavailable", "InternalServerError"):
         return AIProviderUnavailableError(msg, provider="gemini")
     if cls_name in ("RetryError", "GoogleAPIError", "GoogleAPICallError"):
+        return AIProviderUnavailableError(msg, provider="gemini")
+    # `google-genai` exception hierarchy: `ServerError` (5xx), `ClientError`
+    # (4xx other than 429, which we caught above), `APIError` (base).
+    if cls_name in ("ServerError", "ClientError", "APIError"):
         return AIProviderUnavailableError(msg, provider="gemini")
     if "timeout" in msg_lower or "connection" in msg_lower:
         return AIProviderUnavailableError(msg, provider="gemini")
@@ -273,15 +285,21 @@ def _gemini_generate_image_bytes(
     )
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel(GEMINI_IMAGE_MODEL)
-        # `response_modalities` belongs in generation_config. Passing it as a
-        # plain dict (not GenerationConfig) keeps us forward-compatible with
-        # SDK versions that haven't surfaced the dataclass field yet.
-        resp = model.generate_content(
-            prompt,
-            generation_config={"response_modalities": GEMINI_IMAGE_MODALITIES},
+        # Use the newer `google-genai` SDK (NOT the legacy
+        # `google-generativeai` package). The legacy SDK's GenerationConfig
+        # rejects `response_modalities` outright with
+        # "Unknown field for GenerationConfig: response_modalities" —
+        # caught in prod via /creator/test-gemini-image on 2026-05-10.
+        # `google-genai` is the SDK Google's image-generation docs use.
+        from google import genai as google_genai
+        from google.genai import types as genai_types
+        client = google_genai.Client(api_key=settings.GEMINI_API_KEY)
+        resp = client.models.generate_content(
+            model=GEMINI_IMAGE_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=GEMINI_IMAGE_MODALITIES,
+            ),
         )
     except AIProviderError:
         raise

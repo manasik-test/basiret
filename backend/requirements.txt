@@ -24,6 +24,13 @@ protobuf==4.25.3
 scikit-learn==1.5.1
 stripe==9.12.0
 google-generativeai==0.7.2
+# Newer SDK — required for image generation (`gemini-2.5-flash-image`).
+# The legacy google-generativeai 0.7.2 SDK doesn't accept
+# `response_modalities` in GenerationConfig, so image-gen calls fail with
+# "Unknown field for GenerationConfig: response_modalities". Only used by
+# `_gemini_generate_image_bytes` in app/core/ai_image.py; all text/json/
+# chat callers stay on the legacy SDK above.
+google-genai==2.0.1
 openai==1.54.3
 reportlab==4.2.2
 arabic-reshaper==3.0.0
