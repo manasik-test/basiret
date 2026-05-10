@@ -326,19 +326,37 @@ def _download_image_bytes(image_url: str) -> bytes:
     """Pull the source image bytes from R2 (absolute URL) or the local-fallback
     media route (relative URL like `/api/v1/media/foo.png`).
 
-    Local relative URLs are resolved against `FRONTEND_URL` so dev (local
-    fallback) and prod (R2 absolute URLs) both work without special-casing.
+    Local-fallback URLs are read DIRECTLY from `LOCAL_MEDIA_DIR` rather than
+    round-tripped through HTTP. Going through HTTP would force the request
+    out via FRONTEND_URL → nginx → back into a (possibly different) api
+    container instance — needless network hop, and broken on prod where
+    FRONTEND_URL is the frontend container's port (caught 2026-05-10:
+    "ConnectError: [Errno 111] Connection refused" when the edit path tried
+    to download an upload that landed in /tmp/basiret-media/).
     """
+    from app.core.storage import LOCAL_MEDIA_DIR, LOCAL_MEDIA_URL_PREFIX
+
+    # Local-fallback URL: read straight from disk. Reject anything that looks
+    # like a path-traversal attempt — `_safe_filename` strips slashes on the
+    # write side, but defense-in-depth on the read side.
+    if image_url.startswith(LOCAL_MEDIA_URL_PREFIX):
+        name = image_url[len(LOCAL_MEDIA_URL_PREFIX):]
+        if "/" in name or ".." in name:
+            raise AIProviderUnavailableError(
+                f"Refusing suspicious local media path: {name}",
+                provider="openai",
+            )
+        path = LOCAL_MEDIA_DIR / name
+        if not path.exists():
+            raise AIProviderUnavailableError(
+                f"Local media file not found: {name}", provider="openai",
+            )
+        return path.read_bytes()
+
+    # Absolute URL (R2 or any public host) → HTTP fetch.
     import httpx
-    if image_url.startswith("/"):
-        # Relative URL → local media fallback. Resolve against FRONTEND_URL
-        # so the download still works in dev where R2 isn't configured.
-        base = (settings.FRONTEND_URL or "http://localhost:8000").rstrip("/")
-        full_url = f"{base}{image_url}"
-    else:
-        full_url = image_url
     with httpx.Client(timeout=60) as http:
-        r = http.get(full_url)
+        r = http.get(image_url)
         r.raise_for_status()
         return r.content
 

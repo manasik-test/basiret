@@ -617,6 +617,80 @@ def test_edit_product_image_uploads_and_logs_usage(client, insights_user, db):
     assert edit_rows[0].tokens_used == 1288
 
 
+def test_edit_path_reads_local_fallback_url_from_disk(insights_user, db):
+    """Regression for prod 503: when source_image_url is a local-fallback
+    URL like `/api/v1/media/foo.png` (returned by upload when R2 isn't
+    configured), the edit path MUST read it directly from LOCAL_MEDIA_DIR
+    rather than HTTP-round-trip through FRONTEND_URL — that round-trip
+    failed with `Connection refused` because FRONTEND_URL points at the
+    frontend container, not the api container."""
+    import base64
+    import io
+    from PIL import Image
+    from app.core.ai_image import edit_product_image
+    from app.core.storage import LOCAL_MEDIA_DIR
+
+    _, _org, _ = insights_user
+
+    # Drop a real PNG into LOCAL_MEDIA_DIR so the edit path can actually
+    # read it. Distinctive bytes so we can prove the disk read happened.
+    LOCAL_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    test_filename = "test-edit-disk-read-fixture.png"
+    test_path = LOCAL_MEDIA_DIR / test_filename
+    img = Image.new("RGB", (256, 256), color=(220, 50, 70))
+    img.save(test_path, format="PNG")
+    source_bytes = test_path.read_bytes()
+    source_url = f"/api/v1/media/{test_filename}"
+
+    # Stub OpenAI edit so we capture exactly what the SDK got fed.
+    captured: dict = {}
+    fake_image_bytes = b"\x89PNG\r\n\x1a\nFAKEEDITED" * 8
+
+    def _capture_edit(**kwargs):
+        captured.update(kwargs)
+        # `image` is a BytesIO with .name set; read it to confirm it
+        # contains the bytes we wrote to disk above.
+        captured["image_bytes"] = kwargs["image"].getvalue()
+        resp = MagicMock()
+        resp.data = [MagicMock(b64_json=base64.b64encode(fake_image_bytes).decode())]
+        resp.usage = MagicMock(total_tokens=100)
+        return resp
+
+    fake_openai = MagicMock()
+    fake_openai.images.edit = MagicMock(side_effect=_capture_edit)
+
+    prior_key = settings.OPENAI_API_KEY
+    settings.OPENAI_API_KEY = "test-key"
+    try:
+        with patch("app.core.ai_image._openai_client", return_value=fake_openai), \
+             patch(
+                 "app.core.ai_image.upload_media",
+                 return_value="/api/v1/media/edited-output.png",
+             ):
+            result = edit_product_image(
+                source_url,
+                description="restyle",
+                ratio="1:1",
+                brand_identity={},
+                business_profile={},
+                account_id=None,
+                source="user",
+            )
+    finally:
+        settings.OPENAI_API_KEY = prior_key
+        try:
+            test_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    # Edit succeeded — disk read worked and the bytes flowed through.
+    assert result["url"] == "/api/v1/media/edited-output.png"
+    # The OpenAI SDK got the EXACT bytes we wrote to LOCAL_MEDIA_DIR — no
+    # HTTP round-trip in between (which on prod would have hit
+    # FRONTEND_URL=http://localhost:3000 and refused).
+    assert captured["image_bytes"] == source_bytes
+
+
 def test_caption_specificity_mandate_when_brand_known(client, starter_user):
     """When vision identifies a brand+product, the caption system prompt
     MUST include the SPECIFICITY MANDATE telling the model to mention the
