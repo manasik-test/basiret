@@ -27,6 +27,8 @@ ingestion, analysis, or the Sentiment page should preserve and reinforce it.
 ## Known debt
 marketing copy is inline in `frontend/src/components/landing/*` and `frontend/src/pages/marketing/*` via the `marketing-i18n.tsx` shim (uses `t("English","Arabic")` calls instead of i18next JSON keys) — not in the `landing.*` namespace of `frontend/src/i18n/{en,ar}.json`. Editing those JSON files will NOT change the marketing site copy. Follow-up: grep `t(` in `components/landing` + `pages/marketing` and migrate to `landing.*` namespace if/when SUS or content review demands a single source of truth.
 
+`ai_usage_log` has no per-row `model_name` column. The `provider` field carries routing (`gemini` vs `openai`) and each helper hardcodes its model identifier (`gemini-2.0-flash-exp-image-generation`, `dall-e-3`, `gpt-4o`, `gpt-4o-mini`, `gemini-2.5-flash-lite`), so today the `(provider, task)` tuple uniquely identifies the model that served a row. If per-row model granularity is ever needed for billing analysis, cost attribution, or A/B comparison across model versions within the same provider, add a `model_name VARCHAR(64)` column via Alembic migration and pass it through `_log_usage()` from each call site. Additive, low-risk; deferred until a real need surfaces.
+
 ---
 
 ## Tech Stack (locked)
