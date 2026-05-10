@@ -169,6 +169,11 @@ export interface GenerateImageRequest {
   description: string
   ratio: ImageRatio
   account_id?: string
+  // When provided, the backend runs in TRANSFORM mode (GPT-Image-1 edits
+  // the user's uploaded photo into a professional version while keeping
+  // the product recognizable). Without it, GENERATE-FROM-SCRATCH mode
+  // fires (Gemini → DALL-E fallback).
+  source_image_url?: string
 }
 
 export interface GenerateImageResponse {
@@ -177,6 +182,9 @@ export interface GenerateImageResponse {
   revised_prompt?: string
   ratio: ImageRatio
   size: string
+  mode?: 'edit' | 'generate'
+  source_image_url?: string
+  model?: string
 }
 
 export async function generateImage(

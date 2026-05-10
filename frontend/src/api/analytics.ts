@@ -450,6 +450,13 @@ export async function fetchPostsInsights(language: 'en' | 'ar' = 'en'): Promise<
 
 export interface ImageAnalysis {
   product_description: string
+  // Identification fields populated by GPT-4o Vision when readable on the
+  // packaging — empty strings/arrays when not visible. The caption generator
+  // switches from generic prose to product-specific copy when these are set.
+  brand_name?: string
+  product_name?: string
+  key_features?: string[]
+  label_text?: string
   detected_style: string
   dominant_colors: string[]
   suggested_tone: string
@@ -480,10 +487,16 @@ export interface GenerateCaptionRequest {
 function captionCacheKey(req: GenerateCaptionRequest): string | null {
   if (typeof window === 'undefined' || !req.account_id) return null
   const day = new Date().toISOString().slice(0, 10)
-  // Compact image-analysis fingerprint — same shape we use server-side.
+  // Compact image-analysis fingerprint — mirrors the server-side cache key
+  // shape (see ai_pages.py). Includes brand_name + product_name + key_features
+  // so two products from the same brand get distinct cache entries and a
+  // re-analysis that picks up new label detail invalidates the prior caption.
   const ia = req.image_analysis
     ? [
         req.image_analysis.product_description,
+        req.image_analysis.brand_name ?? '',
+        req.image_analysis.product_name ?? '',
+        (req.image_analysis.key_features ?? []).slice(0, 4).join(','),
         req.image_analysis.detected_style,
         req.image_analysis.suggested_tone,
       ].join('|')

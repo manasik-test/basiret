@@ -750,6 +750,17 @@
       "aiLimit": "استخدمت كل المحاولات الذكية ({{n}}) لهذا المنشور.",
       "aiError": "تعذّر إنشاء الصورة. جرّب وصفاً مختلفاً.",
       "aiBadge": "صورة بالذكاء",
+      "aiNoSource": "ارفع صورة أولاً ثم حوّلها بالذكاء.",
+      "transformTitle": "حوّل بالذكاء الاصطناعي",
+      "transformSubtitle": "دع بصيرة ينشئ نسخة احترافية جاهزة لإنستغرام من صورتك مع الحفاظ على هوية المنتج.",
+      "transformDescriptionLabel": "ما النمط البصري الذي تريده؟",
+      "transformDescriptionPlaceholder": "تصوير منتجات احترافي لإنستغرام، إضاءة طبيعية ناعمة على سطح من الرخام…",
+      "transformDefaultDescription": "تصوير منتجات احترافي لإنستغرام",
+      "transformGo": "✦ حوّل بالذكاء",
+      "transformAgain": "أعد التحويل",
+      "transforming": "جاري التحويل…",
+      "transformedBadge": "محوّلة",
+      "useOriginal": "استخدم الأصلية",
       "ratioTitle": "نسبة العرض إلى الارتفاع"
     },
     "caption": {

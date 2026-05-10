@@ -750,6 +750,17 @@
       "aiLimit": "You've used all {{n}} AI generations for this post.",
       "aiError": "Couldn't generate the image. Try a different description.",
       "aiBadge": "AI generated",
+      "aiNoSource": "Upload a photo first, then transform it.",
+      "transformTitle": "Transform with AI",
+      "transformSubtitle": "Let Basiret create a professional Instagram-ready version of your product photo. The product stays recognizable.",
+      "transformDescriptionLabel": "What kind of look?",
+      "transformDescriptionPlaceholder": "Professional Instagram product photography. Soft natural light on a marble surface…",
+      "transformDefaultDescription": "Professional Instagram product photography",
+      "transformGo": "✦ Transform with AI",
+      "transformAgain": "Transform again",
+      "transforming": "Transforming…",
+      "transformedBadge": "Transformed",
+      "useOriginal": "Use original",
       "ratioTitle": "Aspect ratio"
     },
     "caption": {

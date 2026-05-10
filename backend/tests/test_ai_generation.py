@@ -467,3 +467,254 @@ def test_generate_image_billing_limit_returns_specific_message(client, insights_
     assert "temporarily unreachable" not in msg
     # Sanity: ensure AIProviderUnavailableError is not what got returned.
     assert AIProviderUnavailableError.user_message.lower() not in msg
+
+
+# ── Transform-with-AI (GPT-Image edit of an uploaded photo) ───────────────
+
+
+def test_generate_image_dispatches_to_edit_when_source_provided(
+    client, insights_user, db,
+):
+    """When `source_image_url` is in the request body, the endpoint MUST
+    take the GPT-Image edit path — never touch the Gemini→DALL-E generate
+    dispatcher. Response shape advertises mode='edit' and echoes the
+    source_image_url back so the frontend can keep tracking the original."""
+    _, org, token = insights_user
+    seed_social_account_with_posts(db, org.id)
+
+    edit_called = []
+
+    def _stub_edit(image_url, *, description, ratio, brand_identity,
+                   business_profile, account_id, source):
+        edit_called.append({
+            "image_url": image_url,
+            "description": description,
+            "ratio": ratio,
+            "brand_identity": brand_identity,
+            "business_profile": business_profile,
+        })
+        return {
+            "url": "/api/v1/media/transformed-abc.png",
+            "prompt_used": "stub prompt",
+            "size": "1024x1024",
+            "model": "gpt-image-1",
+        }
+
+    # Spies on both alternative paths so we can assert neither was touched.
+    gemini_called = MagicMock()
+    dalle_called = MagicMock()
+
+    with patch(
+        "app.api.v1.posts_creator.edit_product_image",
+        side_effect=_stub_edit,
+    ), patch(
+        "app.api.v1.posts_creator.generate_dalle_image",
+        side_effect=dalle_called,
+    ), patch(
+        "app.core.ai_image._gemini_generate_image_bytes",
+        side_effect=gemini_called,
+    ):
+        res = client.post(
+            "/api/v1/creator/generate-image",
+            json={
+                "description": "Restyle for Instagram",
+                "ratio": "4:5",
+                "source_image_url": "/api/v1/media/upload-source.png",
+            },
+            headers=_auth(token),
+        )
+
+    assert res.status_code == 200, res.text
+    body = res.json()["data"]
+    assert body["mode"] == "edit"
+    assert body["url"] == "/api/v1/media/transformed-abc.png"
+    assert body["source_image_url"] == "/api/v1/media/upload-source.png"
+    assert body["model"] == "gpt-image-1"
+
+    # The edit helper got the user's URL + ratio.
+    assert len(edit_called) == 1
+    assert edit_called[0]["image_url"] == "/api/v1/media/upload-source.png"
+    assert edit_called[0]["ratio"] == "4:5"
+
+    # Generate-from-scratch dispatchers must not be touched on the edit path.
+    assert dalle_called.call_count == 0
+    assert gemini_called.call_count == 0
+
+
+def test_edit_product_image_uploads_and_logs_usage(client, insights_user, db):
+    """End-to-end edit path: stub the OpenAI client to return a fake b64_json
+    payload, assert (a) `upload_media` is called with the decoded bytes,
+    (b) `ai_usage_log` gets a row with task='image_edit' provider='openai',
+    (c) the response carries the persistent URL upload_media returned."""
+    import base64
+    _, org, token = insights_user
+    account = seed_social_account_with_posts(db, org.id)
+    db.query(AiUsageLog).filter(AiUsageLog.social_account_id == account.id).delete()
+    db.commit()
+
+    # Distinctive byte sequence so we can prove the upload received exactly
+    # the decoded edit-output bytes.
+    fake_image_bytes = b"\x89PNG\r\n\x1a\nFAKEEDITEDIMAGEBYTES" * 4
+    fake_b64 = base64.b64encode(fake_image_bytes).decode("ascii")
+
+    fake_resp = MagicMock()
+    fake_resp.data = [MagicMock(b64_json=fake_b64)]
+    fake_resp.usage = MagicMock(total_tokens=1288)
+    fake_openai = MagicMock()
+    fake_openai.images.edit = MagicMock(return_value=fake_resp)
+
+    # Source-image download is stubbed so the test doesn't need a live HTTP
+    # server. The edit path calls _download_image_bytes() before invoking
+    # the OpenAI client.
+    upload_calls: list = []
+
+    def _spy_upload(payload, filename, content_type):
+        upload_calls.append({
+            "payload": payload, "filename": filename, "content_type": content_type,
+        })
+        return "/api/v1/media/edit-result-xyz.png"
+
+    prior_key = settings.OPENAI_API_KEY
+    settings.OPENAI_API_KEY = "test-key"
+    try:
+        with patch("app.core.ai_image._openai_client", return_value=fake_openai), \
+             patch(
+                 "app.core.ai_image._download_image_bytes",
+                 return_value=b"original-source-bytes",
+             ), \
+             patch("app.core.ai_image.upload_media", side_effect=_spy_upload):
+            res = client.post(
+                "/api/v1/creator/generate-image",
+                json={
+                    "description": "Studio shot",
+                    "ratio": "1:1",
+                    "source_image_url": "/api/v1/media/source.png",
+                },
+                headers=_auth(token),
+            )
+    finally:
+        settings.OPENAI_API_KEY = prior_key
+
+    assert res.status_code == 200, res.text
+    body = res.json()["data"]
+    assert body["url"] == "/api/v1/media/edit-result-xyz.png"
+    assert body["mode"] == "edit"
+
+    # upload_media got the decoded edit bytes verbatim.
+    assert len(upload_calls) == 1
+    assert upload_calls[0]["payload"] == fake_image_bytes
+    assert upload_calls[0]["content_type"] == "image/png"
+
+    # ai_usage_log carries a row distinguishing this from generate-from-scratch.
+    rows = (
+        db.query(AiUsageLog)
+        .filter(AiUsageLog.social_account_id == account.id)
+        .all()
+    )
+    edit_rows = [r for r in rows if r.task == "image_edit"]
+    assert len(edit_rows) == 1, f"expected 1 image_edit row, got {len(edit_rows)}"
+    assert edit_rows[0].provider == "openai"
+    assert edit_rows[0].tokens_used == 1288
+
+
+def test_caption_specificity_mandate_when_brand_known(client, starter_user):
+    """When vision identifies a brand+product, the caption system prompt
+    MUST include the SPECIFICITY MANDATE telling the model to mention the
+    product by name. Without that mandate, captions stay generic."""
+    _, _, token = starter_user
+    captured: dict = {}
+
+    class _SpyProvider:
+        name = "spy"
+
+        def generate_text(self, system, user, temperature=0.5, **_kwargs):
+            captured["system"] = system
+            return f"Discover Velvet Rose by Maison Rouge today. #perfume"
+
+        def generate_json(self, *_args, **_kwargs):
+            return {}
+
+    image_analysis = {
+        "product_description": "A glass perfume bottle",
+        "brand_name": "Maison Rouge",
+        "product_name": "Velvet Rose",
+        "key_features": ["gold cap", "30ml glass bottle", "rose-gold lettering"],
+        "label_text": "Maison Rouge | Velvet Rose | 30ml",
+        "detected_style": "luxury",
+        "suggested_tone": "luxurious",
+        "content_suggestions": ["Product showcase", "Gift idea", "Behind the scenes"],
+        "dominant_colors": ["#F5E6D3"],
+    }
+
+    with patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         patch("app.api.v1.ai_pages.get_provider", return_value=_SpyProvider()):
+        res = client.post(
+            "/api/v1/ai-pages/generate-caption",
+            json={
+                "content_type": "image",
+                "language": "en",
+                "image_ratio": "1:1",
+                "image_analysis": image_analysis,
+            },
+            headers=_auth(token),
+        )
+
+    assert res.status_code == 200, res.text
+    system = captured.get("system", "")
+    # The mandate must reference the product BY NAME with the brand attached.
+    assert "Velvet Rose" in system
+    assert "Maison Rouge" in system
+    # The "MUST mention" directive is the load-bearing instruction.
+    assert "MUST mention" in system
+    # At least one of the visible features should be folded into the prompt.
+    assert any(feat in system for feat in ("gold cap", "30ml glass bottle", "rose-gold lettering"))
+
+
+def test_caption_no_specificity_mandate_when_brand_unknown(client, starter_user):
+    """Conversely: when vision found NO brand or product name, the caption
+    prompt should NOT carry the specificity mandate (the model can't follow
+    it without knowing what to mention) — falls back to the existing
+    'reference what's pictured' guidance."""
+    _, _, token = starter_user
+    captured: dict = {}
+
+    class _SpyProvider:
+        name = "spy"
+        def generate_text(self, system, user, temperature=0.5, **_kwargs):
+            captured["system"] = system
+            return "Some generic caption"
+        def generate_json(self, *_args, **_kwargs):
+            return {}
+
+    # Vision found something pictured but no readable brand/product.
+    image_analysis = {
+        "product_description": "A glass bottle on a marble surface",
+        "brand_name": "",
+        "product_name": "",
+        "key_features": [],
+        "label_text": "",
+        "detected_style": "luxury",
+        "suggested_tone": "luxurious",
+        "content_suggestions": ["Product showcase"],
+        "dominant_colors": ["#F5E6D3"],
+    }
+
+    with patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         patch("app.api.v1.ai_pages.get_provider", return_value=_SpyProvider()):
+        res = client.post(
+            "/api/v1/ai-pages/generate-caption",
+            json={
+                "content_type": "image",
+                "language": "en",
+                "image_analysis": image_analysis,
+            },
+            headers=_auth(token),
+        )
+
+    assert res.status_code == 200, res.text
+    system = captured.get("system", "")
+    # Mandate-only phrasing should be absent.
+    assert "MUST mention" not in system
+    # But the existing "reference what's pictured" fallback should still be
+    # present so captions stay anchored to the image.
+    assert "Reference the actual product" in system or "anchored to what is pictured" in system

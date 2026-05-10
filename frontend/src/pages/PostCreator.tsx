@@ -59,8 +59,17 @@ interface DraftPost {
   post_now: boolean
   ai_generated_caption: boolean
   ai_generated_media: boolean
-  // GPT-4o Vision analysis of the post image (uploaded or AI-generated). Set
-  // automatically when the user moves from Step 1 to Step 2.
+  // The user's ORIGINAL uploaded image, set on upload and preserved after a
+  // Transform-with-AI run so the "Use original" revert button can restore it.
+  // null when the user is in generate-from-scratch mode.
+  original_url: string | null
+  // True when the current `media_urls[0]` is a Transform-with-AI output of
+  // `original_url`. Drives the badge ("Transformed" vs "AI generated") and
+  // shows the "Use original" button.
+  is_transformed: boolean
+  // GPT-4o Vision analysis of the ORIGINAL uploaded image (NOT the transformed
+  // version). Set automatically when the user moves from Step 1 to Step 2.
+  // Captioning uses this to write product-specific copy.
   image_analysis: ImageAnalysis | null
   // Pre-fill metadata from the URL (read-only after mount).
   prefilled_topic: string
@@ -135,6 +144,8 @@ function PostCreatorBody() {
       post_now: false,
       ai_generated_caption: false,
       ai_generated_media: false,
+      original_url: null,
+      is_transformed: false,
       image_analysis: null,
       prefilled_topic: topic,
       content_plan_day: date || null,
@@ -168,13 +179,19 @@ function PostCreatorBody() {
     const idx = STEPS.indexOf(step)
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]!)
     // When leaving the Media step into Caption, trigger a background image
-    // analysis on the first image (if not already done). The Caption step
-    // shows a "Analyzing your image…" hint while it runs.
-    if (step === 'media' && draft.media_urls[0] && !draft.image_analysis && !analyzeImage.isPending) {
-      const firstUrl = draft.media_urls[0]
+    // analysis (if not already done). The Caption step shows a
+    // "Analyzing your image…" hint while it runs.
+    //
+    // Important: when the user transformed an upload via AI, analyze the
+    // ORIGINAL upload (which still has the real product packaging + label
+    // text on it), NOT the AI-transformed version (which may have stylized
+    // away the brand mark). Only the original tells us what the product
+    // actually IS — and that's what we need for product-specific captions.
+    if (step === 'media' && !draft.image_analysis && !analyzeImage.isPending) {
+      const urlToAnalyze = draft.original_url || draft.media_urls[0]
       const isImage = draft.media_type !== 'video'
-      if (isImage) {
-        analyzeImage.mutate(firstUrl, {
+      if (urlToAnalyze && isImage) {
+        analyzeImage.mutate(urlToAnalyze, {
           onSuccess: (result) => {
             setDraft((d) => ({ ...d, image_analysis: result }))
           },
@@ -317,14 +334,19 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
       try {
         const result = await upload.mutateAsync(f)
         const updated = [...draft.media_urls, result.url]
+        const isFirstImage =
+          updated.length === 1 && (result.media_type as MediaType) === 'image'
         patch({
           media_urls: updated,
           media_type: updated.length > 1
             ? 'carousel'
             : (result.media_type as MediaType),
           // A user-uploaded image clears any prior AI flag — analyze runs
-          // on Next, fresh per upload.
+          // on Next, fresh per upload. Capture the upload as `original_url`
+          // so a later Transform-with-AI run can revert to it.
           ai_generated_media: false,
+          original_url: isFirstImage ? result.url : draft.original_url,
+          is_transformed: false,
           image_analysis: null,
         })
       } catch (err) {
@@ -333,6 +355,47 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
     }
   }
 
+  // Transform mode: GPT-Image-1 edits the user's uploaded photo into a
+  // professional Instagram-ready version. Original is preserved so the
+  // user can revert with "Use original" — and so the captioning step
+  // analyzes the original (where the brand mark is still readable).
+  async function handleTransform() {
+    setAiError('')
+    if (!draft.original_url) {
+      setAiError(t('creator.media.aiNoSource'))
+      return
+    }
+    if (aiCount >= MAX_AI_IMAGE_GENERATIONS) {
+      setAiError(t('creator.media.aiLimit', { n: MAX_AI_IMAGE_GENERATIONS }))
+      return
+    }
+    const description =
+      aiDescription.trim() || t('creator.media.transformDefaultDescription')
+    try {
+      const styledDescription = `${description}. Style: ${aiStyle}.`
+      const result = await generate.mutateAsync({
+        description: styledDescription,
+        ratio: draft.ratio,
+        account_id: accounts.data?.[0]?.id,
+        source_image_url: draft.original_url,
+      })
+      patch({
+        media_urls: [result.url],
+        media_type: 'image',
+        ai_generated_media: true,
+        is_transformed: true,
+        // Keep image_analysis null so Step-2's auto-analyze re-runs against
+        // the ORIGINAL (which still has the brand/label readable).
+        image_analysis: null,
+      })
+      setAiCount((c) => c + 1)
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : t('creator.media.aiError'))
+    }
+  }
+
+  // Generate-from-scratch mode: no source image, Gemini-or-DALL-E creates
+  // a new image. Used when the user has not uploaded anything.
   async function handleGenerate() {
     setAiError('')
     if (!aiDescription.trim()) {
@@ -344,8 +407,6 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
       return
     }
     try {
-      // Compose the description with the chosen style so multiple regenerates
-      // with different style picks actually change the result.
       const styledDescription = `${aiDescription.trim()}. Style: ${aiStyle}.`
       const result = await generate.mutateAsync({
         description: styledDescription,
@@ -356,12 +417,27 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
         media_urls: [result.url],
         media_type: 'image',
         ai_generated_media: true,
+        // No upload → no original to revert to.
+        original_url: null,
+        is_transformed: false,
         image_analysis: null,  // re-analyze on Next.
       })
       setAiCount((c) => c + 1)
     } catch (err) {
       setAiError(err instanceof Error ? err.message : t('creator.media.aiError'))
     }
+  }
+
+  // Restore the user's original upload (after a Transform-with-AI run).
+  function handleUseOriginal() {
+    if (!draft.original_url) return
+    patch({
+      media_urls: [draft.original_url],
+      media_type: 'image',
+      ai_generated_media: false,
+      is_transformed: false,
+      image_analysis: null,  // re-analyze the original on Next.
+    })
   }
 
   function removeAt(i: number) {
@@ -371,6 +447,14 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
       media_type: remaining.length === 0 ? null
         : remaining.length === 1 ? draft.media_type === 'video' ? 'video' : 'image'
         : 'carousel',
+      // Clearing the deck wipes the original-upload reference and any prior
+      // AI-transform / vision-analysis state — the next upload starts fresh.
+      ...(remaining.length === 0 && {
+        original_url: null,
+        is_transformed: false,
+        ai_generated_media: false,
+        image_analysis: null,
+      }),
     })
   }
 
@@ -430,7 +514,9 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
                 {i === 0 && draft.ai_generated_media && (
                   <span className="creator-thumb-aibadge">
                     <Sparkles className="w-3 h-3" />
-                    {t('creator.media.aiBadge')}
+                    {draft.is_transformed
+                      ? t('creator.media.transformedBadge')
+                      : t('creator.media.aiBadge')}
                   </span>
                 )}
                 <div className="creator-thumb-actions">
@@ -454,67 +540,147 @@ function StepMedia({ draft, patch }: { draft: DraftPost; patch: (p: Partial<Draf
         )}
       </section>
 
-      {/* AI generate panel */}
-      <section className="creator-card">
-        <div className="creator-ai-head">
-          <h3>{t('creator.media.aiTitle')}</h3>
-          <span className="creator-ai-counter">
-            {t('creator.media.aiRemaining', {
-              n: Math.max(0, MAX_AI_IMAGE_GENERATIONS - aiCount),
-            })}
-          </span>
-        </div>
-        <p className="creator-sub">{t('creator.media.aiSubtitle')}</p>
+      {/* AI panel — bifurcates by upload state.
+        *   No upload  → Generate-from-scratch (Gemini → DALL-E)
+        *   Upload set → Transform-with-AI (GPT-Image-1 edits the photo
+        *                while keeping the product recognizable)
+        * Sharing the same description/style/ratio inputs and the same
+        * remaining-generations counter so the user's mental model is
+        * "I get N AI tries per post, period". */}
+      {draft.original_url ? (
+        <section className="creator-card">
+          <div className="creator-ai-head">
+            <h3>{t('creator.media.transformTitle')}</h3>
+            <span className="creator-ai-counter">
+              {t('creator.media.aiRemaining', {
+                n: Math.max(0, MAX_AI_IMAGE_GENERATIONS - aiCount),
+              })}
+            </span>
+          </div>
+          <p className="creator-sub">{t('creator.media.transformSubtitle')}</p>
 
-        <label className="creator-label">{t('creator.media.aiDescriptionLabel')}</label>
-        <textarea
-          className="creator-textarea"
-          rows={3}
-          placeholder={t('creator.media.aiDescriptionPlaceholder')}
-          value={aiDescription}
-          onChange={(e) => setAiDescription(e.target.value)}
-          dir="auto"
-        />
+          <label className="creator-label">{t('creator.media.transformDescriptionLabel')}</label>
+          <textarea
+            className="creator-textarea"
+            rows={3}
+            placeholder={t('creator.media.transformDescriptionPlaceholder')}
+            value={aiDescription}
+            onChange={(e) => setAiDescription(e.target.value)}
+            dir="auto"
+          />
 
-        <label className="creator-label">{t('creator.media.aiStyleLabel')}</label>
-        <div className="creator-ratio">
-          {(['clean', 'vibrant', 'minimal', 'luxurious', 'playful'] as const).map((s) => (
+          <label className="creator-label">{t('creator.media.aiStyleLabel')}</label>
+          <div className="creator-ratio">
+            {(['clean', 'vibrant', 'minimal', 'luxurious', 'playful'] as const).map((s) => (
+              <button
+                key={s}
+                className={cn('creator-ratio-btn', aiStyle === s && 'is-on')}
+                onClick={() => setAiStyle(s)}
+                type="button"
+              >
+                {t(`brandIdentity.imageStyle.${s}`, { defaultValue: s })}
+              </button>
+            ))}
+          </div>
+
+          <div className="creator-ai-actions">
             <button
-              key={s}
-              className={cn('creator-ratio-btn', aiStyle === s && 'is-on')}
-              onClick={() => setAiStyle(s)}
+              className="creator-btn-primary"
+              onClick={handleTransform}
+              disabled={generate.isPending || aiCount >= MAX_AI_IMAGE_GENERATIONS}
               type="button"
             >
-              {t(`brandIdentity.imageStyle.${s}`, { defaultValue: s })}
+              {generate.isPending ? (
+                <>
+                  <Sparkles className="w-4 h-4 animate-pulse" />
+                  {t('creator.media.transforming')}
+                </>
+              ) : draft.is_transformed ? (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  {t('creator.media.transformAgain')}
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-4 h-4" />
+                  {t('creator.media.transformGo')}
+                </>
+              )}
             </button>
-          ))}
-        </div>
+            {draft.is_transformed && (
+              <button
+                className="creator-btn-ghost"
+                onClick={handleUseOriginal}
+                type="button"
+              >
+                {t('creator.media.useOriginal')}
+              </button>
+            )}
+          </div>
+          {aiError && <p className="creator-error">{aiError}</p>}
+        </section>
+      ) : (
+        <section className="creator-card">
+          <div className="creator-ai-head">
+            <h3>{t('creator.media.aiTitle')}</h3>
+            <span className="creator-ai-counter">
+              {t('creator.media.aiRemaining', {
+                n: Math.max(0, MAX_AI_IMAGE_GENERATIONS - aiCount),
+              })}
+            </span>
+          </div>
+          <p className="creator-sub">{t('creator.media.aiSubtitle')}</p>
 
-        <button
-          className="creator-btn-primary creator-ai-go"
-          onClick={handleGenerate}
-          disabled={generate.isPending || aiCount >= MAX_AI_IMAGE_GENERATIONS || !aiDescription.trim()}
-          type="button"
-        >
-          {generate.isPending ? (
-            <>
-              <Sparkles className="w-4 h-4 animate-pulse" />
-              {t('creator.media.aiGenerating')}
-            </>
-          ) : aiCount > 0 ? (
-            <>
-              <RefreshCw className="w-4 h-4" />
-              {t('creator.media.aiRegenerate')}
-            </>
-          ) : (
-            <>
-              <Wand2 className="w-4 h-4" />
-              {t('creator.media.aiGenerate')}
-            </>
-          )}
-        </button>
-        {aiError && <p className="creator-error">{aiError}</p>}
-      </section>
+          <label className="creator-label">{t('creator.media.aiDescriptionLabel')}</label>
+          <textarea
+            className="creator-textarea"
+            rows={3}
+            placeholder={t('creator.media.aiDescriptionPlaceholder')}
+            value={aiDescription}
+            onChange={(e) => setAiDescription(e.target.value)}
+            dir="auto"
+          />
+
+          <label className="creator-label">{t('creator.media.aiStyleLabel')}</label>
+          <div className="creator-ratio">
+            {(['clean', 'vibrant', 'minimal', 'luxurious', 'playful'] as const).map((s) => (
+              <button
+                key={s}
+                className={cn('creator-ratio-btn', aiStyle === s && 'is-on')}
+                onClick={() => setAiStyle(s)}
+                type="button"
+              >
+                {t(`brandIdentity.imageStyle.${s}`, { defaultValue: s })}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="creator-btn-primary creator-ai-go"
+            onClick={handleGenerate}
+            disabled={generate.isPending || aiCount >= MAX_AI_IMAGE_GENERATIONS || !aiDescription.trim()}
+            type="button"
+          >
+            {generate.isPending ? (
+              <>
+                <Sparkles className="w-4 h-4 animate-pulse" />
+                {t('creator.media.aiGenerating')}
+              </>
+            ) : aiCount > 0 ? (
+              <>
+                <RefreshCw className="w-4 h-4" />
+                {t('creator.media.aiRegenerate')}
+              </>
+            ) : (
+              <>
+                <Wand2 className="w-4 h-4" />
+                {t('creator.media.aiGenerate')}
+              </>
+            )}
+          </button>
+          {aiError && <p className="creator-error">{aiError}</p>}
+        </section>
+      )}
 
       {/* Ratio selector — applies to both columns */}
       <section className="creator-card creator-card-full">
@@ -839,6 +1005,11 @@ function StepSchedule({
       content_plan_day: draft.content_plan_day ?? undefined,
       ai_generated_caption: draft.ai_generated_caption,
       ai_generated_media: draft.ai_generated_media,
+      // Persist the original-upload URL when the user transformed it via AI
+      // so the saved post still has a pointer back to what they uploaded.
+      source_image_url: draft.is_transformed
+        ? (draft.original_url ?? undefined)
+        : undefined,
       image_analysis: draft.image_analysis ?? undefined,
     }
     try {
@@ -1042,6 +1213,7 @@ const CREATOR_STYLES = `
 .creator-ai-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .creator-ai-counter { font-size:11.5px; font-weight:600; color:var(--purple-700); background:var(--purple-50); padding:3px 9px; border-radius:99px; }
 .creator-ai-go { align-self:flex-start; margin-top:6px; }
+.creator-ai-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
 .creator-thumb-aibadge { position:absolute; top:6px; inset-inline-start:6px; display:inline-flex; align-items:center; gap:4px; padding:3px 7px; background:linear-gradient(135deg,#5433c2,#BF499B); color:#fff; border-radius:99px; font-size:10px; font-weight:700; box-shadow:0 4px 10px -3px rgba(84,51,194,.45); }
 
 /* Step 2 image-analysis surface */

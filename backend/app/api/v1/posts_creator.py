@@ -30,6 +30,7 @@ from app.core.ai_image import (
     _gemini_generate_image_bytes,
     analyze_image_url as openai_analyze_image_url,
     dalle_size_for_ratio,
+    edit_product_image,
     generate_dalle_image,
 )
 from app.core.ai_provider import AIProviderError
@@ -282,6 +283,12 @@ class GenerateImageRequest(BaseModel):
     description: str = Field(..., min_length=3, max_length=2000)
     ratio: Literal["1:1", "4:5", "16:9"] = "1:1"
     account_id: Optional[str] = None
+    # When provided, the endpoint runs in "transform" mode: the URL points
+    # at the user's uploaded product photo, and GPT-Image-1 edits that photo
+    # into a professional Instagram-ready version while keeping the product
+    # recognizable. Without it, the endpoint runs in "generate from scratch"
+    # mode (Gemini → DALL-E fallback) — the prior behavior.
+    source_image_url: Optional[str] = None
 
 
 @router.post("/creator/generate-image")
@@ -290,13 +297,17 @@ def generate_image(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Generate a brand-aware image via DALL-E 3, persist it on R2, return URL.
+    """Two modes:
 
-    Brand identity (primary color, image style, tone) and business profile
-    (industry, city) are folded into the DALL-E prompt so generated images
-    match the rest of the account's content. The generated URL hosted by
-    OpenAI expires within ~1 hour so we download + re-upload to R2 inside
-    this request — the URL we return points at our storage backend.
+    * `source_image_url` provided → transform that image with GPT-Image-1,
+      preserving the product's identity (shape, packaging, branding, label)
+      while restyling lighting, background, and composition.
+    * No `source_image_url` → generate from scratch via the Gemini-first /
+      DALL-E-fallback dispatcher.
+
+    Either way the response shape is `{url, prompt_used, ratio, size}` so
+    the frontend swaps the image into the wizard the same way regardless
+    of which mode served the request.
     """
     primary_account_id = _resolve_primary_account_id(db, user, body.account_id)
 
@@ -308,6 +319,39 @@ def generate_image(
     brand = (org.brand_identity if org else None) or {}
     bp = (org.business_profile if org else None) or {}
 
+    # ── Transform mode: edit an existing product photo ───────────────
+    if body.source_image_url:
+        try:
+            edit_result = edit_product_image(
+                body.source_image_url,
+                description=body.description,
+                ratio=body.ratio,
+                brand_identity=brand,
+                business_profile=bp,
+                account_id=primary_account_id,
+                source="user",
+            )
+        except AIProviderError as exc:
+            return degraded_no_cache_response(exc)
+        logger.info(
+            "creator generate-image (edit) by user=%s account=%s ratio=%s size=%s",
+            user.id, primary_account_id, body.ratio, edit_result.get("size"),
+        )
+        return {
+            "success": True,
+            "data": {
+                "url": edit_result["url"],
+                "prompt_used": edit_result["prompt_used"],
+                "ratio": body.ratio,
+                "size": edit_result["size"],
+                "model": edit_result.get("model"),
+                "mode": "edit",
+                "source_image_url": body.source_image_url,
+            },
+            "meta": {"status": "fresh"},
+        }
+
+    # ── Generate-from-scratch mode (existing dispatcher) ─────────────
     prompt = _build_dalle_prompt(body.description, body.ratio, brand, bp)
 
     try:
@@ -366,6 +410,7 @@ def generate_image(
             "revised_prompt": gen.get("revised_prompt"),
             "ratio": body.ratio,
             "size": gen.get("size") or dalle_size_for_ratio(body.ratio),
+            "mode": "generate",
         },
         "meta": {"status": "fresh"},
     }

@@ -602,10 +602,16 @@ def generate_caption(
 
     # Compact, stable summary of the image analysis so the cache key changes
     # when the picture itself does, but doesn't churn on incidental dict-key
-    # ordering noise from the upstream JSON.
+    # ordering noise from the upstream JSON. Includes brand_name + product_name
+    # so two different products from the same brand don't share a cached
+    # caption, and key_features so a re-analysis that picks up new label
+    # detail invalidates the prior caption.
     ia = body.image_analysis or {}
     ia_summary = (
         f"{(ia.get('product_description') or '').strip()}|"
+        f"{(ia.get('brand_name') or '').strip()}|"
+        f"{(ia.get('product_name') or '').strip()}|"
+        f"{','.join((ia.get('key_features') or [])[:4])}|"
         f"{(ia.get('detected_style') or '').strip()}|"
         f"{(ia.get('suggested_tone') or '').strip()}"
     ) if ia else ""
@@ -682,16 +688,52 @@ def generate_caption(
     # IMAGE ANALYSIS block — only added when the caller passed a vision result.
     # Helps the model write copy that describes what's actually in the image
     # instead of falling back to generic "check out our latest!" content.
+    # When vision picked up the brand and/or product name from the packaging,
+    # we promote them to first-class fields and add a SPECIFICITY MANDATE
+    # below — that's what flips captions from generic to product-specific.
     image_block = ""
+    brand_name = (ia or {}).get("brand_name") or ""
+    product_name = (ia or {}).get("product_name") or ""
+    key_features = (ia or {}).get("key_features") or []
+    has_product_identity = bool(brand_name or product_name)
     if ia and ia.get("product_description"):
         suggestions = ia.get("content_suggestions") or []
         first_suggestion = suggestions[0] if suggestions else ""
+        features_line = (
+            f"- Key features: {', '.join(key_features[:4])}\n"
+            if key_features else ""
+        )
         image_block = (
             "IMAGE ANALYSIS:\n"
             f"- Product: {ia.get('product_description', '')}\n"
-            f"- Style: {(ia.get('detected_style') or '').title() or 'Unspecified'}\n"
+            + (f"- Brand: {brand_name}\n" if brand_name else "")
+            + (f"- Product name: {product_name}\n" if product_name else "")
+            + features_line
+            + f"- Style: {(ia.get('detected_style') or '').title() or 'Unspecified'}\n"
             f"- Suggested tone: {(ia.get('suggested_tone') or '').title() or 'Unspecified'}\n"
             + (f"- Content angle: {first_suggestion}\n" if first_suggestion else "")
+        )
+
+    # SPECIFICITY MANDATE — fires only when vision identified a real product.
+    # Without it, the model defaults to generic copy even with the IMAGE
+    # ANALYSIS block in front of it; with it, the caption MUST mention the
+    # product by name.
+    specificity_mandate = ""
+    if has_product_identity:
+        if brand_name and product_name:
+            target = f"{product_name} by {brand_name}"
+        elif product_name:
+            target = product_name
+        else:
+            target = f"this {brand_name} product"
+        feat_clause = (
+            f" Mention at least one of these visible details: {', '.join(key_features[:3])}."
+            if key_features else ""
+        )
+        specificity_mandate = (
+            f"The caption MUST mention {target} by name and write specifically "
+            f"about it.{feat_clause} Do NOT write generic copy that could apply "
+            "to any product — this caption is about this exact product."
         )
 
     sys = (
@@ -714,9 +756,10 @@ def generate_caption(
         + (
             "Reference the actual product or scene visible in the image. "
             "Make the copy feel anchored to what is pictured — do not write generic copy. "
-            if image_block
+            if image_block and not specificity_mandate
             else ""
         )
+        + (f"\n{specificity_mandate}\n" if specificity_mandate else "")
         + f"{hashtag_rule} "
         f"{emoji_rule} "
         "No quotation marks around the caption. No preamble like 'Here is...'. "

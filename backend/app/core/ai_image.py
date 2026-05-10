@@ -103,13 +103,28 @@ def _map_openai_exception(exc: Exception) -> AIProviderError:
 
 _VISION_SYSTEM = (
     "You are a product-photography analyst for an Instagram content tool. "
-    "Given an uploaded image, return a tight JSON object with exactly these keys: "
-    "product_description (one short sentence describing what's in the image, "
-    "no marketing fluff), detected_style (one of: 'luxury', 'minimal', 'vibrant', "
-    "'clean', 'playful'), dominant_colors (array of 2-4 hex strings starting with #), "
+    "Given an uploaded image, identify the SPECIFIC product as concretely as you "
+    "can — read the packaging, look for the brand mark, name the model. Return a "
+    "tight JSON object with exactly these keys: "
+    "product_description (one short sentence — what is in the image), "
+    "brand_name (string — the brand visible on the packaging or product, or "
+    "empty string if no brand mark is visible), "
+    "product_name (string — the specific product name or model from the label, "
+    "or empty string if not visible), "
+    "key_features (array of up to 4 short noun phrases describing distinctive "
+    "details a viewer would notice — e.g. 'gold cap', 'rose-gold lettering', "
+    "'30ml glass bottle' — empty array if none stand out), "
+    "label_text (string — verbatim text visible on the label/packaging, "
+    "preserving the original language; empty string if none readable), "
+    "detected_style (one of: 'luxury', 'minimal', 'vibrant', 'clean', 'playful'), "
+    "dominant_colors (array of 2-4 hex strings starting with #), "
     "suggested_tone (one of: 'professional', 'friendly', 'luxurious', 'playful', "
-    "'inspiring'), content_suggestions (array of exactly 3 short content angles "
-    "the creator could use, each 2-5 words). "
+    "'inspiring'), "
+    "content_suggestions (array of exactly 3 short content angles the creator "
+    "could use, each 2-5 words). "
+    "Use empty strings or empty arrays — never null — for fields you cannot "
+    "fill from the image. Do NOT invent a brand or product name; if the label "
+    "is unreadable or absent, return empty strings. "
     "Return ONLY the JSON object — no preamble, no code fences, no commentary."
 )
 
@@ -178,8 +193,19 @@ def analyze_image_url(
 
     # Normalize: ensure all expected keys exist with sane defaults so the
     # caller can store the dict directly without per-key existence checks.
+    # New product-identification fields (brand_name, product_name, key_features,
+    # label_text) drive the brand-aware caption prompt — when populated, the
+    # caption generator switches from generic copy to product-specific copy.
     normalized = {
         "product_description": str(parsed.get("product_description") or "").strip(),
+        "brand_name": str(parsed.get("brand_name") or "").strip(),
+        "product_name": str(parsed.get("product_name") or "").strip(),
+        "key_features": [
+            str(f).strip()
+            for f in (parsed.get("key_features") or [])
+            if isinstance(f, str) and str(f).strip()
+        ][:4],
+        "label_text": str(parsed.get("label_text") or "").strip(),
         "detected_style": str(parsed.get("detected_style") or "clean").strip().lower(),
         "dominant_colors": [
             c for c in (parsed.get("dominant_colors") or []) if isinstance(c, str)
@@ -201,6 +227,234 @@ def analyze_image_url(
         source=source, tokens_used=tokens,
     )
     return normalized
+
+
+# ── Image editing: GPT-Image (transform an uploaded product photo) ────────
+
+
+# OpenAI image-editing model. `gpt-image-2` exists but requires the org to
+# be verified at platform.openai.com → Settings → Organization → Verify.
+# Until that's done, `gpt-image-1` is available without verification, has
+# the same `client.images.edit()` API, and produces the same b64_json
+# inline-bytes response shape — drop-in upgrade later by changing this
+# constant.
+GPT_IMAGE_EDIT_MODEL = "gpt-image-1"
+
+# Aspect ratios accepted by `client.images.edit()` for `gpt-image-1`. Same
+# three the rest of the Post Creator surfaces use, mapped to the closest
+# supported size; portrait (4:5) → 1024x1536 is the model's portrait shape.
+_RATIO_TO_GPT_IMAGE_SIZE: dict[str, str] = {
+    "1:1": "1024x1024",
+    "4:5": "1024x1536",
+    "16:9": "1536x1024",
+}
+
+# Style descriptors lifted from the brand-identity image_style enum, keyed
+# the same way `_build_dalle_prompt` does. Kept inline here because the
+# edit-prompt phrasing is subtly different from generate-from-scratch
+# (it's about *transforming* an existing scene, not inventing one).
+_EDIT_STYLE_DESCRIPTORS: dict[str, str] = {
+    "luxurious": "luxurious refined product photography, soft directional lighting, premium materials feel",
+    "luxury": "luxurious refined product photography, soft directional lighting, premium materials feel",
+    "minimal": "minimal clean composition, generous negative space, neutral palette, soft natural light",
+    "vibrant": "vibrant saturated colors, energetic composition, contemporary lighting",
+    "playful": "playful joyful composition, warm color palette, lively styling",
+    "clean": "clean studio aesthetic, even lighting, uncluttered background",
+}
+
+
+def _build_edit_prompt(
+    description: str,
+    ratio: str,
+    brand_identity: dict | None,
+    business_profile: dict | None,
+) -> str:
+    """Compose the GPT-Image edit prompt from the user description + brand
+    + business context + the always-on "preserve product identity" tail.
+
+    Distinct from `_build_dalle_prompt` (in posts_creator.py) because edit
+    prompts must explicitly tell the model NOT to invent new objects — the
+    user's product needs to remain the visual subject. Generation prompts
+    don't have that constraint.
+    """
+    parts: list[str] = [description.strip()]
+
+    brand = brand_identity or {}
+    bp = business_profile or {}
+    style = (brand.get("image_style") or "").strip().lower()
+    tone = (brand.get("tone") or "").strip().lower()
+    primary_color = (brand.get("primary_color") or "").strip()
+
+    if style in _EDIT_STYLE_DESCRIPTORS:
+        parts.append(_EDIT_STYLE_DESCRIPTORS[style])
+    if tone and tone not in ("", "friendly"):
+        parts.append(f"{tone} mood")
+    if primary_color:
+        parts.append(f"complement the brand color {primary_color}")
+
+    industry = (bp.get("industry") or "").strip()
+    city = (bp.get("city") or "").strip()
+    if industry:
+        parts.append(f"For a {industry} brand")
+    if city:
+        parts.append(f"based in {city}")
+
+    aspect = {
+        "1:1": "square 1:1 framing for an Instagram feed post",
+        "4:5": "portrait 4:5 framing for an Instagram feed post",
+        "16:9": "landscape 16:9 framing suitable for an Instagram cover",
+    }.get(ratio, "square 1:1 framing for an Instagram feed post")
+    parts.append(aspect)
+
+    # The non-negotiable tail — every edit prompt ends with this so the
+    # transformed image keeps the user's actual product identifiable.
+    parts.append(
+        "Professional Instagram product photography. Keep the product clearly "
+        "visible and recognizable — preserve its shape, packaging, branding, "
+        "and label so it stays the same product. Do not replace or invent a "
+        "different product. No text overlays, no watermarks, no logos that "
+        "weren't already on the product."
+    )
+    return ". ".join(p for p in parts if p)
+
+
+def gpt_image_size_for_ratio(ratio: str) -> str:
+    return _RATIO_TO_GPT_IMAGE_SIZE.get(ratio, "1024x1024")
+
+
+def _download_image_bytes(image_url: str) -> bytes:
+    """Pull the source image bytes from R2 (absolute URL) or the local-fallback
+    media route (relative URL like `/api/v1/media/foo.png`).
+
+    Local relative URLs are resolved against `FRONTEND_URL` so dev (local
+    fallback) and prod (R2 absolute URLs) both work without special-casing.
+    """
+    import httpx
+    if image_url.startswith("/"):
+        # Relative URL → local media fallback. Resolve against FRONTEND_URL
+        # so the download still works in dev where R2 isn't configured.
+        base = (settings.FRONTEND_URL or "http://localhost:8000").rstrip("/")
+        full_url = f"{base}{image_url}"
+    else:
+        full_url = image_url
+    with httpx.Client(timeout=60) as http:
+        r = http.get(full_url)
+        r.raise_for_status()
+        return r.content
+
+
+def edit_product_image(
+    image_url: str,
+    *,
+    description: str,
+    ratio: str = "1:1",
+    brand_identity: dict | None = None,
+    business_profile: dict | None = None,
+    account_id: str | None = None,
+    source: AISource = "user",
+) -> dict[str, Any]:
+    """Transform an uploaded product image into a professional Instagram-ready
+    version while keeping the product recognizable.
+
+    Downloads the image at `image_url`, sends it to OpenAI's image-edit API
+    (`gpt-image-1`), uploads the transformed bytes to R2, and returns
+    `{"url": <persistent R2 URL>, "prompt_used": <full prompt>, "size": <px>}`.
+
+    Logs `provider='openai', task='image_edit'` in ai_usage_log so the admin
+    dashboard distinguishes edits from from-scratch generations.
+
+    Raises an `AIProviderError` subclass on quota / billing / transport /
+    parsing failures so the endpoint can degrade with a structured 503.
+    """
+    if source == "user":
+        _check_rate_limit(
+            provider="openai", account_id=account_id, task="image_edit",
+        )
+
+    prompt = _build_edit_prompt(description, ratio, brand_identity, business_profile)
+    size = gpt_image_size_for_ratio(ratio)
+
+    logger.info(
+        "GPT-Image edit call: model=%s size=%s prompt_len=%d account=%s source=%s",
+        GPT_IMAGE_EDIT_MODEL, size, len(prompt), account_id, source,
+    )
+
+    # Download the source image first so a transient R2 hiccup surfaces
+    # cleanly rather than as a half-formed multipart upload to OpenAI.
+    try:
+        source_bytes = _download_image_bytes(image_url)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "GPT-Image edit: source download failed url=%s class=%s: %s",
+            image_url, exc.__class__.__name__, exc,
+        )
+        raise AIProviderUnavailableError(
+            f"Failed to fetch source image: {exc}", provider="openai",
+        ) from exc
+
+    # `client.images.edit` needs a file-like with a `.name` attribute (the
+    # SDK uses it to set the multipart filename + content-type sniffing).
+    import io
+    file_obj = io.BytesIO(source_bytes)
+    file_obj.name = "source.png"
+
+    client = _openai_client()
+    try:
+        resp = client.images.edit(
+            model=GPT_IMAGE_EDIT_MODEL,
+            image=file_obj,
+            prompt=prompt,
+            size=size,
+        )
+    except AIProviderError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "GPT-Image edit failed: model=%s class=%s message=%s",
+            GPT_IMAGE_EDIT_MODEL, exc.__class__.__name__, str(exc),
+        )
+        raise _map_openai_exception(exc) from exc
+
+    try:
+        first = resp.data[0]
+    except (IndexError, AttributeError) as exc:
+        raise AIInvalidResponseError(
+            "GPT-Image edit response missing data[0]", provider="openai",
+        ) from exc
+
+    # `gpt-image-1` returns inline base64 bytes via `b64_json` — there's no
+    # ephemeral URL like DALL-E 3. Decode then re-host on R2 for stability.
+    b64 = getattr(first, "b64_json", None)
+    if not b64:
+        raise AIInvalidResponseError(
+            "GPT-Image edit returned no b64_json data", provider="openai",
+        )
+
+    import base64
+    try:
+        image_bytes = base64.b64decode(b64)
+    except (ValueError, TypeError) as exc:
+        raise AIInvalidResponseError(
+            f"GPT-Image edit returned invalid base64: {exc}", provider="openai",
+        ) from exc
+
+    final_url = upload_media(image_bytes, "ai-edited.png", "image/png")
+
+    tokens = getattr(getattr(resp, "usage", None), "total_tokens", None)
+    logger.info(
+        "GPT-Image edit success: model=%s bytes=%d tokens=%s url=%s",
+        GPT_IMAGE_EDIT_MODEL, len(image_bytes), tokens, final_url,
+    )
+    _log_usage(
+        provider="openai", task="image_edit",
+        account_id=account_id, source=source, tokens_used=tokens,
+    )
+    return {
+        "url": final_url,
+        "prompt_used": prompt,
+        "size": size,
+        "model": GPT_IMAGE_EDIT_MODEL,
+    }
 
 
 # ── Gemini exception mapping (mirrors GeminiProvider._map_exception) ─────
