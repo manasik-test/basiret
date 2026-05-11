@@ -12,6 +12,12 @@ Usage (inside the API container):
 
 If no ID is passed, the earliest-connected social account is used.
 Requires INSTAGRAM_TEST_TOKEN in the environment.
+
+INVARIANT: this script operates on an existing `social_account` row only —
+it never creates one. The OAuth `/callback` handler is the single source of
+truth for inserting `social_account` rows (Meta's `ig_user_id` is the only
+correct value for `platform_account_id`). If no row exists yet, the script
+fails fast: connect Instagram through Settings first, then re-run.
 """
 import os
 import sys

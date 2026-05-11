@@ -181,7 +181,27 @@ async def oauth_callback(
         logger.exception("Instagram OAuth network failure: %s", e)
         return _settings_redirect("exchange_failed")
 
-    # 5. Upsert social_account — scoped to the resolved user's organization
+    # 5. Upsert social_account — scoped to the resolved user's organization.
+    #
+    # CRITICAL: this callback is the ONLY code path in the entire application
+    # that may insert a `social_account` row. Every other consumer (sync,
+    # analyze, segment, insights, publishing, the Settings UI) reads rows
+    # created here. NEVER add a code path elsewhere that creates a row with
+    # a placeholder `platform_account_id`, even for dev/test convenience.
+    #
+    # Why: the upsert key is `(organization_id, platform, platform_account_id)`
+    # and `platform_account_id` is set to whatever Meta returns at
+    # `/oauth/access_token` (the real Instagram user ID). If any OTHER code
+    # path inserts a row with a guessed/stale/placeholder `platform_account_id`,
+    # the next OAuth callback's lookup-by-real-ig-user-id will miss that row
+    # and INSERT a duplicate. The duplicate then owns no real data while the
+    # stale row owns all the posts — exactly the failure mode that bit us on
+    # 2026-05-11 when a placeholder ID was stored before the user completed
+    # OAuth for the first time.
+    #
+    # Meta's `ig_user_id` is the source of truth. If you ever need to fix a
+    # stored row, fix it FROM the callback path (e.g. re-run OAuth) — never
+    # via a one-off UPDATE or INSERT elsewhere.
     account = db.query(SocialAccount).filter_by(
         platform=Platform.instagram,
         platform_account_id=ig_user_id,
@@ -221,8 +241,13 @@ def trigger_sync(
 ):
     """Trigger Instagram post sync for the user's organization accounts.
 
-    For dev/testing: if no accounts exist yet, creates one using
-    INSTAGRAM_TEST_TOKEN from .env so the pipeline can be tested.
+    Returns 400 if the org has no connected, active Instagram account —
+    sync is meaningless without one, and (intentionally) this endpoint
+    will NOT bootstrap a placeholder row even if INSTAGRAM_TEST_TOKEN is
+    set. The only legitimate code path for creating a `social_account`
+    row is the OAuth `/callback` handler, where Meta's `ig_user_id` is
+    the source of truth for `platform_account_id`. See the invariant
+    comment above the callback's upsert block for the full reasoning.
     """
     accounts = db.query(SocialAccount).filter(
         SocialAccount.organization_id == user.organization_id,
@@ -230,46 +255,11 @@ def trigger_sync(
         SocialAccount.is_active == True,
     ).all()
 
-    # Dev convenience: bootstrap a test account if none exist
-    if not accounts and settings.INSTAGRAM_TEST_TOKEN:
-        # Pull the real username + IG user id from /me so the seeded row matches
-        # the account the token actually points at. Fall back to placeholders if
-        # the API is unreachable (dev offline) — the row is still usable for tests.
-        ig_user_id = "test_user"
-        ig_username = "test_user"
-        try:
-            with httpx.Client(timeout=10) as client:
-                me_resp = client.get(ME_URL, params={
-                    "fields": "id,username",
-                    "access_token": settings.INSTAGRAM_TEST_TOKEN,
-                })
-            if me_resp.status_code == 200:
-                me = me_resp.json()
-                ig_user_id = str(me.get("id") or ig_user_id)
-                ig_username = me.get("username") or ig_username
-            else:
-                logger.warning(
-                    "Bootstrap /me failed (%s): %s — falling back to placeholders",
-                    me_resp.status_code, me_resp.text[:200],
-                )
-        except httpx.HTTPError as exc:
-            logger.warning("Bootstrap /me network error: %s — falling back to placeholders", exc)
-
-        test_account = SocialAccount(
-            platform=Platform.instagram,
-            platform_account_id=ig_user_id,
-            username=ig_username,
-            access_token_encrypted=encrypt_token(settings.INSTAGRAM_TEST_TOKEN),
-            token_expires_at=datetime.now(timezone.utc) + timedelta(days=60),
-            organization_id=user.organization_id,
-        )
-        db.add(test_account)
-        db.commit()
-        db.refresh(test_account)
-        accounts = [test_account]
-
     if not accounts:
-        raise HTTPException(status_code=404, detail="No active Instagram accounts found")
+        raise HTTPException(
+            status_code=400,
+            detail="Connect an Instagram account first via Settings → Organization.",
+        )
 
     task_ids = []
     for account in accounts:

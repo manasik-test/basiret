@@ -5,6 +5,12 @@ under a different key and sync is failing with "Failed to decrypt".
 
 Run inside the API container:
     docker compose -f docker-compose.prod.yml exec api python3 scripts/seed_production.py
+
+INVARIANT: this script operates on an existing `social_account` row only —
+it never creates one. The OAuth `/callback` handler is the single source of
+truth for inserting `social_account` rows (Meta's `ig_user_id` is the only
+correct value for `platform_account_id`). If `social_account` is empty,
+this script fails fast rather than fabricating a placeholder row.
 """
 import os
 import sys

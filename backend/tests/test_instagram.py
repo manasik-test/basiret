@@ -239,6 +239,142 @@ def test_callback_full_flow_connects_account(client, db, starter_user):
     assert account.is_active is True
 
 
+def test_callback_reconnect_same_ig_keeps_single_row(client, db, starter_user):
+    """Connect → reconnect with the SAME Instagram account must update the
+    existing row in place, NOT create a duplicate. Guards the invariant in
+    instagram.py: Meta's `ig_user_id` is the upsert key, and the second
+    callback's lookup must hit the row the first callback created.
+    """
+    user, org, _ = starter_user
+    from app.models.social_account import SocialAccount, Platform
+
+    fake_short = MagicMock(status_code=200, json=lambda: {"access_token": "short_tok", "user_id": "7777"})
+    fake_long = MagicMock(status_code=200, json=lambda: {"access_token": "long_tok", "expires_in": 5_184_000})
+    fake_me = MagicMock(status_code=200, json=lambda: {"id": "7777", "username": "same_handle"})
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, *_, **__):
+            return fake_short
+
+        async def get(self, url, *_, **__):
+            return fake_long if "access_token" in url else fake_me
+
+    # First connect — state JWT #1 (nonces are one-time-use)
+    state1 = create_oauth_state_token(str(user.id))
+    with patch("app.api.v1.instagram.httpx.AsyncClient", FakeAsyncClient):
+        resp1 = client.get(
+            f"/api/v1/instagram/callback?code=fake_code_1&state={state1}",
+            follow_redirects=False,
+        )
+    assert resp1.status_code == 302
+    assert "ig=connected" in resp1.headers["location"]
+
+    # Second connect — state JWT #2, same Meta `ig_user_id` (the user
+    # reconnected the same IG account)
+    state2 = create_oauth_state_token(str(user.id))
+    with patch("app.api.v1.instagram.httpx.AsyncClient", FakeAsyncClient):
+        resp2 = client.get(
+            f"/api/v1/instagram/callback?code=fake_code_2&state={state2}",
+            follow_redirects=False,
+        )
+    assert resp2.status_code == 302
+    assert "ig=connected" in resp2.headers["location"]
+
+    # Exactly ONE row, refreshed by the second callback.
+    rows = db.query(SocialAccount).filter_by(
+        organization_id=org.id,
+        platform=Platform.instagram,
+        platform_account_id="7777",
+    ).all()
+    assert len(rows) == 1, f"expected single row after reconnect, got {len(rows)}"
+    assert rows[0].is_active is True
+
+
+def test_callback_reconnect_different_ig_creates_second_row(client, db, starter_user):
+    """Connect IG account A → reconnect with IG account B (same org) must
+    create a SECOND row. Multi-account-per-org is a real (Enterprise)
+    feature and the callback must not collapse distinct accounts into one.
+    """
+    user, org, _ = starter_user
+    from app.models.social_account import SocialAccount, Platform
+
+    fake_long = MagicMock(status_code=200, json=lambda: {"access_token": "long_tok", "expires_in": 5_184_000})
+
+    def _make_client(ig_user_id: str, username: str):
+        fake_short = MagicMock(status_code=200, json=lambda: {"access_token": "short_tok", "user_id": ig_user_id})
+        fake_me = MagicMock(status_code=200, json=lambda: {"id": ig_user_id, "username": username})
+
+        class FakeAsyncClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def post(self, *_, **__):
+                return fake_short
+
+            async def get(self, url, *_, **__):
+                return fake_long if "access_token" in url else fake_me
+
+        return FakeAsyncClient
+
+    # Connect account A
+    state1 = create_oauth_state_token(str(user.id))
+    with patch("app.api.v1.instagram.httpx.AsyncClient", _make_client("1111", "account_a")):
+        resp1 = client.get(
+            f"/api/v1/instagram/callback?code=fake_code_a&state={state1}",
+            follow_redirects=False,
+        )
+    assert resp1.status_code == 302
+    assert "ig=connected" in resp1.headers["location"]
+
+    # Connect account B
+    state2 = create_oauth_state_token(str(user.id))
+    with patch("app.api.v1.instagram.httpx.AsyncClient", _make_client("2222", "account_b")):
+        resp2 = client.get(
+            f"/api/v1/instagram/callback?code=fake_code_b&state={state2}",
+            follow_redirects=False,
+        )
+    assert resp2.status_code == 302
+    assert "ig=connected" in resp2.headers["location"]
+
+    rows = (
+        db.query(SocialAccount)
+        .filter_by(organization_id=org.id, platform=Platform.instagram)
+        .order_by(SocialAccount.connected_at.asc())
+        .all()
+    )
+    ids = {r.platform_account_id for r in rows}
+    assert "1111" in ids and "2222" in ids, f"expected both accounts present, got {ids}"
+    assert len([r for r in rows if r.platform_account_id in {"1111", "2222"}]) == 2
+
+
+def test_sync_without_account_returns_400(client, starter_user):
+    """No connected IG account → /sync must refuse with a clear 400.
+
+    Previously this path silently bootstrapped a placeholder `social_account`
+    row from INSTAGRAM_TEST_TOKEN, which produced the same class of
+    stale-platform-account-id duplicate that bit us in prod on 2026-05-11.
+    The single source of truth for `social_account` rows is the OAuth
+    callback; /sync must fail cleanly when there's nothing to sync.
+    """
+    _, _, token = starter_user
+    resp = client.post(
+        "/api/v1/instagram/sync",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "Connect" in detail and "Instagram" in detail
+
+
 def test_callback_state_replay_rejected(client, starter_user):
     """A previously-consumed state JWT must NOT be replayable, even within its TTL."""
     user, _, _ = starter_user
