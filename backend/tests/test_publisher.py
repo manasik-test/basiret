@@ -119,7 +119,9 @@ async def _no_sleep(_seconds):
 
 
 def test_publish_image_post(db, insights_user):
-    """Image: POST media → GET status (FINISHED) → POST media_publish = 3 calls."""
+    """Image: POST media → GET status (FINISHED) → POST media_publish →
+    GET ?fields=permalink = 4 calls. Permalink saved on the post.
+    """
     _user, org, _token = insights_user
     account = _make_account(db, org.id)
     post = _make_post(db, org.id, account.id)
@@ -128,6 +130,7 @@ def test_publish_image_post(db, insights_user):
         ("POST", _resp(200, {"id": "container-1"})),
         ("GET",  _resp(200, {"status_code": "FINISHED"})),
         ("POST", _resp(200, {"id": "PLATFORM-POST-1"})),
+        ("GET",  _resp(200, {"permalink": "https://www.instagram.com/p/CXyZ123/"})),
     ]
     patcher, fake = _patch_client(responses)
     with patcher, patch.object(ig.asyncio, "sleep", _no_sleep):
@@ -137,11 +140,41 @@ def test_publish_image_post(db, insights_user):
     db.refresh(post)
     assert post.status == "published"
     assert post.platform_post_id == "PLATFORM-POST-1"
+    assert post.permalink == "https://www.instagram.com/p/CXyZ123/"
     assert post.published_at is not None
-    assert len(fake.calls) == 3
+    assert len(fake.calls) == 4
     assert fake.calls[0][0] == "POST" and "/media" in fake.calls[0][1] and "media_publish" not in fake.calls[0][1]
     assert fake.calls[1][0] == "GET"  and fake.calls[1][2]["fields"] == "status_code"
     assert fake.calls[2][0] == "POST" and "media_publish" in fake.calls[2][1]
+    assert fake.calls[3][0] == "GET"  and fake.calls[3][2]["fields"] == "permalink"
+
+
+def test_publish_permalink_soft_fails_post_still_published(db, insights_user):
+    """If the permalink fetch fails (e.g. rate-limit on the follow-up GET),
+    the post must STILL be marked published — the publish itself succeeded
+    on Meta's side; permalink is enrichment, not a publish prerequisite.
+    """
+    _user, org, _token = insights_user
+    account = _make_account(db, org.id)
+    post = _make_post(db, org.id, account.id)
+
+    responses = [
+        ("POST", _resp(200, {"id": "container-1"})),
+        ("GET",  _resp(200, {"status_code": "FINISHED"})),
+        ("POST", _resp(200, {"id": "PLATFORM-POST-1"})),
+        # Permalink fetch returns 429 → _fetch_permalink swallows + returns None
+        ("GET",  _resp(429, {"error": {"code": 17, "message": "User rate limit"}})),
+    ]
+    patcher, _ = _patch_client(responses)
+    with patcher, patch.object(ig.asyncio, "sleep", _no_sleep):
+        platform_post_id = asyncio.run(ig.publish_post(account, post, db))
+
+    assert platform_post_id == "PLATFORM-POST-1"
+    db.refresh(post)
+    assert post.status == "published"
+    assert post.platform_post_id == "PLATFORM-POST-1"
+    assert post.permalink is None
+    assert post.published_at is not None
 
 
 def test_publish_carousel(db, insights_user):
@@ -172,21 +205,25 @@ def test_publish_carousel(db, insights_user):
         ("POST", _resp(200, {"id": "carousel-1"})),
         ("GET",  _resp(200, {"status_code": "FINISHED"})),
         ("POST", _resp(200, {"id": "PLATFORM-CAROUSEL-1"})),
+        ("GET",  _resp(200, {"permalink": "https://www.instagram.com/p/CarOu1/"})),
     ]
     patcher, fake = _patch_client(responses)
     with patcher, patch.object(ig.asyncio, "sleep", _no_sleep):
         platform_post_id = asyncio.run(ig.publish_post(account, post, db))
 
     assert platform_post_id == "PLATFORM-CAROUSEL-1"
-    assert len(fake.calls) == 9
+    assert len(fake.calls) == 10
     # Item create + poll triples (calls 0,2,4 are creates with is_carousel_item)
     for i in (0, 2, 4):
         assert fake.calls[i][2]["is_carousel_item"] == "true"
     # Carousel container creation at call 6
     assert fake.calls[6][2]["media_type"] == "CAROUSEL"
     assert fake.calls[6][2]["children"] == "item-1,item-2,item-3"
-    # Final publish at call 8
+    # Final publish at call 8, then permalink fetch at call 9
     assert "media_publish" in fake.calls[8][1]
+    assert fake.calls[9][0] == "GET" and fake.calls[9][2]["fields"] == "permalink"
+    db.refresh(post)
+    assert post.permalink == "https://www.instagram.com/p/CarOu1/"
 
 
 def test_publish_video_polls_until_ready(db, insights_user):
@@ -205,14 +242,16 @@ def test_publish_video_polls_until_ready(db, insights_user):
         ("GET",  _resp(200, {"status_code": "IN_PROGRESS"})),
         ("GET",  _resp(200, {"status_code": "FINISHED"})),
         ("POST", _resp(200, {"id": "PLATFORM-REEL-1"})),
+        ("GET",  _resp(200, {"permalink": "https://www.instagram.com/reel/ReeL1/"})),
     ]
     patcher, fake = _patch_client(responses)
     with patcher, patch.object(ig.asyncio, "sleep", _no_sleep):
         platform_post_id = asyncio.run(ig.publish_post(account, post, db))
 
     assert platform_post_id == "PLATFORM-REEL-1"
-    assert len(fake.calls) == 5
-    assert all(c[0] == "GET" for c in fake.calls[1:4])
+    assert len(fake.calls) == 6
+    assert all(c[0] == "GET" for c in fake.calls[1:4])  # the 3 status polls
+    assert fake.calls[5][0] == "GET" and fake.calls[5][2]["fields"] == "permalink"
 
 
 def test_publish_container_stuck_in_progress_times_out(db, insights_user):
@@ -460,11 +499,12 @@ def test_concurrent_dispatch_while_publishing_no_second_publish(db, insights_use
     post = _make_post(db, org.id, account.id, status="scheduled",
                       scheduled_at=datetime.now(timezone.utc) - timedelta(minutes=1))
 
-    # First call: full happy path (image post).
+    # First call: full happy path (image post + permalink fetch).
     responses_first = [
         ("POST", _resp(200, {"id": "container-1"})),
         ("GET",  _resp(200, {"status_code": "FINISHED"})),
         ("POST", _resp(200, {"id": "PLATFORM-POST-1"})),
+        ("GET",  _resp(200, {"permalink": "https://www.instagram.com/p/Conc1/"})),
     ]
     patcher1, fake1 = _patch_client(responses_first)
     with patcher1, patch.object(ig.asyncio, "sleep", _no_sleep):

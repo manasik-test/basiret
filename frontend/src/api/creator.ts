@@ -33,6 +33,11 @@ export interface ScheduledPost {
   published_at: string | null
   status: PostStatus
   platform_post_id: string | null
+  // Public Instagram URL (shortcode-based). Populated by the publisher
+  // after /media_publish via GET /{media_id}?fields=permalink. NULL when
+  // the post is pre-fix (legacy) or the post-publish permalink fetch
+  // soft-failed (the post itself is live on IG either way).
+  permalink: string | null
   ai_generated_media: boolean
   ai_generated_caption: boolean
   source_image_url: string | null

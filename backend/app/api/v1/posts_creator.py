@@ -129,6 +129,7 @@ def _serialize(post: ScheduledPost) -> dict:
         "published_at": post.published_at.isoformat() if post.published_at else None,
         "status": post.status,
         "platform_post_id": post.platform_post_id,
+        "permalink": post.permalink,
         "ai_generated_media": post.ai_generated_media,
         "ai_generated_caption": post.ai_generated_caption,
         "source_image_url": post.source_image_url,

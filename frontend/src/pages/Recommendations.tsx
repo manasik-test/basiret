@@ -864,9 +864,10 @@ function PostRow({
     )
   }
 
-  const permalink = post.platform_post_id
-    ? `https://www.instagram.com/p/${post.platform_post_id}/`
-    : null
+  // The backend fetches and stores the real shortcode-based URL after
+  // /media_publish. Falling back to constructing one from platform_post_id
+  // produces 404s — IG public URLs use shortcodes, not numeric ids.
+  const permalink = post.permalink
 
   return (
     <div className="cp-row-card">

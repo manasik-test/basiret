@@ -61,6 +61,11 @@ class ScheduledPost(Base):
     published_at = Column(DateTime(timezone=True))
     status = Column(String(20), nullable=False, default="draft", server_default="draft")
     platform_post_id = Column(String(255))
+    # Public IG URL (uses a shortcode, NOT the numeric platform_post_id).
+    # Fetched via GET /{media_id}?fields=permalink after /media_publish
+    # succeeds. NULL means either: pre-fix legacy row, or the post-publish
+    # permalink fetch failed (soft failure — post is live on IG either way).
+    permalink = Column(String(500))
     ai_generated_media = Column(Boolean, nullable=False, default=False, server_default="false")
     ai_generated_caption = Column(Boolean, nullable=False, default=False, server_default="false")
     source_image_url = Column(Text)

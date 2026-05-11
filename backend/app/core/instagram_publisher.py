@@ -154,6 +154,47 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict[str, Any]) -> d
     return resp.json()
 
 
+async def _fetch_permalink(
+    client: httpx.AsyncClient,
+    media_id: str,
+    access_token: str,
+) -> str | None:
+    """Best-effort fetch of the public IG URL for a freshly-published media.
+
+    Meta's `/media_publish` returns a numeric media id, but the public URL
+    uses a shortcode (`/p/CXyZAbCdEf-/`). The shortcode is only retrievable
+    via a follow-up GET `/{media_id}?fields=permalink`.
+
+    This is a SOFT failure: the post is already live on Instagram by the
+    time this runs. A missing permalink should not flip the publish to
+    failed. Returns None on any error (network, rate-limit, parse) and
+    logs at WARNING for diagnostics.
+    """
+    try:
+        result = await _get(
+            client,
+            f"{GRAPH_BASE}/{media_id}",
+            {"fields": "permalink", "access_token": access_token},
+        )
+        link = result.get("permalink")
+        if not isinstance(link, str) or not link.strip():
+            logger.warning("permalink fetch returned empty for media_id=%s", media_id)
+            return None
+        return link
+    except PublishError as exc:
+        logger.warning(
+            "permalink fetch failed for media_id=%s (code=%s): %s — leaving NULL",
+            media_id, exc.code, exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "permalink fetch unexpected error for media_id=%s: %s — leaving NULL",
+            media_id, exc,
+        )
+        return None
+
+
 async def _wait_for_container_ready(
     client: httpx.AsyncClient,
     container_id: str,
@@ -338,6 +379,7 @@ async def publish_post(
     caption = _compose_caption(post)
     media_type = _resolve_media_type(post)
 
+    permalink: str | None = None
     try:
         async with httpx.AsyncClient() as client:
             if media_type == "carousel":
@@ -358,6 +400,12 @@ async def publish_post(
                 platform_post_id = await _publish_image(
                     client, ig_user_id, access_token, image_url, caption,
                 )
+
+            # Fetch the public IG URL (shortcode-based — the numeric
+            # platform_post_id alone is NOT enough to build a valid URL).
+            # This is a soft failure: the post itself is already live, so a
+            # missing permalink should NOT mark the publish as failed.
+            permalink = await _fetch_permalink(client, platform_post_id, access_token)
     except PublishError as exc:
         # Token expired → mark account so the dispatcher stops queuing it
         # and the UI can show a "reconnect" banner.
@@ -381,11 +429,12 @@ async def publish_post(
     post.status = "published"
     post.published_at = datetime.now(timezone.utc)
     post.platform_post_id = platform_post_id
+    post.permalink = permalink
     post.error_message = None
     db.commit()
     logger.info(
-        "published post=%s account=%s platform_post_id=%s media_type=%s",
-        post.id, social_account.id, platform_post_id, media_type,
+        "published post=%s account=%s platform_post_id=%s permalink=%s media_type=%s",
+        post.id, social_account.id, platform_post_id, permalink or "<missing>", media_type,
     )
     return platform_post_id
 

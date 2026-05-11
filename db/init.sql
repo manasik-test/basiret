@@ -300,6 +300,9 @@ CREATE TABLE scheduled_post (
     published_at TIMESTAMPTZ,
     status VARCHAR(20) NOT NULL DEFAULT 'draft',
     platform_post_id VARCHAR(255),
+    -- Public IG URL (shortcode-based). Fetched via GET /{media_id}?fields=permalink
+    -- after /media_publish succeeds. NULL = not yet fetched or fetch failed.
+    permalink VARCHAR(500),
     ai_generated_media BOOLEAN NOT NULL DEFAULT FALSE,
     ai_generated_caption BOOLEAN NOT NULL DEFAULT FALSE,
     source_image_url TEXT,

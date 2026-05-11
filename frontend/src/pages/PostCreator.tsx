@@ -1334,9 +1334,10 @@ function StepSchedule({
         const post = await fetchPost(publishing.postId)
         if (cancelled) return
         if (post.status === 'published') {
-          const permalink = post.platform_post_id
-            ? `https://www.instagram.com/p/${post.platform_post_id}/`
-            : null
+          // Use the permalink the backend fetched from Meta. Numeric
+          // platform_post_id is NOT a valid public URL fragment — IG
+          // public URLs are shortcode-based (/p/CXyZAbCdEf-/).
+          const permalink = post.permalink
           setPublishing({ postId: publishing.postId, status: 'success', permalink })
           return
         }
