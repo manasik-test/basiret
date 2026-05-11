@@ -61,11 +61,13 @@ TOKEN_EXPIRED_CODE = 190
 # a useless hour of nothing.
 RATE_LIMIT_CODES = {4, 17, 32, 613}
 
-# Code 9007 ("Media ID not available") is what Meta returns when the
-# container exists but hasn't finished processing yet. With container
-# polling in place this should be unreachable; if it still surfaces, it's
-# a brief readiness gap — treat as transient with a short backoff.
-CONTAINER_NOT_READY_CODE = 9007
+# Codes that mean "the request itself is fine, but the resource isn't yet
+# ready" — short retry, NOT the 1h rate-limit backoff. Currently just 9007
+# ("Media ID is not available"), which Meta returns when /media_publish is
+# called before the container's `status_code` has flipped to FINISHED. With
+# the polling layer in place this should be unreachable; if it does surface
+# in the wild (a race between FINISHED and publish), treat as transient.
+TRANSIENT_READINESS_CODES = {9007}
 
 
 class PublishError(Exception):
@@ -80,7 +82,7 @@ class PublishError(Exception):
         is_token_expired: bool = False,
         is_rate_limited: bool = False,
         is_retryable: bool = False,
-        is_container_not_ready: bool = False,
+        is_transient_readiness: bool = False,
     ):
         super().__init__(message)
         self.code = code
@@ -88,7 +90,7 @@ class PublishError(Exception):
         self.is_token_expired = is_token_expired
         self.is_rate_limited = is_rate_limited
         self.is_retryable = is_retryable
-        self.is_container_not_ready = is_container_not_ready
+        self.is_transient_readiness = is_transient_readiness
 
 
 def _parse_graph_error(resp: httpx.Response) -> PublishError:
@@ -105,12 +107,12 @@ def _parse_graph_error(resp: httpx.Response) -> PublishError:
 
     is_token_expired = code == TOKEN_EXPIRED_CODE
     is_rate_limited = code in RATE_LIMIT_CODES or resp.status_code == 429
-    is_container_not_ready = code == CONTAINER_NOT_READY_CODE
-    # 5xx, real rate limits, and container-not-ready are retryable; everything
+    is_transient_readiness = code in TRANSIENT_READINESS_CODES
+    # 5xx, real rate limits, and transient-readiness are retryable; everything
     # else is terminal so we don't burn quota repeatedly publishing a
-    # malformed post. Container-not-ready uses a SHORT backoff (handled by
+    # malformed post. Transient-readiness uses a SHORT backoff (handled by
     # the task wrapper) — not the 1-hour rate-limit countdown.
-    is_retryable = is_rate_limited or is_container_not_ready or 500 <= resp.status_code < 600
+    is_retryable = is_rate_limited or is_transient_readiness or 500 <= resp.status_code < 600
 
     return PublishError(
         msg,
@@ -119,7 +121,7 @@ def _parse_graph_error(resp: httpx.Response) -> PublishError:
         is_token_expired=is_token_expired,
         is_rate_limited=is_rate_limited,
         is_retryable=is_retryable,
-        is_container_not_ready=is_container_not_ready,
+        is_transient_readiness=is_transient_readiness,
     )
 
 

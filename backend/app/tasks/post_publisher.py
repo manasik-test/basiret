@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from celery import Task
 from sqlalchemy import text
@@ -62,6 +62,14 @@ logger = logging.getLogger(__name__)
 # in one minute and trip Instagram's per-token rate limit. Anything still
 # pending after the cap waits for the next tick (60s later).
 DISPATCH_BATCH_LIMIT = 10
+
+# Stale-publishing recovery window. If a worker crashed mid-publish (kernel
+# OOM, segfault, container shot mid-task), the row stays in `publishing`
+# forever — no Celery retry queued, no dispatcher re-pickup. After this
+# many seconds the dispatcher will reclaim it. Image publishes take <10s,
+# reels take 30s-2m, so 10 minutes is comfortably outside the legitimate
+# work window.
+STALE_PUBLISHING_RECOVERY_SECONDS = 600
 
 # Backoff schedule by failure class:
 #   * Real Meta rate limit (codes 4/17/32/613 or HTTP 429) — Meta itself
@@ -90,27 +98,56 @@ def _run_async(coro):
 def _claim_post(db: Session, post_id: str) -> bool:
     """Atomically claim a scheduled post for publishing.
 
-    Returns True if this task instance now owns the row (status flipped from
-    `scheduled` to `publishing`), False if no row was eligible (already
-    settled, already in-flight by another worker, or doesn't exist).
+    Returns True if this task instance now owns the row, False if no row
+    was eligible (already settled, freshly in-flight by another worker, or
+    doesn't exist).
 
-    The UPDATE ... RETURNING pattern serializes against any concurrent
-    claim attempt at the row level — only one caller can flip a given row
-    from `scheduled` to `publishing`. Beat dispatches that race with the
-    "Post now" API path resolve cleanly: whoever wins the UPDATE proceeds;
-    the loser sees `None` and short-circuits.
+    Two claim conditions are accepted:
+      1. `status='scheduled'` — the normal beat / Post-now path
+      2. `status='publishing' AND publishing_started_at < NOW() - 10min` —
+         stale-publishing recovery (the previous worker crashed before
+         settling the row to published/failed)
+
+    `publishing_started_at` is set to NOW() inside the same UPDATE so the
+    10-minute window restarts from this claim. The UPDATE ... RETURNING
+    pattern serializes against any concurrent claim attempt at the row
+    level — only one worker can flip the row at a time.
     """
     row = db.execute(
         text(
             "UPDATE scheduled_post "
-            "SET status = 'publishing', error_message = NULL "
-            "WHERE id = :id AND status = 'scheduled' "
+            "SET status = 'publishing', "
+            "    publishing_started_at = NOW(), "
+            "    error_message = NULL "
+            "WHERE id = :id AND ("
+            "    status = 'scheduled' "
+            "    OR ("
+            "        status = 'publishing' "
+            "        AND publishing_started_at IS NOT NULL "
+            "        AND publishing_started_at < NOW() - (:stale_seconds * INTERVAL '1 second')"
+            "    )"
+            ") "
             "RETURNING id"
         ),
-        {"id": post_id},
+        {"id": post_id, "stale_seconds": STALE_PUBLISHING_RECOVERY_SECONDS},
     ).fetchone()
     db.commit()
     return row is not None
+
+
+def _bump_publishing_started_at(db: Session, post_id: str) -> None:
+    """Restart the 10-minute stale window when scheduling a Celery retry.
+
+    Without this, a long retry (e.g. the 1h rate-limit countdown) would
+    leave the row eligible for stale-recovery dispatch after 10 minutes,
+    racing the legitimate Celery-queued retry. Bumping the timestamp on
+    each retry keeps the row exclusive to the current task instance.
+    """
+    db.execute(
+        text("UPDATE scheduled_post SET publishing_started_at = NOW() WHERE id = :id"),
+        {"id": post_id},
+    )
+    db.commit()
 
 
 @celery.task(name="publish_scheduled_post", bind=True, max_retries=3)
@@ -182,9 +219,11 @@ def publish_scheduled_post(self: Task, post_id: str) -> dict:
                 # account.needs_reauth before raising; nothing to do here.
                 return {"status": "failed", "reason": "token_expired"}
 
-            # Real Meta rate limit → 1-hour backoff. Status stays
-            # `publishing` so the dispatcher does NOT re-pick it up; the
-            # retry comes from Celery itself.
+            # Real Meta rate limit (codes 4/17/32/613 or HTTP 429) →
+            # 1-hour backoff. Status stays `publishing`. Bump
+            # publishing_started_at so the 10-minute stale-recovery
+            # window restarts from now and the dispatcher doesn't race
+            # the legitimate Celery-queued retry.
             if exc.is_rate_limited:
                 logger.info(
                     "publish %s rate-limited (code=%s); Celery retry in %ss",
@@ -194,13 +233,14 @@ def publish_scheduled_post(self: Task, post_id: str) -> dict:
                 # actively retrying this row, not giving up.
                 post.status = "publishing"
                 db.commit()
+                _bump_publishing_started_at(db, post_id)
                 raise self.retry(exc=exc, countdown=RATE_LIMIT_RETRY_SECONDS)
 
-            # Container-not-ready (code 9007) → short backoff, capped at
+            # Transient readiness (code 9007) → short backoff, capped at
             # CONTAINER_NOT_READY_MAX_RETRIES to bound the worst case. With
             # the publisher's polling layer this branch should be unreachable
             # in practice; the cap is a safety net.
-            if exc.is_container_not_ready:
+            if exc.is_transient_readiness:
                 if self.request.retries >= CONTAINER_NOT_READY_MAX_RETRIES:
                     logger.warning(
                         "publish %s exhausted container-not-ready retries", post_id,
@@ -208,18 +248,21 @@ def publish_scheduled_post(self: Task, post_id: str) -> dict:
                     return {"status": "failed", "reason": "container_not_ready_exhausted"}
                 post.status = "publishing"
                 db.commit()
+                _bump_publishing_started_at(db, post_id)
                 logger.info(
-                    "publish %s container not ready (code 9007); Celery retry in %ss",
+                    "publish %s transient readiness (code 9007); Celery retry in %ss",
                     post_id, CONTAINER_NOT_READY_RETRY_SECONDS,
                 )
                 raise self.retry(exc=exc, countdown=CONTAINER_NOT_READY_RETRY_SECONDS)
 
-            # Other retryable (5xx, network, container timeout) → short
-            # exponential backoff.
+            # Other retryable (5xx, network, container poll timeout) →
+            # short exponential backoff. Same publishing_started_at bump
+            # as the long-retry branches above.
             if exc.is_retryable:
                 countdown = DEFAULT_RETRY_SECONDS * (2 ** self.request.retries)
                 post.status = "publishing"
                 db.commit()
+                _bump_publishing_started_at(db, post_id)
                 logger.info(
                     "publish %s transient failure (code=%s); Celery retry in %ss",
                     post_id, exc.code, countdown,
@@ -238,32 +281,47 @@ def publish_scheduled_post(self: Task, post_id: str) -> dict:
 
 @celery.task(name="dispatch_due_posts")
 def dispatch_due_posts() -> dict:
-    """Beat-driven dispatcher. Picks up scheduled+due posts ONLY (never
-    in-flight `publishing` rows — Celery's own retry mechanism owns those)
-    and queues per-post publish tasks. Runs every minute.
+    """Beat-driven dispatcher. Queues per-post publish tasks for rows that
+    are due to start publishing. Runs every minute.
+
+    Two cases:
+      1. Normal: status='scheduled' AND scheduled_at<=now
+      2. Stale-publishing recovery: status='publishing' AND
+         publishing_started_at < now - STALE_PUBLISHING_RECOVERY_SECONDS
+         (handles the case where a worker crashed mid-publish and left
+         the row orphaned in `publishing`)
 
     Caps at DISPATCH_BATCH_LIMIT per tick so a sudden backlog doesn't
     overwhelm Instagram's per-token rate limit.
 
-    The strict `status='scheduled'` filter is load-bearing: re-dispatching
-    `status='publishing'` rows produces a tight retry loop because each
-    new dispatch creates a fresh Meta media container and tries to publish
-    it. Beat fires once per minute; an actively-retrying task may also fire
-    within that minute via Celery's retry queue — double-dispatching means
-    double the Meta API calls, double the quota burn.
+    The stale-publishing branch is what prevents both
+      (a) a crashed worker pinning a row in `publishing` forever, and
+      (b) the 2026-05-11 tight retry loop — that one came from the old
+          filter unconditionally re-dispatching ALL `publishing` rows,
+          not just stale ones. The 10-minute window cleanly separates
+          "Celery owns this row" from "the worker that owned this row
+          is gone".
     """
     db: Session = SessionLocal()
     queued: list[str] = []
     try:
         now = datetime.now(timezone.utc)
+        stale_cutoff = now - timedelta(seconds=STALE_PUBLISHING_RECOVERY_SECONDS)
 
         rows = (
             db.query(ScheduledPost)
             .filter(
-                ScheduledPost.status == "scheduled",
-                ScheduledPost.scheduled_at <= now,
+                (
+                    (ScheduledPost.status == "scheduled")
+                    & (ScheduledPost.scheduled_at <= now)
+                )
+                | (
+                    (ScheduledPost.status == "publishing")
+                    & (ScheduledPost.publishing_started_at.isnot(None))
+                    & (ScheduledPost.publishing_started_at < stale_cutoff)
+                )
             )
-            .order_by(ScheduledPost.scheduled_at.asc())
+            .order_by(ScheduledPost.scheduled_at.asc().nullsfirst())
             .limit(DISPATCH_BATCH_LIMIT)
             .all()
         )

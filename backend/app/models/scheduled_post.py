@@ -68,6 +68,11 @@ class ScheduledPost(Base):
     content_plan_day = Column(Date)
     draft_expires_at = Column(DateTime(timezone=True))
     error_message = Column(Text)
+    # Set by the publisher's atomic claim. Powers stale-publishing recovery:
+    # if a worker crashes mid-publish, dispatch_due_posts picks the row back
+    # up after publishing_started_at is older than 10 minutes. NULL means
+    # "not currently publishing".
+    publishing_started_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

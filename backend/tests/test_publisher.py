@@ -253,7 +253,7 @@ def test_publish_container_stuck_in_progress_times_out(db, insights_user):
         asyncio.run(ig.publish_post(account, post, db))
 
     assert exc_info.value.is_retryable is True
-    assert exc_info.value.is_container_not_ready is False
+    assert exc_info.value.is_transient_readiness is False
     # No /media_publish call should ever have been issued.
     publish_calls = [c for c in fake.calls if "media_publish" in c[1]]
     assert publish_calls == []
@@ -308,7 +308,7 @@ def test_publish_handles_token_expired(db, insights_user):
 
 def test_real_rate_limit_code_classified_correctly(db, insights_user):
     """Real Meta rate-limit code (17 = User Request Limit) → is_rate_limited=True,
-    is_container_not_ready=False.
+    is_transient_readiness=False.
     """
     _user, org, _token = insights_user
     account = _make_account(db, org.id)
@@ -337,14 +337,14 @@ def test_real_rate_limit_code_classified_correctly(db, insights_user):
     # Real rate limit → 1-hour countdown.
     assert captured["countdown"] == 60 * 60
     assert captured["exc"].is_rate_limited is True
-    assert captured["exc"].is_container_not_ready is False
+    assert captured["exc"].is_transient_readiness is False
     db.refresh(post)
     # Task instance owns the row across retries; stays 'publishing'.
     assert post.status == "publishing"
 
 
 def test_code_9007_treated_as_container_not_ready_short_retry(db, insights_user):
-    """Code 9007 → is_container_not_ready=True, is_rate_limited=False; retry
+    """Code 9007 → is_transient_readiness=True, is_rate_limited=False; retry
     with short (10s) countdown, not the 1h rate-limit backoff.
     """
     _user, org, _token = insights_user
@@ -376,7 +376,7 @@ def test_code_9007_treated_as_container_not_ready_short_retry(db, insights_user)
         publish_scheduled_post.run(str(post.id))
 
     assert captured["countdown"] == 10  # CONTAINER_NOT_READY_RETRY_SECONDS
-    assert captured["exc"].is_container_not_ready is True
+    assert captured["exc"].is_transient_readiness is True
     assert captured["exc"].is_rate_limited is False
 
 
@@ -511,6 +511,107 @@ def test_token_refresh_updates_db(db, insights_user):
 
 
 # ── Post-now API path ───────────────────────────────────────────────
+
+
+def test_dispatcher_picks_up_stale_publishing_row(db, insights_user):
+    """Worker crashed mid-publish → row stuck in `publishing` with an old
+    publishing_started_at. Dispatcher's stale-recovery branch must pick it
+    up so the row isn't pinned forever.
+    """
+    _user, org, _token = insights_user
+    account = _make_account(db, org.id)
+
+    # 15 minutes ago — comfortably beyond the 10-min stale window.
+    stale_ts = datetime.now(timezone.utc) - timedelta(minutes=15)
+    post = _make_post(db, org.id, account.id, status="publishing")
+    post.publishing_started_at = stale_ts
+    db.commit()
+
+    delays = []
+
+    def _record_delay(post_id):
+        delays.append(post_id)
+        return MagicMock(id="task-fake")
+
+    async def _no_refresh(_acct, _db):
+        return False
+
+    with patch.object(publish_scheduled_post, "delay", side_effect=_record_delay), \
+         patch.object(ig, "refresh_token_if_needed", _no_refresh):
+        result = dispatch_due_posts.run()
+
+    assert str(post.id) in delays
+    assert str(post.id) in result["queued"]
+
+
+def test_dispatcher_skips_recent_publishing_row(db, insights_user):
+    """A row that started publishing 2 minutes ago is NOT stale — Celery's
+    retry queue still owns it. Dispatcher must skip it.
+    """
+    _user, org, _token = insights_user
+    account = _make_account(db, org.id)
+
+    fresh_ts = datetime.now(timezone.utc) - timedelta(minutes=2)
+    post = _make_post(db, org.id, account.id, status="publishing")
+    post.publishing_started_at = fresh_ts
+    db.commit()
+
+    delays = []
+
+    def _record_delay(post_id):
+        delays.append(post_id)
+        return MagicMock(id="task-fake")
+
+    async def _no_refresh(_acct, _db):
+        return False
+
+    with patch.object(publish_scheduled_post, "delay", side_effect=_record_delay), \
+         patch.object(ig, "refresh_token_if_needed", _no_refresh):
+        result = dispatch_due_posts.run()
+
+    assert str(post.id) not in delays
+    assert str(post.id) not in result["queued"]
+
+
+def test_rate_limit_retry_bumps_publishing_started_at(db, insights_user):
+    """On real rate-limit retry, publishing_started_at must be bumped to NOW
+    so the 10-minute stale window restarts from the retry — otherwise the
+    1-hour Celery countdown would race the dispatcher's stale-recovery.
+    """
+    _user, org, _token = insights_user
+    account = _make_account(db, org.id)
+
+    # Seed the row with an OLD publishing_started_at (12 min ago) — if the
+    # rate-limit branch forgets to bump, this would still look stale after
+    # commit.
+    old_ts = datetime.now(timezone.utc) - timedelta(minutes=12)
+    post = _make_post(db, org.id, account.id, status="scheduled",
+                      scheduled_at=datetime.now(timezone.utc) - timedelta(minutes=1))
+    post.publishing_started_at = old_ts
+    db.commit()
+
+    responses = [
+        ("POST", _resp(400, {"error": {"code": 17, "message": "User request limit reached"}})),
+    ]
+
+    class _RetryCalled(Exception):
+        pass
+
+    def _fake_retry(*, exc=None, countdown=None):  # noqa: ARG001
+        raise _RetryCalled()
+
+    patcher, _ = _patch_client(responses)
+    with patcher, patch.object(ig.asyncio, "sleep", _no_sleep), \
+         patch.object(publish_scheduled_post, "retry", side_effect=_fake_retry), \
+         pytest.raises(_RetryCalled):
+        publish_scheduled_post.run(str(post.id))
+
+    db.refresh(post)
+    assert post.status == "publishing"
+    # publishing_started_at must have been bumped — well within the last minute.
+    assert post.publishing_started_at is not None
+    age = datetime.now(timezone.utc) - post.publishing_started_at
+    assert age < timedelta(minutes=1), f"publishing_started_at not bumped (age={age})"
 
 
 def test_post_now_stores_scheduled_and_fires_delay(client, db, insights_user):

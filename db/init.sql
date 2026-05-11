@@ -307,6 +307,11 @@ CREATE TABLE scheduled_post (
     content_plan_day DATE,
     draft_expires_at TIMESTAMPTZ,
     error_message TEXT,
+    -- Set by the publisher's atomic claim; NULL means "not currently
+    -- publishing". Powers stale-publishing recovery in the dispatcher:
+    -- rows where publishing_started_at is >10min old are re-claimable
+    -- so a crashed worker can't pin the row in `publishing` forever.
+    publishing_started_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -314,3 +319,5 @@ CREATE TABLE scheduled_post (
 CREATE INDEX idx_scheduled_post_org_status ON scheduled_post(organization_id, status);
 CREATE INDEX idx_scheduled_post_account_scheduled ON scheduled_post(social_account_id, scheduled_at);
 CREATE INDEX idx_scheduled_post_status_expires ON scheduled_post(status, draft_expires_at);
+-- Stale-publishing recovery scans this index every minute via the dispatcher.
+CREATE INDEX idx_scheduled_post_publishing_started ON scheduled_post(publishing_started_at) WHERE status = 'publishing';
