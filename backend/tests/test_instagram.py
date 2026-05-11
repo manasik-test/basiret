@@ -170,13 +170,23 @@ def test_callback_unknown_user_redirects(client):
 
 
 def test_callback_full_flow_connects_account(client, db, starter_user):
-    """Happy path: valid state → mocked Meta exchange → social_account row stored → redirect."""
+    """Happy path: valid state → mocked Meta exchange → social_account row stored → redirect.
+
+    Also captures the outbound POST + GET to Meta and asserts client_secret
+    on both legs is the Instagram product's secret (INSTAGRAM_APP_SECRET),
+    NOT the Facebook product's (META_APP_SECRET). Guards against the
+    regression where the Instagram OAuth flow used the wrong app secret
+    and Meta returned the misleading "redirect_uri identical..." error.
+    """
     user, org, _ = starter_user
     state = create_oauth_state_token(str(user.id))
 
     fake_short = MagicMock(status_code=200, json=lambda: {"access_token": "short_tok", "user_id": "9988"})
     fake_long = MagicMock(status_code=200, json=lambda: {"access_token": "long_tok", "expires_in": 5_184_000})
     fake_me = MagicMock(status_code=200, json=lambda: {"id": "9988", "username": "test_handle"})
+
+    captured_post: dict = {}
+    captured_long_get_params: dict = {}
 
     class FakeAsyncClient:
         async def __aenter__(self):
@@ -185,11 +195,17 @@ def test_callback_full_flow_connects_account(client, db, starter_user):
         async def __aexit__(self, *_):
             return False
 
-        async def post(self, *_, **__):
+        async def post(self, _url, data=None, **__):
+            if data:
+                captured_post.update(data)
             return fake_short
 
-        async def get(self, url, *_, **__):
-            return fake_long if "access_token" in url else fake_me
+        async def get(self, url, params=None, **__):
+            if "access_token" in url:
+                if params:
+                    captured_long_get_params.update(params)
+                return fake_long
+            return fake_me
 
     with patch("app.api.v1.instagram.httpx.AsyncClient", FakeAsyncClient):
         resp = client.get(
@@ -199,6 +215,18 @@ def test_callback_full_flow_connects_account(client, db, starter_user):
 
     assert resp.status_code == 302
     assert "ig=connected" in resp.headers["location"]
+
+    # Short-token exchange must use the Instagram product credentials —
+    # NOT the Facebook product's. Both id AND secret are the IG pair.
+    assert captured_post["client_id"] == settings.INSTAGRAM_APP_ID
+    assert captured_post["client_secret"] == settings.INSTAGRAM_APP_SECRET
+    if settings.META_APP_SECRET and settings.META_APP_SECRET != settings.INSTAGRAM_APP_SECRET:
+        assert captured_post["client_secret"] != settings.META_APP_SECRET
+
+    # Long-lived exchange (ig_exchange_token) must use the same IG secret.
+    assert captured_long_get_params["client_secret"] == settings.INSTAGRAM_APP_SECRET
+    if settings.META_APP_SECRET and settings.META_APP_SECRET != settings.INSTAGRAM_APP_SECRET:
+        assert captured_long_get_params["client_secret"] != settings.META_APP_SECRET
 
     from app.models.social_account import SocialAccount, Platform
     account = db.query(SocialAccount).filter_by(

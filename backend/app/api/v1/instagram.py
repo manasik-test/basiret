@@ -127,11 +127,13 @@ async def oauth_callback(
     try:
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(TOKEN_URL, data={
-                # Same Instagram (NOT Facebook) App ID used at /authorize.
-                # api.instagram.com/oauth/access_token validates the pair
-                # against the Instagram product, not the parent FB app.
+                # Instagram product credentials — id + secret must be the
+                # PAIR from the Instagram product page (Use Cases → API setup
+                # with Instagram Login), not the parent Facebook product's
+                # creds. A mismatched secret surfaces as the misleading
+                # "redirect_uri identical to the one you used" error.
                 "client_id": settings.INSTAGRAM_APP_ID,
-                "client_secret": settings.META_APP_SECRET,
+                "client_secret": settings.INSTAGRAM_APP_SECRET,
                 "grant_type": "authorization_code",
                 "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
                 "code": code,
@@ -146,10 +148,14 @@ async def oauth_callback(
         ig_user_id = str(token_data["user_id"])
 
         # 3. Exchange short-lived → long-lived token (60 days)
+        # Same Instagram product secret — graph.instagram.com/access_token
+        # validates against the Instagram product just like the short-token
+        # exchange above. Using META_APP_SECRET here would fail the second
+        # leg of the flow with the same misleading error.
         async with httpx.AsyncClient() as client:
             ll_resp = await client.get(LONG_LIVED_URL, params={
                 "grant_type": "ig_exchange_token",
-                "client_secret": settings.META_APP_SECRET,
+                "client_secret": settings.INSTAGRAM_APP_SECRET,
                 "access_token": short_token,
             })
 

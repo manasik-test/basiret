@@ -13,24 +13,33 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
 
     # Instagram OAuth
-    # NOTE: Meta exposes TWO distinct app IDs:
-    #   * META_APP_ID         — the Facebook App ID. Used for Graph API
-    #                           server-to-server admin calls (data-deletion
-    #                           callback HMAC, app-level diagnostics).
-    #   * INSTAGRAM_APP_ID    — the Instagram product's App ID, shown on the
-    #                           Instagram product page inside the same Meta
-    #                           App. This is the ONLY value Instagram's OAuth
-    #                           endpoint (instagram.com/oauth/authorize +
-    #                           api.instagram.com/oauth/access_token) accepts
-    #                           as `client_id`. Passing the Facebook App ID
-    #                           there returns "Invalid platform app".
-    # META_APP_SECRET is the Instagram product's App Secret (Meta confusingly
-    # surfaces it under the same name) — used for the token exchange and the
-    # data-deletion HMAC. Kept under the existing name to avoid a churny
-    # rename of a working call site.
+    # NOTE: Meta exposes TWO distinct app products inside the same App, and
+    # each has its OWN ID and secret. They are NOT interchangeable.
+    #
+    # Facebook product (Settings → Basic):
+    #   * META_APP_ID         — Facebook App ID. Used for Graph API admin
+    #                           calls + the data-deletion callback HMAC.
+    #   * META_APP_SECRET     — Facebook App Secret. Pairs with META_APP_ID.
+    #                           Reserved for future FB Graph server-to-server
+    #                           calls; the data-deletion HMAC currently uses
+    #                           this value too. NOT used for Instagram OAuth.
+    #
+    # Instagram product (Use Cases → API setup with Instagram Login):
+    #   * INSTAGRAM_APP_ID     — Instagram App ID. The ONLY value Instagram's
+    #                            OAuth endpoints (instagram.com/oauth/authorize
+    #                            and api.instagram.com/oauth/access_token)
+    #                            accept as `client_id`.
+    #   * INSTAGRAM_APP_SECRET — Instagram App Secret. The ONLY value those
+    #                            same endpoints accept as `client_secret`.
+    #
+    # Symptom of mixing them up: Meta returns "Invalid platform app" (wrong
+    # client_id) or the generic "redirect_uri identical to the one you used
+    # in the OAuth dialog request" (wrong client_secret — Meta's error mapper
+    # bundles auth-mismatch under that misleading message).
     META_APP_ID: str
     INSTAGRAM_APP_ID: str
     META_APP_SECRET: str
+    INSTAGRAM_APP_SECRET: str
     INSTAGRAM_REDIRECT_URI: str = "http://localhost:8000/api/v1/instagram/callback"
     INSTAGRAM_TEST_TOKEN: str = ""
 

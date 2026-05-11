@@ -204,20 +204,28 @@ SECRET_KEY=<32-byte-hex>
 ENVIRONMENT=production
 
 # Meta / Instagram OAuth — production app credentials.
-# Meta exposes TWO different app IDs inside the same App dashboard:
-#   META_APP_ID       — Facebook App ID (Settings → Basic). Used for the
-#                       data-deletion callback HMAC and other Graph admin
-#                       calls.
-#   INSTAGRAM_APP_ID  — Instagram product App ID (Instagram → API setup with
-#                       Instagram Login). This is the ONLY value Instagram's
-#                       OAuth endpoint accepts as client_id; using the FB
-#                       App ID here yields "Invalid platform app".
-# META_APP_SECRET is the Instagram product's App Secret — used for the token
-# exchange and the data-deletion HMAC. Kept under the META_ name for
-# historical reasons; the value is shared across both surfaces.
+# Meta exposes TWO different app products inside the same App dashboard,
+# and each product has its OWN id AND its OWN secret. They are NOT
+# interchangeable.
+#
+# Facebook product (Settings → Basic):
+#   META_APP_ID      — Facebook App ID. Used for the data-deletion callback
+#                      HMAC and any FB Graph admin calls.
+#   META_APP_SECRET  — Facebook App Secret. Pairs with META_APP_ID. Reserved
+#                      for FB Graph server-to-server calls; not used for IG
+#                      OAuth.
+#
+# Instagram product (Use Cases → API setup with Instagram Login):
+#   INSTAGRAM_APP_ID     — Instagram App ID. ONLY value IG's OAuth endpoints
+#                          accept as client_id. FB App ID → "Invalid platform
+#                          app".
+#   INSTAGRAM_APP_SECRET — Instagram App Secret. ONLY value those endpoints
+#                          accept as client_secret. Wrong value → misleading
+#                          "redirect_uri identical..." error.
 META_APP_ID=<prod-facebook-app-id>
+META_APP_SECRET=<prod-facebook-app-secret>
 INSTAGRAM_APP_ID=<prod-instagram-app-id>
-META_APP_SECRET=<prod-app-secret>
+INSTAGRAM_APP_SECRET=<prod-instagram-app-secret>
 INSTAGRAM_REDIRECT_URI=https://basiret.co/api/v1/instagram/callback
 INSTAGRAM_TEST_TOKEN=
 
