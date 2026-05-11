@@ -38,9 +38,14 @@ logger = logging.getLogger(__name__)
 GRAPH_BASE = "https://graph.instagram.com/v21.0"
 REFRESH_URL = "https://graph.instagram.com/refresh_access_token"
 
-# Reels: poll the container until it's FINISHED (or fail after the timeout).
-VIDEO_POLL_INTERVAL_SECONDS = 5
-VIDEO_POLL_TIMEOUT_SECONDS = 60
+# Container readiness polling. Meta needs time to ingest the media before
+# `/media_publish` will accept the container — for video this is obvious (the
+# upload has to complete server-side), but Meta requires it for image and
+# carousel containers too. Without polling, `/media_publish` fires too soon
+# and Meta returns code=9007 "Media ID is not available". We poll for ALL
+# media types, not just video.
+CONTAINER_POLL_INTERVAL_SECONDS = 2
+CONTAINER_POLL_TIMEOUT_SECONDS = 60
 
 # Refresh long-lived tokens this many days before they expire.
 TOKEN_REFRESH_THRESHOLD_DAYS = 7
@@ -48,7 +53,19 @@ TOKEN_REFRESH_THRESHOLD_DAYS = 7
 # Instagram error codes we branch on. See:
 # https://developers.facebook.com/docs/graph-api/guides/error-handling
 TOKEN_EXPIRED_CODE = 190
-RATE_LIMIT_CODE = 9007  # Application request limit reached (publishing-specific)
+
+# Real Meta rate-limit codes (App / User / Page / "calls per hour" caps).
+# Each one means "back off and retry in ~1h". Do NOT add 9007 here — that's
+# a container-not-ready error which our polling layer already handles, and
+# treating it as rate-limit triggers a 1h backoff that turns a 2s wait into
+# a useless hour of nothing.
+RATE_LIMIT_CODES = {4, 17, 32, 613}
+
+# Code 9007 ("Media ID not available") is what Meta returns when the
+# container exists but hasn't finished processing yet. With container
+# polling in place this should be unreachable; if it still surfaces, it's
+# a brief readiness gap — treat as transient with a short backoff.
+CONTAINER_NOT_READY_CODE = 9007
 
 
 class PublishError(Exception):
@@ -63,6 +80,7 @@ class PublishError(Exception):
         is_token_expired: bool = False,
         is_rate_limited: bool = False,
         is_retryable: bool = False,
+        is_container_not_ready: bool = False,
     ):
         super().__init__(message)
         self.code = code
@@ -70,6 +88,7 @@ class PublishError(Exception):
         self.is_token_expired = is_token_expired
         self.is_rate_limited = is_rate_limited
         self.is_retryable = is_retryable
+        self.is_container_not_ready = is_container_not_ready
 
 
 def _parse_graph_error(resp: httpx.Response) -> PublishError:
@@ -85,10 +104,13 @@ def _parse_graph_error(resp: httpx.Response) -> PublishError:
     msg = err.get("message") or f"Instagram API returned HTTP {resp.status_code}"
 
     is_token_expired = code == TOKEN_EXPIRED_CODE
-    is_rate_limited = code == RATE_LIMIT_CODE or resp.status_code == 429
-    # 5xx + rate limits are retryable; everything else is terminal so we
-    # don't burn quota repeatedly publishing a malformed post.
-    is_retryable = is_rate_limited or 500 <= resp.status_code < 600
+    is_rate_limited = code in RATE_LIMIT_CODES or resp.status_code == 429
+    is_container_not_ready = code == CONTAINER_NOT_READY_CODE
+    # 5xx, real rate limits, and container-not-ready are retryable; everything
+    # else is terminal so we don't burn quota repeatedly publishing a
+    # malformed post. Container-not-ready uses a SHORT backoff (handled by
+    # the task wrapper) — not the 1-hour rate-limit countdown.
+    is_retryable = is_rate_limited or is_container_not_ready or 500 <= resp.status_code < 600
 
     return PublishError(
         msg,
@@ -97,6 +119,7 @@ def _parse_graph_error(resp: httpx.Response) -> PublishError:
         is_token_expired=is_token_expired,
         is_rate_limited=is_rate_limited,
         is_retryable=is_retryable,
+        is_container_not_ready=is_container_not_ready,
     )
 
 
@@ -129,18 +152,22 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict[str, Any]) -> d
     return resp.json()
 
 
-async def _wait_for_video_ready(
+async def _wait_for_container_ready(
     client: httpx.AsyncClient,
     container_id: str,
     access_token: str,
 ) -> None:
-    """Poll the container until status_code='FINISHED' or timeout.
+    """Poll a media container until status_code='FINISHED' or timeout.
 
-    Raises `PublishError` if status_code is ERROR / EXPIRED, or if we exceed
-    the timeout (Instagram occasionally takes >60s on long videos — we treat
-    that as retryable so the task wrapper can come back to it later).
+    Required for ALL media types (image, carousel, reel) before calling
+    /media_publish — without it, Meta returns code=9007 "Media ID is not
+    available". Images usually finish in <1s; reels can take 10-30s.
+
+    Raises `PublishError` if status_code is ERROR / EXPIRED (terminal),
+    or if we exceed the timeout (retryable — Instagram occasionally takes
+    >60s on long videos).
     """
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=VIDEO_POLL_TIMEOUT_SECONDS)
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=CONTAINER_POLL_TIMEOUT_SECONDS)
     while datetime.now(timezone.utc) < deadline:
         result = await _get(
             client,
@@ -152,12 +179,12 @@ async def _wait_for_video_ready(
             return
         if status_code in {"ERROR", "EXPIRED"}:
             raise PublishError(
-                f"Instagram rejected video container ({status_code})",
+                f"Instagram rejected media container ({status_code})",
                 is_retryable=False,
             )
-        await asyncio.sleep(VIDEO_POLL_INTERVAL_SECONDS)
+        await asyncio.sleep(CONTAINER_POLL_INTERVAL_SECONDS)
     raise PublishError(
-        "Timed out waiting for Instagram to ingest the video",
+        "Timed out waiting for Instagram to process the media container",
         is_retryable=True,
     )
 
@@ -175,6 +202,9 @@ async def _publish_image(
         {"image_url": image_url, "caption": caption, "access_token": access_token},
     )
     container_id = container["id"]
+    # Even image containers need a beat to ingest before /media_publish will
+    # accept them. Skipping this poll is what produces the 9007 retry storm.
+    await _wait_for_container_ready(client, container_id, access_token)
     published = await _post(
         client,
         f"{GRAPH_BASE}/{ig_user_id}/media_publish",
@@ -206,7 +236,12 @@ async def _publish_carousel(
                 "access_token": access_token,
             },
         )
-        item_ids.append(item["id"])
+        item_id = item["id"]
+        # Wait for each child item to finish ingesting before we reference
+        # it from the carousel container — Meta won't accept a CAROUSEL
+        # whose children aren't all FINISHED.
+        await _wait_for_container_ready(client, item_id, access_token)
+        item_ids.append(item_id)
 
     carousel = await _post(
         client,
@@ -218,6 +253,9 @@ async def _publish_carousel(
             "access_token": access_token,
         },
     )
+    # Same readiness gate as image + reel: the carousel parent has to be
+    # FINISHED before /media_publish will accept it.
+    await _wait_for_container_ready(client, carousel["id"], access_token)
     published = await _post(
         client,
         f"{GRAPH_BASE}/{ig_user_id}/media_publish",
@@ -245,7 +283,7 @@ async def _publish_reel(
         },
     )
     container_id = container["id"]
-    await _wait_for_video_ready(client, container_id, access_token)
+    await _wait_for_container_ready(client, container_id, access_token)
     published = await _post(
         client,
         f"{GRAPH_BASE}/{ig_user_id}/media_publish",

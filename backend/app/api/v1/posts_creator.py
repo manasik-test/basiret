@@ -627,6 +627,16 @@ def create_post(
     now = datetime.now(timezone.utc)
     draft_expires_at = now + DRAFT_TTL if body.status == "draft" else None
 
+    # "Post now" path: the frontend posts status='publishing' to mean
+    # "publish immediately." Store the row as status='scheduled' with
+    # scheduled_at=NOW() instead, so the publisher's atomic-claim flow
+    # has a single transition point (scheduled → publishing). The .delay()
+    # call below fires the task immediately; the dispatcher is a fallback
+    # for the case where the .delay() call fails or the worker is down.
+    requested_post_now = body.status == "publishing"
+    stored_status = "scheduled" if requested_post_now else body.status
+    stored_scheduled_at = now if requested_post_now else body.scheduled_at
+
     post = ScheduledPost(
         organization_id=user.organization_id,
         social_account_id=account_id,
@@ -636,8 +646,8 @@ def create_post(
         caption_en=body.caption_en,
         hashtags=body.hashtags or [],
         ratio=body.ratio,
-        scheduled_at=body.scheduled_at,
-        status=body.status,
+        scheduled_at=stored_scheduled_at,
+        status=stored_status,
         ai_generated_media=body.ai_generated_media,
         ai_generated_caption=body.ai_generated_caption,
         source_image_url=body.source_image_url,
@@ -649,12 +659,7 @@ def create_post(
     db.commit()
     db.refresh(post)
 
-    # "Post now" path — frontend posts with status='publishing' to mean
-    # "publish immediately." Hand off to the Celery worker right away so
-    # the user sees a result within seconds (not just at the next 60s
-    # dispatcher tick). The dispatcher still picks this row up if Celery
-    # is down, so this is an optimization, not the only path.
-    if post.status == "publishing":
+    if requested_post_now:
         try:
             publish_scheduled_post.delay(str(post.id))
         except Exception:  # noqa: BLE001
@@ -730,21 +735,28 @@ def update_post(
             detail="scheduled_at is required when status='scheduled'.",
         )
 
+    # "Post now" via PUT: same mapping as the create path. Store as
+    # scheduled+now so the publisher's atomic claim handles it.
+    now_ts = datetime.now(timezone.utc)
+    requested_post_now = new_status == "publishing"
+    if requested_post_now:
+        payload["status"] = "scheduled"
+        payload["scheduled_at"] = now_ts
+        new_status = "scheduled"
+
     for key, value in payload.items():
         setattr(post, key, value)
 
     if new_status == "draft" and post.draft_expires_at is None:
-        post.draft_expires_at = datetime.now(timezone.utc) + DRAFT_TTL
+        post.draft_expires_at = now_ts + DRAFT_TTL
     if new_status != "draft":
         post.draft_expires_at = None
 
-    post.updated_at = datetime.now(timezone.utc)
+    post.updated_at = now_ts
     db.commit()
     db.refresh(post)
 
-    # Same "Post now" handoff as the create path — the user can also reach
-    # publishing by editing an existing draft and choosing Post now.
-    if new_status == "publishing":
+    if requested_post_now:
         try:
             publish_scheduled_post.delay(str(post.id))
         except Exception:  # noqa: BLE001
