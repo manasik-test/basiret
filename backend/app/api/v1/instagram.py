@@ -63,7 +63,10 @@ def get_auth_url(user: User = Depends(get_current_user)):
     """
     state = create_oauth_state_token(str(user.id))
     params = {
-        "client_id": settings.META_APP_ID,
+        # Must be the Instagram App ID (NOT the Facebook App ID). Meta's
+        # instagram.com/oauth/authorize rejects the FB app ID with
+        # "Invalid platform app". See config.py for the distinction.
+        "client_id": settings.INSTAGRAM_APP_ID,
         "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
         # `instagram_business_manage_comments` is required to read /{media-id}/comments.
         # `instagram_business_manage_insights` is required to read /{media-id}/insights
@@ -124,7 +127,10 @@ async def oauth_callback(
     try:
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(TOKEN_URL, data={
-                "client_id": settings.META_APP_ID,
+                # Same Instagram (NOT Facebook) App ID used at /authorize.
+                # api.instagram.com/oauth/access_token validates the pair
+                # against the Instagram product, not the parent FB app.
+                "client_id": settings.INSTAGRAM_APP_ID,
                 "client_secret": settings.META_APP_SECRET,
                 "grant_type": "authorization_code",
                 "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,

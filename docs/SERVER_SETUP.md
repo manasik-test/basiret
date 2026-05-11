@@ -203,8 +203,20 @@ SECRET_KEY=<32-byte-hex>
 
 ENVIRONMENT=production
 
-# Meta / Instagram OAuth — production app credentials
-META_APP_ID=<prod-app-id>
+# Meta / Instagram OAuth — production app credentials.
+# Meta exposes TWO different app IDs inside the same App dashboard:
+#   META_APP_ID       — Facebook App ID (Settings → Basic). Used for the
+#                       data-deletion callback HMAC and other Graph admin
+#                       calls.
+#   INSTAGRAM_APP_ID  — Instagram product App ID (Instagram → API setup with
+#                       Instagram Login). This is the ONLY value Instagram's
+#                       OAuth endpoint accepts as client_id; using the FB
+#                       App ID here yields "Invalid platform app".
+# META_APP_SECRET is the Instagram product's App Secret — used for the token
+# exchange and the data-deletion HMAC. Kept under the META_ name for
+# historical reasons; the value is shared across both surfaces.
+META_APP_ID=<prod-facebook-app-id>
+INSTAGRAM_APP_ID=<prod-instagram-app-id>
 META_APP_SECRET=<prod-app-secret>
 INSTAGRAM_REDIRECT_URI=https://basiret.co/api/v1/instagram/callback
 INSTAGRAM_TEST_TOKEN=

@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import httpx
 
+from app.core.config import settings
 from app.core.security import decode_token, create_oauth_state_token
 from app.tasks.instagram_sync import (
     _fetch_carousel_children,
@@ -52,8 +53,16 @@ def test_instagram_auth_url(client, starter_user):
     url = resp.json()["url"]
     assert "instagram.com/oauth/authorize" in url
 
-    # State must be a single-purpose JWT identifying the requesting user.
     qs = parse_qs(urlparse(url).query)
+
+    # client_id MUST be the Instagram App ID (NOT the Facebook App ID).
+    # Meta's OAuth endpoint rejects the FB app ID with "Invalid platform app",
+    # which is the regression this assertion guards against.
+    assert qs["client_id"][0] == settings.INSTAGRAM_APP_ID
+    if settings.META_APP_ID and settings.META_APP_ID != settings.INSTAGRAM_APP_ID:
+        assert qs["client_id"][0] != settings.META_APP_ID
+
+    # State must be a single-purpose JWT identifying the requesting user.
     state = qs["state"][0]
     payload = decode_token(state)
     assert payload is not None
