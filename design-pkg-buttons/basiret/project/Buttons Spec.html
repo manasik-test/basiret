@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Basiret — Buttons Spec (handoff)</title>
+  <link rel="stylesheet" href="colors_and_type.css" />
+  <style>
+    body { padding: 32px 40px 64px; max-width: 1080px; margin: 0 auto; }
+    h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
+    .lede { color: var(--ink-600); font-size: 14px; margin: 0 0 28px; max-width: 680px; line-height: 1.55; }
+
+    .group { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; margin-bottom: 18px; }
+    .group h2 { font-size: 15px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.005em; }
+    .group .desc { font-size: 12.5px; color: var(--ink-500); margin: 0 0 18px; }
+
+    .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 16px; background: var(--canvas); border-radius: 12px; margin-bottom: 12px; }
+    .row.dark-bg { background: linear-gradient(135deg, var(--purple-50), oklch(0.97 0.03 280)); }
+    .row.urgent-bg { background: oklch(0.99 0.01 30); border: 1px solid oklch(0.88 0.06 30); }
+
+    .label { font-size: 11px; color: var(--ink-500); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; min-width: 110px; font-family: 'Inter', monospace; }
+    pre { background: var(--ink-900); color: var(--ink-100); padding: 14px 16px; border-radius: 10px; font-size: 11.5px; line-height: 1.6; overflow-x: auto; margin: 8px 0 0; font-family: 'SF Mono', Menlo, monospace; }
+    pre .c { color: var(--ink-400); }
+    pre .k { color: oklch(0.78 0.13 280); }
+    pre .s { color: oklch(0.78 0.13 155); }
+
+    /* ───── BUTTON SPECS ───── */
+
+    /* 1. PRIMARY (purple) — used by .hm-nba-btn */
+    .btn-primary {
+      padding: 10px 16px;
+      background: var(--purple-600);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      box-shadow: 0 6px 16px -6px rgba(99,65,224,.5);
+      transition: background .15s;
+    }
+    .btn-primary:hover { background: var(--purple-700); }
+
+    /* 2. DARK CTA (ink-900) — used by .hm-act-cta on normal cards */
+    .btn-dark {
+      padding: 9px 14px;
+      background: var(--ink-900);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      font-size: 11.5px;
+      font-weight: 600;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-dark:hover { background: var(--purple-700); }
+
+    /* 3. URGENT CTA (coral) — used by .hm-act--urgent .hm-act-cta */
+    .btn-urgent {
+      padding: 9px 14px;
+      background: oklch(0.55 0.17 30);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      font-size: 11.5px;
+      font-weight: 600;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-urgent:hover { background: oklch(0.48 0.18 30); }
+
+    /* 4. GHOST — outline, neutral */
+    .btn-ghost {
+      padding: 11px 16px;
+      background: transparent;
+      color: var(--ink-700);
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-ghost:hover { background: var(--ink-50); }
+
+    /* 5. PRIMARY-DARK FILL (used inside hm-nxt-acts as .hm-btn.primary) */
+    .btn-fill-dark {
+      padding: 11px 18px;
+      background: var(--ink-900);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-fill-dark:hover { background: var(--ink-800); }
+
+    /* 6. SEGMENTED CONTROL — .hm-seg */
+    .seg { display: inline-flex; background: var(--ink-100); border-radius: 10px; padding: 3px; }
+    .seg button {
+      padding: 7px 14px;
+      font-size: 12.5px;
+      border-radius: 7px;
+      color: var(--ink-600);
+      font-weight: 500;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .seg button.is-on {
+      background: var(--surface);
+      color: var(--ink-900);
+      font-weight: 600;
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* 7. LINK BUTTON — .hm-link */
+    .btn-link {
+      font-size: 12px;
+      color: var(--purple-700);
+      font-weight: 500;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      padding: 4px 0;
+    }
+    .btn-link:hover { color: var(--purple-800); text-decoration: underline; }
+
+    .specs { display: grid; grid-template-columns: 110px 1fr; gap: 6px 16px; font-size: 11.5px; margin-top: 8px; padding: 12px; background: var(--ink-50); border-radius: 8px; font-family: 'Inter', monospace; }
+    .specs dt { color: var(--ink-500); font-weight: 600; }
+    .specs dd { margin: 0; color: var(--ink-900); font-weight: 500; }
+
+    .arrow { font-size: 11px; }
+    .iconleft::before { content: '✦'; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+  <h1>Basiret — Button Spec</h1>
+  <p class="lede">المرجع الكامل لأزرار التطبيق. كل زر له اسم، وألوان دقيقة، وحشوة (padding)، وحجم خط، ونصف قطر (border-radius). اتبع هذه القيم بالضبط للحصول على النتيجة الصحيحة.</p>
+
+  <!-- 1. PRIMARY -->
+  <div class="group">
+    <h2>1 · Primary (Purple)</h2>
+    <p class="desc">يُستخدم في الـ NBA banner ("ابدأ الآن") والإجراءات الرئيسية. لون أرجواني صلب مع ظل أرجواني ناعم.</p>
+    <div class="row dark-bg">
+      <span class="label">default</span>
+      <button class="btn-primary">ابدأ الآن <span class="arrow">‹</span></button>
+      <button class="btn-primary">إنشاء منشور</button>
+    </div>
+    <dl class="specs">
+      <dt>background</dt><dd>var(--purple-600) → #664FA1 (or your token)</dd>
+      <dt>hover</dt><dd>var(--purple-700)</dd>
+      <dt>color</dt><dd>#ffffff</dd>
+      <dt>padding</dt><dd>10px 16px</dd>
+      <dt>radius</dt><dd>10px</dd>
+      <dt>font-size</dt><dd>12.5px / weight 600</dd>
+      <dt>shadow</dt><dd>0 6px 16px -6px rgba(99,65,224,.5)</dd>
+      <dt>gap</dt><dd>5px (icon ↔ text)</dd>
+    </dl>
+  </div>
+
+  <!-- 2. DARK CTA -->
+  <div class="group">
+    <h2>2 · Dark CTA (Ink)</h2>
+    <p class="desc">الزر الافتراضي على بطاقات المهام (.hm-act). أسود حِبر مع تحويل إلى أرجواني عند التحويم.</p>
+    <div class="row">
+      <span class="label">default</span>
+      <button class="btn-dark">افتح المشاعر <span class="arrow">‹</span></button>
+      <button class="btn-dark">جدولة منشور</button>
+      <button class="btn-dark">مراجعة الخطة</button>
+    </div>
+    <dl class="specs">
+      <dt>background</dt><dd>var(--ink-900) → #1c1a28</dd>
+      <dt>hover</dt><dd>var(--purple-700)</dd>
+      <dt>color</dt><dd>#ffffff</dd>
+      <dt>padding</dt><dd>9px 14px</dd>
+      <dt>radius</dt><dd>9px</dd>
+      <dt>font-size</dt><dd>11.5px / weight 600</dd>
+      <dt>shadow</dt><dd>none</dd>
+    </dl>
+  </div>
+
+  <!-- 3. URGENT CTA -->
+  <div class="group">
+    <h2>3 · Urgent CTA (Coral)</h2>
+    <p class="desc">يستبدل الزر الداكن داخل بطاقات المهام العاجلة (.hm-act--urgent). نفس الأبعاد، لون مرجاني.</p>
+    <div class="row urgent-bg">
+      <span class="label">on urgent card</span>
+      <button class="btn-urgent">رد الآن <span class="arrow">‹</span></button>
+      <button class="btn-urgent">إنشاء منشور</button>
+    </div>
+    <dl class="specs">
+      <dt>background</dt><dd>oklch(0.55 0.17 30) — coral</dd>
+      <dt>hover</dt><dd>oklch(0.48 0.18 30)</dd>
+      <dt>color</dt><dd>#ffffff</dd>
+      <dt>padding</dt><dd>9px 14px (same as dark CTA)</dd>
+      <dt>radius</dt><dd>9px</dd>
+      <dt>font-size</dt><dd>11.5px / weight 600</dd>
+    </dl>
+  </div>
+
+  <!-- 4. GHOST -->
+  <div class="group">
+    <h2>4 · Ghost (Outline)</h2>
+    <p class="desc">زر ثانوي بإطار. يُستخدم بجانب أزرار Primary أو Dark كخيار ثانٍ.</p>
+    <div class="row">
+      <span class="label">default</span>
+      <button class="btn-ghost">إلغاء</button>
+      <button class="btn-ghost">معاينة</button>
+    </div>
+    <dl class="specs">
+      <dt>background</dt><dd>transparent</dd>
+      <dt>hover</dt><dd>var(--ink-50)</dd>
+      <dt>color</dt><dd>var(--ink-700)</dd>
+      <dt>border</dt><dd>1px solid var(--line-strong) → #d8d5e4</dd>
+      <dt>padding</dt><dd>11px 16px</dd>
+      <dt>radius</dt><dd>10px</dd>
+      <dt>font-size</dt><dd>12.5px / weight 600</dd>
+    </dl>
+  </div>
+
+  <!-- 5. SEGMENTED -->
+  <div class="group">
+    <h2>5 · Segmented Control</h2>
+    <p class="desc">للتبديل بين خيارات (٧ أيام / ٣٠ يوم / ٩٠ يوم). الخيار النشط له خلفية بيضاء وظل خفيف.</p>
+    <div class="row">
+      <span class="label">default</span>
+      <div class="seg">
+        <button>٧ أيام</button>
+        <button class="is-on">٣٠ يوم</button>
+        <button>٩٠ يوم</button>
+      </div>
+    </div>
+    <dl class="specs">
+      <dt>track bg</dt><dd>var(--ink-100)</dd>
+      <dt>track padding</dt><dd>3px (around segments)</dd>
+      <dt>track radius</dt><dd>10px</dd>
+      <dt>segment</dt><dd>7px 14px / 12.5px / weight 500</dd>
+      <dt>active bg</dt><dd>var(--surface) — #ffffff</dd>
+      <dt>active shadow</dt><dd>var(--shadow-sm) → 0 1px 2px rgba(30,20,70,.04)</dd>
+      <dt>active radius</dt><dd>7px (inner)</dd>
+    </dl>
+  </div>
+
+  <!-- 6. LINK -->
+  <div class="group">
+    <h2>6 · Link Button</h2>
+    <p class="desc">رابط نصّي للقفز إلى صفحة أخرى ("عرض منشوراتي"). لا خلفية، لا حدود.</p>
+    <div class="row">
+      <span class="label">default</span>
+      <button class="btn-link">عرض منشوراتي ↩</button>
+      <button class="btn-link">عرض الكل ›</button>
+    </div>
+    <dl class="specs">
+      <dt>color</dt><dd>var(--purple-700)</dd>
+      <dt>hover</dt><dd>var(--purple-800) + underline</dd>
+      <dt>font-size</dt><dd>12px / weight 500</dd>
+      <dt>padding</dt><dd>4px 0 (no horizontal)</dd>
+    </dl>
+  </div>
+
+  <div class="group">
+    <h2>قواعد عامة</h2>
+    <ul style="margin: 0; padding-inline-start: 20px; font-size: 13px; line-height: 1.7; color: var(--ink-700);">
+      <li>كل الأزرار <code>font-family: inherit</code> — لا تستخدم خطاً مختلفاً للأزرار.</li>
+      <li>كل الأزرار <code>border: none</code> ما عدا <em>Ghost</em>.</li>
+      <li>الأيقونات داخل الأزرار حجمها <code>11–12px</code>، والمسافة بينها وبين النص <code>5px</code>.</li>
+      <li>لا تستخدم <code>text-transform: uppercase</code> على الأزرار العربية.</li>
+      <li>لا تضف ظل (shadow) إلا للزر الـ Primary فقط.</li>
+      <li>الانتقال (transition) دائماً <code>background .15s</code>.</li>
+    </ul>
+  </div>
+
+</body>
+</html>

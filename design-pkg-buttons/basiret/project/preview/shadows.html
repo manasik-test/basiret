@@ -1,0 +1,18 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Shadows</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 28px; background: var(--canvas); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 18px; }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; height: 100px; display: flex; flex-direction: column; justify-content: space-between; }
+  .name { font: 600 13px/1 'IBM Plex Sans Arabic'; color: var(--ink-900); }
+  .var { font: 500 10px/1.3 'Inter'; color: var(--ink-500); }
+</style></head><body>
+<div class="lbl">Shadows — ink-tinted, never gray</div>
+<div class="row">
+  <div class="card" style="box-shadow: var(--shadow-sm)"><span class="name">--shadow-sm</span><span class="var">resting cards</span></div>
+  <div class="card" style="box-shadow: var(--shadow)"><span class="name">--shadow</span><span class="var">hover / raised</span></div>
+  <div class="card" style="box-shadow: var(--shadow-lg)"><span class="name">--shadow-lg</span><span class="var">popovers, AskFab</span></div>
+</div>
+</body></html>

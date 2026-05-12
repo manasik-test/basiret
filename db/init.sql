@@ -180,6 +180,7 @@ CREATE TABLE ai_page_cache (
     language VARCHAR(8) NOT NULL DEFAULT 'en',
     content JSONB NOT NULL,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_user_edit_at TIMESTAMPTZ,
     CONSTRAINT uq_ai_page_cache_key UNIQUE (social_account_id, page_name, language)
 );
 CREATE INDEX idx_ai_page_cache_lookup ON ai_page_cache(social_account_id, page_name, language);

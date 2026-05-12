@@ -1,0 +1,31 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>AskFab</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 24px; background: var(--canvas); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 18px; }
+  .fab {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 18px 12px 14px;
+    background: var(--ink-900); color: #fff;
+    border-radius: 999px; box-shadow: var(--shadow-lg);
+    font: 600 14px/1 'IBM Plex Sans Arabic';
+    cursor: pointer; transition: background .12s;
+  }
+  .fab:hover { background: var(--ink-800); }
+  .fab-icon {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--purple-400), var(--purple-600));
+    display: grid; place-items: center; color: #fff;
+  }
+  .fab-sub { font: 500 11px/1 'Inter'; color: var(--purple-300); letter-spacing: .04em; }
+</style></head><body>
+<div class="lbl">AskFab — floating assistant</div>
+<button class="fab">
+  <span class="fab-icon">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M4.2 7.2l2 2M17.8 14.8l2 2M3 12h3M18 12h3"/></svg>
+  </span>
+  <span>اسأل بصيرة</span>
+  <span class="fab-sub">⌘K</span>
+</button>
+</body></html>

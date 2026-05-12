@@ -1,0 +1,22 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Colors — Ink</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 20px; background: var(--surface); }
+  .scale { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; }
+  .swatch { aspect-ratio: 1/1.1; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; font: 600 10px/1 'Inter'; border: 1px solid var(--line); }
+  .swatch .h { font-weight: 500; opacity: .7; font-size: 9px; }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 8px; }
+</style></head><body>
+<div class="lbl">Ink — neutrals (slightly cool)</div>
+<div class="scale" id="s"></div>
+<script>
+  const tones = [50,100,150,200,300,400,500,600,700,800,900,950];
+  const hex   = ['#faf9fc','#f3f2f8','#ecebf3','#e3e1ec','#bfbdcc','#9996ad','#74718a','#55536b','#3d3b50','#2a2839','#1c1a28','#12101a'];
+  document.getElementById('s').innerHTML = tones.map((t,i)=>{
+    const dark = t >= 500;
+    return `<div class="swatch" style="background:${hex[i]}; color:${dark?'#fff':'#1c1a28'}">
+      <span>${t}</span><span class="h">${hex[i]}</span></div>`;
+  }).join('');
+</script>
+</body></html>

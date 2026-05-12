@@ -1,0 +1,30 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Inputs</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 22px; background: var(--surface); display: grid; gap: 14px; }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 4px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font: 600 12px/1 'IBM Plex Sans Arabic'; color: var(--ink-700); }
+  .input {
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px;
+    padding: 10px 14px; font: 400 14px/1.4 'IBM Plex Sans Arabic'; color: var(--ink-900);
+    outline: none; transition: border-color .12s, box-shadow .12s;
+  }
+  .input:focus { border-color: var(--purple-500); box-shadow: 0 0 0 3px var(--purple-100); }
+  .input::placeholder { color: var(--ink-400); }
+  .search { display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--ink-100); border-radius: 10px; }
+  .search svg { color: var(--ink-500); flex-shrink: 0; }
+  .search input { flex: 1; border: none; background: transparent; padding: 11px 0; font: 400 14px 'IBM Plex Sans Arabic'; color: var(--ink-900); outline: none; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+</style></head><body>
+<div class="lbl">Inputs</div>
+<div class="row">
+  <div class="field"><label>عنوان المنشور</label><input class="input" value="نصائح سريعة لنمو الحساب"></div>
+  <div class="field"><label>الكلمة المفتاحية</label><input class="input" placeholder="مثال: تسويق المحتوى"></div>
+</div>
+<div class="search">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+  <input placeholder="ابحث في منشوراتك..." />
+</div>
+</body></html>

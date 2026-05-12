@@ -655,6 +655,20 @@
     "navHint": "to navigate",
     "suggestedTag": "Suggested",
     "readyTag": "Ready",
+    "scheduled": {
+      "published": "Published",
+      "scheduled": "Scheduled",
+      "publishing": "Publishing",
+      "draft": "Draft",
+      "failed": "Failed"
+    },
+    "scheduledAction": {
+      "viewOnInstagram": "View on Instagram",
+      "viewStatus": "View status",
+      "viewScheduled": "View scheduled post",
+      "continueDraft": "Continue editing draft",
+      "retry": "Retry post"
+    },
     "captionTitle": "Caption",
     "captionEmpty": "Not created yet",
     "captionPlaceholder": "Basiret will write a catchy caption based on the topic.",
@@ -1321,5 +1335,104 @@
   },
   "common": {
     "language": "English"
+  },
+  "contentPlanCreate": {
+    "backToPlan": "Back to Content Plan",
+    "back": "Back",
+    "nextCaption": "Next: Caption",
+    "nextPreview": "Next: Preview",
+    "indicatorLabel": "Wizard steps",
+    "step": {
+      "image": "Image",
+      "caption": "Caption",
+      "preview": "Preview"
+    },
+    "cancel": {
+      "cancel": "Cancel",
+      "close": "Close",
+      "title": "Save your changes?",
+      "body": "You have unsaved edits. Choose what to do before leaving.",
+      "updateSuggestion": "Update the suggestion (until next refresh)",
+      "saveDraft": "Save as draft",
+      "discard": "Discard"
+    },
+    "placeholder": {
+      "imageTitle": "Step 1 — Image",
+      "imageBody": "The image generation UI lands in the next checkpoint. You'll pick a style, refine the prompt, and either generate, regenerate, or upload your own.",
+      "captionTitle": "Step 2 — Caption",
+      "captionBody": "The caption generation UI lands in the next checkpoint. You'll see the image as a thumbnail, choose a language, generate a caption, and edit it inline.",
+      "previewTitle": "Step 3 — Preview",
+      "previewBody": "The Instagram-style preview, schedule picker, and submit actions land in the next checkpoint."
+    },
+    "image": {
+      "suggestionLabel": "BASIRET suggested",
+      "promptLabel": "Customize your image prompt",
+      "promptPlaceholder": "Describe the image you want BASIRET to create…",
+      "styleLabel": "Style",
+      "style": {
+        "photographic": {
+          "title": "Photographic",
+          "desc": "Real-life photo style"
+        },
+        "illustration": {
+          "title": "Illustration",
+          "desc": "Drawn or stylized art"
+        },
+        "lifestyle": {
+          "title": "Lifestyle",
+          "desc": "Casual, scene-based"
+        }
+      },
+      "ratioLabel": "Aspect ratio",
+      "ratio": {
+        "1x1": "1:1 — Square",
+        "4x5": "4:5 — Portrait",
+        "16x9": "16:9 — Landscape"
+      },
+      "generate": "Generate image",
+      "regenerate": "Regenerate",
+      "generating": "Generating…",
+      "loadingMessage": "Generating your image — this usually takes 10-20 seconds. Refining for your brand…",
+      "uploading": "Uploading your image…",
+      "editPrompt": "Edit prompt",
+      "uploadOwn": "Upload my own",
+      "emptyHint": "Generate an image above, or upload one you already have.",
+      "altText": "Generated post image",
+      "retry": "Retry",
+      "errorGenerate": "Couldn't generate the image. Try again or refine your prompt.",
+      "errorUpload": "Upload failed. Check the file and try again.",
+      "errorTooBig": "That file is too big — the limit is 50 MB.",
+      "errorNotImage": "Pick an image file (jpg, png, or webp)."
+    },
+    "caption": {
+      "thumbAlt": "Your post image",
+      "topicLabel": "Writing about",
+      "languageLabel": "Caption language",
+      "lang": {
+        "en": "English",
+        "ar": "Arabic"
+      },
+      "generate": "Generate caption",
+      "regenerate": "Regenerate",
+      "generating": "Generating…",
+      "loadingMessage": "Writing your caption — using your brand voice and any product details we picked up from the image…",
+      "placeholder": "Your generated caption will appear here. You can edit it freely once it's generated.",
+      "editedTag": "Edited",
+      "noImageHint": "Go back to the image step and pick or generate an image first.",
+      "retry": "Retry",
+      "errorGenerate": "Couldn't generate the caption. Try again.",
+      "replaceTitle": "Replace your edited caption?",
+      "replaceBody": "You've made changes to the caption since it was generated. Regenerating will replace your edits with new AI-written copy.",
+      "keepEdited": "Keep my edits",
+      "replaceConfirm": "Replace with new caption"
+    },
+    "preview": {
+      "dateLabel": "Schedule date",
+      "timeLabel": "Schedule time",
+      "saveDraft": "Save as draft",
+      "schedule": "Schedule",
+      "publishNow": "Publish now",
+      "errorSubmit": "Couldn't save the post. Try again."
+    }
   }
 }

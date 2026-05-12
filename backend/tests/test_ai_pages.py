@@ -662,3 +662,297 @@ def test_sentiment_responses_with_data_and_gemini(client, db, insights_user):
     for pid in post_ids:
         assert pid in template_by_id
         assert "DM us" in template_by_id[pid]
+
+
+# ── PATCH /content-plan/topic + GET extension ──────────────────
+
+
+def _seed_content_plan_cache(db, account_id, language="en", topics=None):
+    """Insert an ai_page_cache row mimicking a prior GET /content-plan call.
+
+    Returns the AiPageCache row so tests can inspect it after PATCH.
+    """
+    from app.models.ai_page_cache import AiPageCache
+    default_topics = {str(i): f"AI topic {i}" for i in range(7)}
+    row = AiPageCache(
+        social_account_id=account_id,
+        page_name="content-plan",
+        language=language,
+        content={"topics_by_idx": topics if topics is not None else default_topics},
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _insights_user_with_role(db, role):
+    """Helper: create an insights-plan user with a specific role so we can
+    exercise the role gate WITHOUT being short-circuited by the feature flag."""
+    from tests.conftest import create_test_user
+    from app.models.subscription import PlanTier
+    user, org, token = create_test_user(db, role=role, plan_tier=PlanTier.insights)
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    return user, org, token
+
+
+def test_update_content_plan_topic_happy_path(client, db, insights_user):
+    """Admin user with cache row → PATCH succeeds, content updated in DB."""
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=2)
+    _seed_content_plan_cache(db, account.id)
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(account.id),
+            "language": "en",
+            "day_index": 3,
+            "new_topic": "Cleaning a pool in 40°C Oman heat",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["day_index"] == 3
+    assert data["topic"] == "Cleaning a pool in 40°C Oman heat"
+    assert data["last_user_edit_at"] is not None
+
+    # Verify the DB row was actually updated and last_user_edit_at stamped
+    from app.models.ai_page_cache import AiPageCache
+    db.expire_all()
+    row = (
+        db.query(AiPageCache)
+        .filter(
+            AiPageCache.social_account_id == account.id,
+            AiPageCache.page_name == "content-plan",
+            AiPageCache.language == "en",
+        )
+        .first()
+    )
+    assert row.content["topics_by_idx"]["3"] == "Cleaning a pool in 40°C Oman heat"
+    assert row.last_user_edit_at is not None
+
+
+def test_update_content_plan_topic_viewer_forbidden(client, db):
+    """Viewer role → 403 even on insights plan (role gate, not feature gate)."""
+    from app.models.user import UserRole
+    user, org, token = _insights_user_with_role(db, UserRole.viewer)
+    account = seed_social_account_with_posts(db, org.id, num_posts=1)
+    _seed_content_plan_cache(db, account.id)
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(account.id),
+            "language": "en",
+            "day_index": 0,
+            "new_topic": "Topic from a viewer",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_update_content_plan_topic_system_admin_forbidden(client, db):
+    """system_admin → 403 (excluded from this gate; they're cross-org operators)."""
+    from app.models.user import UserRole
+    user, org, token = _insights_user_with_role(db, UserRole.system_admin)
+    account = seed_social_account_with_posts(db, org.id, num_posts=1)
+    _seed_content_plan_cache(db, account.id)
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(account.id),
+            "language": "en",
+            "day_index": 0,
+            "new_topic": "Edited by system admin",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_update_content_plan_topic_other_org_account_404(client, db, insights_user):
+    """Account belongs to a different organization → 404."""
+    _, _, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+
+    # Create a separate org with an account; this org's user is NOT the
+    # caller — caller's JWT references insights_user's org.
+    from tests.conftest import create_test_user
+    from app.models.subscription import PlanTier
+    _, other_org, _ = create_test_user(db, plan_tier=PlanTier.insights)
+    other_account = seed_social_account_with_posts(db, other_org.id, num_posts=1)
+    _seed_content_plan_cache(db, other_account.id)
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(other_account.id),
+            "language": "en",
+            "day_index": 0,
+            "new_topic": "Cross-org write attempt",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_update_content_plan_topic_invalid_day_index(client, db, insights_user):
+    """day_index outside 0-6 → 422 via Pydantic ge/le."""
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=1)
+    _seed_content_plan_cache(db, account.id)
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(account.id),
+            "language": "en",
+            "day_index": 7,
+            "new_topic": "out of range",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+def test_update_content_plan_topic_no_cache_row(client, db, insights_user):
+    """No cache row exists for (account, lang) → 422 forcing GET first."""
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=1)
+    # No _seed_content_plan_cache call — row absent.
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(account.id),
+            "language": "en",
+            "day_index": 2,
+            "new_topic": "Edit before GET",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+    assert "content plan" in resp.json()["detail"].lower()
+
+
+def test_update_content_plan_topic_arabic_pathway(client, db, insights_user):
+    """AR language is keyed separately from EN — editing one must not touch the other."""
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=1)
+    _seed_content_plan_cache(db, account.id, language="en")
+    _seed_content_plan_cache(db, account.id, language="ar")
+
+    resp = client.patch(
+        "/api/v1/ai-pages/content-plan/topic",
+        json={
+            "social_account_id": str(account.id),
+            "language": "ar",
+            "day_index": 4,
+            "new_topic": "تنظيف المسبح في حر عمان",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+    from app.models.ai_page_cache import AiPageCache
+    db.expire_all()
+    ar = db.query(AiPageCache).filter(
+        AiPageCache.social_account_id == account.id,
+        AiPageCache.language == "ar",
+    ).first()
+    en = db.query(AiPageCache).filter(
+        AiPageCache.social_account_id == account.id,
+        AiPageCache.language == "en",
+    ).first()
+    assert ar.content["topics_by_idx"]["4"] == "تنظيف المسبح في حر عمان"
+    # EN row untouched
+    assert en.content["topics_by_idx"]["4"] == "AI topic 4"
+
+
+def test_content_plan_response_includes_scheduled_post_for_matching_day(
+    client, db, insights_user,
+):
+    """GET /content-plan annotates each day with scheduled_post when one exists
+    on that day's content_plan_day."""
+    from datetime import date, datetime, timedelta, timezone
+    from app.models.scheduled_post import ScheduledPost
+
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=2)
+
+    # Seed a scheduled post on day_index=2 (today + 2)
+    target_date = date.today() + timedelta(days=2)
+    sp = ScheduledPost(
+        organization_id=org.id,
+        social_account_id=account.id,
+        media_urls=["https://example.com/img.png"],
+        media_type="image",
+        caption_en="From the plan",
+        status="scheduled",
+        scheduled_at=datetime.now(timezone.utc) + timedelta(days=2),
+        content_plan_day=target_date,
+    )
+    db.add(sp)
+    db.commit()
+    db.refresh(sp)
+
+    fake = {"topics": [{"day_index": i, "topic": f"T{i}"} for i in range(7)]}
+    with mock_gemini(json_response=fake):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200
+    days = resp.json()["data"]["days"]
+
+    by_idx = {d["day_index"]: d for d in days}
+    # Day 2 is annotated
+    assert by_idx[2]["scheduled_post"] is not None
+    assert by_idx[2]["scheduled_post"]["id"] == str(sp.id)
+    assert by_idx[2]["scheduled_post"]["status"] == "scheduled"
+    # Days without scheduled posts are explicitly null
+    assert by_idx[0]["scheduled_post"] is None
+    assert by_idx[6]["scheduled_post"] is None
+
+
+def test_content_plan_response_omits_cancelled_scheduled_post(
+    client, db, insights_user,
+):
+    """A cancelled scheduled_post should NOT light up the 'Scheduled ✓' badge."""
+    from datetime import date, timedelta
+    from app.models.scheduled_post import ScheduledPost
+
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=1)
+
+    target_date = date.today() + timedelta(days=1)
+    sp = ScheduledPost(
+        organization_id=org.id,
+        social_account_id=account.id,
+        media_urls=[],
+        status="cancelled",
+        content_plan_day=target_date,
+    )
+    db.add(sp)
+    db.commit()
+
+    fake = {"topics": [{"day_index": i, "topic": f"T{i}"} for i in range(7)]}
+    with mock_gemini(json_response=fake):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    days = resp.json()["data"]["days"]
+    # Day 1 should still be null — cancelled doesn't count
+    by_idx = {d["day_index"]: d for d in days}
+    assert by_idx[1]["scheduled_post"] is None

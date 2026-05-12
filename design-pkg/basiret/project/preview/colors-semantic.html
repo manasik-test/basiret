@@ -1,0 +1,31 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Colors — Semantic</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 20px; background: var(--surface); display: grid; gap: 14px; }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--surface); }
+  .swatch { height: 32px; border-radius: 6px; margin-bottom: 8px; border: 1px solid var(--line); }
+  .name { font: 600 12px/1 'IBM Plex Sans Arabic'; color: var(--ink-900); }
+  .var  { font: 500 10px/1 'Inter'; color: var(--ink-500); margin-top: 4px; }
+</style></head><body>
+<div>
+  <div class="lbl">Surfaces & lines</div>
+  <div class="row">
+    <div class="card"><div class="swatch" style="background:#fff"></div><div class="name">Surface</div><div class="var">--surface</div></div>
+    <div class="card"><div class="swatch" style="background:#f5f3f9"></div><div class="name">Canvas</div><div class="var">--canvas</div></div>
+    <div class="card"><div class="swatch" style="background:#ebe9f2"></div><div class="name">Line</div><div class="var">--line</div></div>
+    <div class="card"><div class="swatch" style="background:#d8d5e4"></div><div class="name">Line strong</div><div class="var">--line-strong</div></div>
+  </div>
+</div>
+<div>
+  <div class="lbl">Status</div>
+  <div class="row">
+    <div class="card"><div class="swatch" style="background:#2f9e6b"></div><div class="name">Success</div><div class="var">--success</div></div>
+    <div class="card"><div class="swatch" style="background:#d99020"></div><div class="name">Warning</div><div class="var">--warning</div></div>
+    <div class="card"><div class="swatch" style="background:#d04a4a"></div><div class="name">Danger</div><div class="var">--danger</div></div>
+    <div class="card"><div class="swatch" style="background:#6341e0"></div><div class="name">Info / brand</div><div class="var">--purple-600</div></div>
+  </div>
+</div>
+</body></html>

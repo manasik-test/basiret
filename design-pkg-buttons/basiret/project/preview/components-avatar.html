@@ -1,0 +1,37 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Avatar & user</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 22px; background: var(--surface); display: grid; gap: 18px; }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 4px; }
+  .row { display: flex; align-items: center; gap: 14px; }
+  .av {
+    border-radius: 50%; display: grid; place-items: center;
+    background: var(--purple-100); color: var(--purple-700);
+    font: 700 12px/1 'Inter';
+  }
+  .av-32 { width: 32px; height: 32px; font-size: 12px; }
+  .av-40 { width: 40px; height: 40px; font-size: 14px; }
+  .av-56 { width: 56px; height: 56px; font-size: 18px; }
+  .av-img { background: linear-gradient(135deg,#e8e0ff,#9b82f5); color: transparent; }
+  .user-block { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); width: fit-content; }
+  .user-name { font: 600 13px/1.2 'IBM Plex Sans Arabic'; color: var(--ink-900); }
+  .user-plan { font: 500 11px/1.2 'IBM Plex Sans Arabic'; color: var(--ink-500); margin-top: 2px; }
+</style></head><body>
+<div>
+  <div class="lbl">Avatars</div>
+  <div class="row">
+    <div class="av av-32">TA</div>
+    <div class="av av-40">RM</div>
+    <div class="av av-56">SK</div>
+    <div class="av av-56 av-img"></div>
+  </div>
+</div>
+<div>
+  <div class="lbl">User block</div>
+  <div class="user-block">
+    <div class="av av-32">TA</div>
+    <div><div class="user-name">Tasyeer Abdalla</div><div class="user-plan">خطة مجانية</div></div>
+  </div>
+</div>
+</body></html>

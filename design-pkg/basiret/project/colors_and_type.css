@@ -1,0 +1,161 @@
+/* Basiret Design System — Tokens + Semantic Type
+   Import in any artifact: <link rel="stylesheet" href="colors_and_type.css">
+   The full app stylesheet (styles.css) extends these. */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ── Brand purple — primary (anchored on #664FA1) ──────────── */
+  --purple-50:  #f4f1fa;
+  --purple-100: #e8e1f4;
+  --purple-200: #d2c5e9;
+  --purple-300: #b09ad6;
+  --purple-400: #8c70bf;
+  --purple-500: #7559b0;
+  --purple-600: #664FA1;   /* Brand primary — logo anchor */
+  --purple-700: #543f88;
+  --purple-800: #41306b;
+  --purple-900: #2c2049;
+
+  /* ── Brand pink — secondary (anchored on #BF499B) ──────────── */
+  --pink-50:    #fbf2f8;
+  --pink-100:   #f6e2ee;
+  --pink-200:   #ecc4dd;
+  --pink-300:   #dd9bc4;
+  --pink-400:   #cc6cab;
+  --pink-500:   #BF499B;   /* Brand secondary — logo end */
+  --pink-600:   #a23a82;
+  --pink-700:   #832e69;
+
+  /* ── Brand sky — tertiary (anchored on #A5DDEC) ────────────── */
+  --sky-50:     #f1fafd;
+  --sky-100:    #dff2f8;
+  --sky-200:    #c6e8f2;
+  --sky-300:    #A5DDEC;   /* Brand tertiary — illustrations */
+  --sky-400:    #7cc6db;
+  --sky-500:    #56adc6;
+  --sky-600:    #3e8ca3;
+
+  /* ── Brand gradient (logo) ─────────────────────────────────── */
+  --brand-gradient: linear-gradient(135deg, #664FA1 0%, #BF499B 100%);
+
+  /* ── Off-white ─────────────────────────────────────────────── */
+  --off-white: #faf8f5;
+
+  /* ── Ink / neutrals — slightly cool ─────────────────────────── */
+  --ink-950: #12101a;
+  --ink-900: #1c1a28;   /* Primary text */
+  --ink-800: #2a2839;
+  --ink-700: #3d3b50;
+  --ink-600: #55536b;   /* Secondary text */
+  --ink-500: #74718a;   /* Tertiary text */
+  --ink-400: #9996ad;   /* Muted */
+  --ink-300: #bfbdcc;
+  --ink-200: #e3e1ec;
+  --ink-150: #ecebf3;
+  --ink-100: #f3f2f8;
+  --ink-50:  #faf9fc;
+
+  /* ── Semantic surfaces ──────────────────────────────────────── */
+  --surface:     #ffffff;   /* Cards, sidebar, sheets */
+  --canvas:      #f5f3f9;   /* Page background */
+  --line:        #ebe9f2;   /* Default border */
+  --line-strong: #d8d5e4;   /* Emphasized border */
+
+  /* ── Content-type accents (share chroma in oklch) ───────────── */
+  --video:    oklch(0.58 0.14 25);    /* warm coral */
+  --image:    oklch(0.58 0.14 180);   /* teal */
+  --carousel: oklch(0.58 0.14 295);   /* violet */
+
+  --video-tone:    rgba(234, 105, 90, 0.10);
+  --image-tone:    rgba(70, 168, 158, 0.10);
+  --carousel-tone: rgba(124, 92, 239, 0.10);
+
+  /* ── Status (used sparingly) ────────────────────────────────── */
+  --success: #2f9e6b;
+  --warning: #d99020;
+  --danger:  #d04a4a;
+
+  /* ── Radii ──────────────────────────────────────────────────── */
+  --radius-sm: 8px;
+  --radius:    12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+
+  /* ── Shadows — soft, ink-tinted, never harsh ───────────────── */
+  --shadow-sm: 0 1px 2px rgba(30, 20, 70, 0.04);
+  --shadow:    0 4px 14px -4px rgba(30, 20, 70, 0.08), 0 1px 2px rgba(30, 20, 70, 0.04);
+  --shadow-lg: 0 18px 40px -18px rgba(30, 20, 70, 0.18);
+
+  /* ── Spacing scale (4px base) ───────────────────────────────── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* ── Type families ──────────────────────────────────────────── */
+  --font-ar:  'IBM Plex Sans Arabic', 'Inter', system-ui, sans-serif;
+  --font-num: 'Inter', system-ui, sans-serif;
+}
+
+/* ── Base ───────────────────────────────────────────────────── */
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-ar);
+  color: var(--ink-900);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Semantic type — use as classes ─────────────────────────── */
+.bsr-display {
+  font-size: 40px; font-weight: 700; line-height: 1.15;
+  letter-spacing: -0.02em; color: var(--ink-900);
+}
+.bsr-h1 {
+  font-size: 28px; font-weight: 700; line-height: 1.25;
+  letter-spacing: -0.015em; color: var(--ink-900);
+}
+.bsr-h2 {
+  font-size: 22px; font-weight: 600; line-height: 1.3;
+  letter-spacing: -0.01em; color: var(--ink-900);
+}
+.bsr-h3 {
+  font-size: 17px; font-weight: 600; line-height: 1.35;
+  letter-spacing: -0.005em; color: var(--ink-900);
+}
+.bsr-body {
+  font-size: 14px; font-weight: 400; line-height: 1.55;
+  color: var(--ink-700);
+}
+.bsr-body-sm {
+  font-size: 13px; font-weight: 400; line-height: 1.5;
+  color: var(--ink-700);
+}
+.bsr-caption {
+  font-size: 12px; font-weight: 500; line-height: 1.4;
+  color: var(--ink-500);
+}
+.bsr-eyebrow {
+  font-size: 11px; font-weight: 600; line-height: 1.3;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-400); font-family: var(--font-num);
+}
+.bsr-num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Focus ──────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--purple-500);
+  outline-offset: 2px;
+  border-radius: 6px;
+}

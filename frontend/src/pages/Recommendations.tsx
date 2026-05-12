@@ -16,6 +16,92 @@ import { cn } from '../lib/utils'
 
 /* ---------------- helpers ---------------- */
 
+import type { ContentPlanDayScheduledPost } from '../api/analytics'
+
+/** Status → badge color + i18n suffix. Mirrors the spec's color choices:
+ *  green=published, blue=scheduled, orange=failed, gray=draft,
+ *  purple=publishing. Each variant uses the same .cp-row-sched-* pattern. */
+const SCHED_BADGE_STYLE: Record<string, { bg: string; fg: string; key: string }> = {
+  published:  { bg: 'rgba(16,185,129,.12)',  fg: '#047857', key: 'published' },
+  scheduled:  { bg: 'rgba(59,130,246,.12)',  fg: '#1d4ed8', key: 'scheduled' },
+  publishing: { bg: 'rgba(168,85,247,.12)',  fg: '#7e22ce', key: 'publishing' },
+  draft:      { bg: 'rgba(100,116,139,.12)', fg: '#475569', key: 'draft' },
+  failed:     { bg: 'rgba(245,158,11,.16)',  fg: '#b45309', key: 'failed' },
+}
+
+function ScheduledBadge({ status }: { status: ContentPlanDayScheduledPost['status'] }) {
+  const { t } = useTranslation()
+  const meta = SCHED_BADGE_STYLE[status] ?? SCHED_BADGE_STYLE.draft!
+  return (
+    <span
+      className="cp-row-sched"
+      style={{ background: meta.bg, color: meta.fg }}
+      data-testid={`sched-badge-${status}`}
+    >
+      <Icon path={I.check} size={10} /> {t(`contentPlanPage.scheduled.${meta.key}` as 'contentPlanPage.scheduled.scheduled')}
+    </span>
+  )
+}
+
+/** Status-aware CTA replacing "Create from this day" when a scheduled_post
+ *  already exists for the selected day. */
+function ScheduledAction({
+  scheduled,
+  onOpenDraft,
+  onOpenScheduledList,
+}: {
+  scheduled: ContentPlanDayScheduledPost
+  onOpenDraft: (id: string) => void
+  onOpenScheduledList: () => void
+}) {
+  const { t } = useTranslation()
+  const { status, id, permalink } = scheduled
+
+  if (status === 'published' && permalink) {
+    return (
+      <a
+        className="cp-ghost"
+        href={permalink}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid={`sched-action-${status}`}
+      >
+        <Icon path={I.trend} size={14} />
+        {t('contentPlanPage.scheduledAction.viewOnInstagram')}
+      </a>
+    )
+  }
+  if (status === 'draft') {
+    return (
+      <button
+        className="cp-ghost"
+        onClick={() => onOpenDraft(id)}
+        data-testid={`sched-action-${status}`}
+      >
+        <Icon path={I.pencil} size={14} />
+        {t('contentPlanPage.scheduledAction.continueDraft')}
+      </button>
+    )
+  }
+  // scheduled / publishing / failed all route to the scheduled list.
+  const labelKey =
+    status === 'failed'
+      ? 'contentPlanPage.scheduledAction.retry'
+      : status === 'publishing'
+      ? 'contentPlanPage.scheduledAction.viewStatus'
+      : 'contentPlanPage.scheduledAction.viewScheduled'
+  return (
+    <button
+      className="cp-ghost"
+      onClick={onOpenScheduledList}
+      data-testid={`sched-action-${status}`}
+    >
+      <Icon path={I.calendar} size={14} />
+      {t(labelKey as 'contentPlanPage.scheduledAction.viewScheduled')}
+    </button>
+  )
+}
+
 const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 function toArDigits(s: string | number): string {
   return String(s)
@@ -251,12 +337,14 @@ function ContentPlanContent() {
               const dayName = t(`contentPlanPage.day.${d.day_label.toLowerCase()}`)
               const md = monthShort(new Date(d.date + 'T00:00:00'))
               const hasCaption = !!captions[realIdx]
+              const sp = d.scheduled_post ?? null
               const typeLabel = t(`contentPlanPage.filter${tNorm.charAt(0).toUpperCase() + tNorm.slice(1)}` as 'contentPlanPage.filterVideo')
               return (
                 <button
                   key={realIdx}
-                  className={`cp-row ${realIdx === selectedIdx ? 'is-on' : ''}`}
+                  className={`cp-row ${realIdx === selectedIdx ? 'is-on' : ''} ${sp ? 'has-scheduled' : ''}`}
                   onClick={() => setSelectedIdx(realIdx)}
+                  data-testid={`cp-row-day-${realIdx}`}
                 >
                   <div className="cp-row-date">
                     <div className="cp-row-day">{dayName}</div>
@@ -270,7 +358,10 @@ function ContentPlanContent() {
                       <span className="cp-row-type" style={{ color }}>
                         <TypeIcon type={tNorm} size={12} /> {typeLabel}
                       </span>
-                      {hasCaption && (
+                      {sp && (
+                        <ScheduledBadge status={sp.status} />
+                      )}
+                      {!sp && hasCaption && (
                         <span className="cp-row-done">
                           <Icon path={I.check} size={10} /> {t('contentPlanPage.readyTag')}
                         </span>
@@ -398,23 +489,36 @@ function ContentPlanContent() {
           </div>
 
           <div className="cp-prev-actions">
-            <button
-              className="cp-ghost"
-              onClick={() => {
-                // Pre-fill the wizard from this AI Plan day so the user
-                // doesn't have to retype topic / type / time.
-                const params = new URLSearchParams({
-                  date: sel.date,
-                  topic: sel.topic ?? '',
-                  time: sel.best_time ?? '',
-                  type: normalizeContentType(sel.content_type),
-                })
-                navigate(`/create?${params.toString()}`)
-              }}
-            >
-              <Icon path={I.spark} size={14} />
-              {t('contentPlanPage.createFromDay')}
-            </button>
+            {sel.scheduled_post ? (
+              <ScheduledAction
+                scheduled={sel.scheduled_post}
+                onOpenDraft={(id) => navigate(`/create?edit=${id}`)}
+                onOpenScheduledList={() => navigate('/content-plan')}
+              />
+            ) : (
+              <button
+                className="cp-ghost"
+                onClick={() => {
+                  // Guided wizard. Pass the source-of-truth via location.state
+                  // rather than a querystring so the wizard can refuse to load
+                  // on a deep-link / refresh (state-less navigation → redirect).
+                  navigate('/content-plan/create', {
+                    state: {
+                      day_index: selectedIdx,
+                      suggestion_topic: sel.topic ?? '',
+                      content_plan_day: sel.date,
+                      content_type: normalizeContentType(sel.content_type),
+                      best_time: sel.best_time ?? '',
+                      language: isAr ? 'ar' : 'en',
+                    },
+                  })
+                }}
+                data-testid="create-from-day"
+              >
+                <Icon path={I.spark} size={14} />
+                {t('contentPlanPage.createFromDay')}
+              </button>
+            )}
             <button
               className="cp-cta"
               onClick={handleGenerate}
@@ -1058,6 +1162,10 @@ const CP_STYLES = `
 .cp-row-top { display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap; }
 .cp-row-type { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; }
 .cp-row-done { display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; color:oklch(0.5 0.15 155); background:oklch(0.95 0.05 155); padding:2px 7px; border-radius:99px; }
+.cp-row-sched { display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; padding:2px 7px; border-radius:99px; }
+.cp-row.has-scheduled { opacity:.85; }
+.cp-row.has-scheduled .cp-row-topic { color:var(--ink-700); }
+.cp-row.has-scheduled.is-on { opacity:1; }
 .cp-row-topic { font-size:14px; font-weight:600; color:var(--ink-900); line-height:1.4; letter-spacing:-0.005em; }
 
 .cp-row-meta { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }

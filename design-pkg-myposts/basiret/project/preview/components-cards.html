@@ -1,0 +1,33 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Cards</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 24px; background: var(--canvas); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 14px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; box-shadow: var(--shadow-sm); }
+  .stat { display: flex; flex-direction: column; gap: 6px; }
+  .stat .eye { font: 600 11px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); }
+  .stat .num { font: 700 28px/1 'Inter'; font-variant-numeric: tabular-nums; color: var(--ink-900); letter-spacing: -.01em; }
+  .stat .delta { font: 600 12px/1 'Inter'; color: var(--success); }
+  .post { display: grid; grid-template-columns: 60px 1fr; gap: 14px; align-items: center; }
+  .thumb { height: 60px; border-radius: 10px; background: linear-gradient(135deg,#e8e0ff,#9b82f5); }
+  .post .t { font: 600 14px/1.35 'IBM Plex Sans Arabic'; color: var(--ink-900); margin: 0 0 4px; }
+  .post .m { font: 500 12px/1 'IBM Plex Sans Arabic'; color: var(--ink-500); }
+</style></head><body>
+<div class="lbl">Cards — KPI · post tile</div>
+<div class="row">
+  <div class="card stat">
+    <div class="eye">المتابعون</div>
+    <div class="num">12,438</div>
+    <div class="delta">↑ 18.4% هذا الأسبوع</div>
+  </div>
+  <div class="card post">
+    <div class="thumb"></div>
+    <div>
+      <div class="t">نصائح سريعة لنمو الحساب</div>
+      <div class="m">٢٩ أبريل · ١٦:٠٠ · فيديو</div>
+    </div>
+  </div>
+</div>
+</body></html>

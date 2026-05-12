@@ -36,3 +36,5 @@ backend/celerybeat-schedule
 /*-check.png
 /analytics-final.png
 /content-plan-english.png
+# Local prod DB backups taken before destructive migrations — never commit
+.backups/

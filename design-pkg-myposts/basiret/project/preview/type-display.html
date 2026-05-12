@@ -1,0 +1,18 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Type — Display</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 24px; background: var(--surface); }
+  .row { display: flex; flex-direction: column; gap: 14px; }
+  .specimen { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .specimen:last-child { border-bottom: none; }
+  .label { font: 500 11px/1 'Inter'; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-400); width: 110px; flex-shrink: 0; }
+  .meta  { font: 500 11px/1 'Inter'; color: var(--ink-500); margin-inline-start: auto; }
+</style></head><body>
+<div class="row">
+  <div class="specimen"><span class="label">Display</span><span class="bsr-display">بصيرة المحتوى</span><span class="meta">40 / 700 / -0.02em</span></div>
+  <div class="specimen"><span class="label">H1</span><span class="bsr-h1">خطة المحتوى لهذا الأسبوع</span><span class="meta">28 / 700</span></div>
+  <div class="specimen"><span class="label">H2</span><span class="bsr-h2">منشورات مقترحة من بصيرة</span><span class="meta">22 / 600</span></div>
+  <div class="specimen"><span class="label">H3</span><span class="bsr-h3">تحليل المنافسين الأسبوعي</span><span class="meta">17 / 600</span></div>
+</div>
+</body></html>

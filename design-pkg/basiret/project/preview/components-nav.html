@@ -1,0 +1,29 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Nav item</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 22px; background: var(--surface); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 14px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; width: 240px; display: flex; flex-direction: column; gap: 2px; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; color: var(--ink-600); font: 500 14px/1 'IBM Plex Sans Arabic'; cursor: pointer; }
+  .item.hover { background: var(--ink-100); color: var(--ink-900); }
+  .item.active { background: var(--purple-50); color: var(--purple-700); font-weight: 600; }
+  .item.active svg { color: var(--purple-600); }
+  .state { font: 500 10px/1 'Inter'; color: var(--ink-400); margin-inline-start: auto; }
+</style></head><body>
+<div class="lbl">Nav item — rest, hover, active</div>
+<div class="panel">
+  <div class="item">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V9.5"/></svg>
+    الرئيسية<span class="state">rest</span>
+  </div>
+  <div class="item hover">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    منشوراتي<span class="state">hover</span>
+  </div>
+  <div class="item active">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17"/><path d="M8 3v4M16 3v4"/></svg>
+    خطة المحتوى<span class="state">active</span>
+  </div>
+</div>
+</body></html>

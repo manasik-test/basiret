@@ -46,6 +46,20 @@ def require_system_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_admin_or_manager(user: User = Depends(get_current_user)) -> User:
+    """Gate for content-mutation actions on an organization's own assets.
+
+    Excludes both `viewer` (read-only) and `system_admin` (cross-org operator,
+    not a content owner). First introduced for PATCH /ai-pages/content-plan/topic.
+    """
+    if user.role not in (UserRole.admin, UserRole.manager):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or manager role required",
+        )
+    return user
+
+
 # ── Feature flag guard ──────────────────────────────────────
 
 class RequireFeature:

@@ -1287,3 +1287,44 @@ The 2026-04-22 entry shipped the `AIProvider` abstraction but kept the historica
 - **Lock key collisions not logged.** If two different UUIDs ever hash to the same bigint, the duplicate-detection would fire spuriously — a "successful" regenerate would silently Ignore even though no other task is running. At graduation scale this is astronomically unlikely (<10 accounts in prod, 2⁻⁶³ collision probability per pair), but if the user base ever grows by 1000×, consider logging the `(account_id, lock_key)` pair so collisions become visible in the logs.
 - **Frontend still has the 30-second regenerate cooldown** (added in commit `8876e5a` — "Swap openai-whisper for faster-whisper + 30s debounce on regen"). With the server-side lock, the 30s is redundant as a correctness safety net but kept as UX — prevents users from spamming the button visually. No change made to the frontend.
 - **Carried over from earlier sessions:** `feature_flag` Alembic migration gap, Meta App Review for `instagram_business_manage_comments`, orphaned `deploy.sh`, no rollback in deploy step, State JWT reuse not prevented, OPENAI_API_KEY rotation needed before publishing repo.
+
+---
+
+## Meta integration — gotchas worth recording
+
+Two things that have bitten the OAuth flow during prod debugging. Both are easy to re-trip without these notes.
+
+### 1. Four credentials, not two — FB and IG products each have their own id+secret
+Meta Instagram Business Login uses **four** distinct credentials, paired across two app products. They are NOT interchangeable, and the FB pair is NOT a fallback for the IG pair.
+
+| Product | Env var | Value (this project) | Used for |
+|---|---|---|---|
+| **Facebook** (Settings → Basic) | `META_APP_ID` | `1367763495118224` | Graph API server-to-server admin calls (data-deletion HMAC, app-level diagnostics) |
+| **Facebook** (Settings → Basic) | `META_APP_SECRET` | `7cf6a8…` | Pairs with `META_APP_ID`. Reserved for FB Graph admin + data-deletion HMAC. NOT used by the Instagram OAuth flow. |
+| **Instagram** (Use Cases → API setup with Instagram Login) | `INSTAGRAM_APP_ID` | `782330678230303` | `client_id` on `instagram.com/oauth/authorize` AND `api.instagram.com/oauth/access_token` |
+| **Instagram** (Use Cases → API setup with Instagram Login) | `INSTAGRAM_APP_SECRET` | `3384a8…` | `client_secret` on BOTH the short-token exchange AND the long-lived exchange (`graph.instagram.com/access_token` via `ig_exchange_token`) |
+
+**Pairing rule:** the OAuth flow uses `INSTAGRAM_APP_ID` + `INSTAGRAM_APP_SECRET` together as a pair. The Facebook id+secret are paired with each other but live on the FB product page. Cross-product mixing fails.
+
+**Symptoms of swapping them:**
+
+| Symptom | Most likely cause |
+|---|---|
+| "Invalid platform app" on Meta consent screen | `client_id` is the FB App ID instead of `INSTAGRAM_APP_ID` |
+| "Error validating verification code. Please make sure your redirect_uri is identical to the one you used in the OAuth dialog request" | **Misleading** — usually means `client_secret` doesn't pair with `client_id`. Meta's error mapper bundles auth-mismatch under the redirect_uri message. Verify the secret pair first, THEN check the redirect URI |
+| "redirect URI mismatch" (a different, clearer error) | Redirect URI on the access_token call isn't byte-identical to what's registered for the Instagram product |
+
+All four vars are required by `Settings()` (no defaults) so a missing one fails fast at container startup rather than silently picking up a stale value. See [backend/app/core/config.py](backend/app/core/config.py) and [backend/app/api/v1/instagram.py](backend/app/api/v1/instagram.py).
+
+**End-to-end confirmed working on prod 2026-05-11** with this four-credential setup.
+
+### 2. Instagram OAuth redirect URIs live under "Use Cases", not Facebook Login
+Instagram Business Login redirect URIs must be set at:
+
+> **Meta App dashboard → Use Cases → API setup with Instagram Login → Section 4: Set up Instagram business login → Redirect URL field**
+
+NOT under **Facebook Login for Business → Settings**. The two products have **independent** redirect URI lists and validate **separately**. Facebook Login's "Redirect URI Validator" passing means nothing for Instagram OAuth — the Instagram product won't see that list at all.
+
+**Symptom of registering in the wrong place:** OAuth fails with "redirect URI mismatch" after the user grants consent, even when the env var on the server byte-matches what's registered (because Instagram is comparing against its own product's list, which is empty/different).
+
+**Production redirect URI** (must appear verbatim in the Instagram product's list): `https://basiret.co/api/v1/instagram/callback` — no `www.`, no trailing slash, exact case.

@@ -1,0 +1,25 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Spacing</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 20px; background: var(--surface); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 12px; }
+  .row { display: flex; flex-direction: column; gap: 10px; }
+  .item { display: flex; align-items: center; gap: 14px; }
+  .name { font: 600 11px/1 'Inter'; color: var(--ink-900); width: 70px; }
+  .px   { font: 500 11px/1 'Inter'; color: var(--ink-500); width: 50px; }
+  .bar  { height: 14px; background: var(--purple-200); border-radius: 4px; }
+</style></head><body>
+<div class="lbl">Spacing scale — 4px base</div>
+<div class="row">
+  <div class="item"><span class="name">--s-1</span><span class="px">4px</span><span class="bar" style="width:4px"></span></div>
+  <div class="item"><span class="name">--s-2</span><span class="px">8px</span><span class="bar" style="width:8px"></span></div>
+  <div class="item"><span class="name">--s-3</span><span class="px">12px</span><span class="bar" style="width:12px"></span></div>
+  <div class="item"><span class="name">--s-4</span><span class="px">16px</span><span class="bar" style="width:16px"></span></div>
+  <div class="item"><span class="name">--s-5</span><span class="px">20px</span><span class="bar" style="width:20px"></span></div>
+  <div class="item"><span class="name">--s-6</span><span class="px">24px</span><span class="bar" style="width:24px"></span></div>
+  <div class="item"><span class="name">--s-8</span><span class="px">32px</span><span class="bar" style="width:32px"></span></div>
+  <div class="item"><span class="name">--s-10</span><span class="px">40px</span><span class="bar" style="width:40px"></span></div>
+  <div class="item"><span class="name">--s-12</span><span class="px">48px</span><span class="bar" style="width:48px"></span></div>
+</div>
+</body></html>

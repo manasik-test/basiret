@@ -25,10 +25,10 @@ import logging
 import re
 import threading
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date as _date, datetime, timedelta, timezone
 from typing import Callable, Literal
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -44,7 +44,8 @@ from app.core.ai_degradation import (
 from app.core.ai_provider import AIProviderError, get_provider
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import RequireFeature, get_current_user
+from app.core.deps import RequireFeature, get_current_user, require_admin_or_manager
+from app.models.scheduled_post import ScheduledPost
 from app.models.ai_page_cache import AiPageCache
 from app.models.analysis_result import AnalysisResult
 from app.models.audience_segment import AudienceSegment
@@ -1421,7 +1422,136 @@ def content_plan(
         if key in topics_by_idx:
             d["topic"] = topics_by_idx[key]
 
+    # Annotate each day with the scheduled_post that originated from it
+    # (if any), so the frontend can swap "Create post for this day" for
+    # "View scheduled post" + render a "Scheduled ✓" badge. content_plan_day
+    # on scheduled_post is a DATE column populated by the wizard at submit
+    # time — single IN-query, no date-range scan.
+    plan_dates = [_date.fromisoformat(d["date"]) for d in days]
+    sched_rows = (
+        db.query(
+            ScheduledPost.id,
+            ScheduledPost.status,
+            ScheduledPost.permalink,
+            ScheduledPost.content_plan_day,
+            ScheduledPost.created_at,
+        )
+        .filter(
+            ScheduledPost.organization_id == user.organization_id,
+            ScheduledPost.social_account_id.in_(account_ids),
+            ScheduledPost.content_plan_day.in_(plan_dates),
+            ScheduledPost.status != "cancelled",
+        )
+        .all()
+    )
+    # When multiple posts share a content_plan_day, prefer the most-progressed
+    # status (published > publishing > scheduled > draft > failed), then the
+    # most recently created one — that's the post the user most likely wants
+    # surfaced behind the badge.
+    _STATUS_PRIORITY = {
+        "published": 0,
+        "publishing": 1,
+        "scheduled": 2,
+        "draft": 3,
+        "failed": 4,
+    }
+    by_day: dict[str, dict] = {}
+    sorted_rows = sorted(
+        sched_rows,
+        key=lambda r: (
+            _STATUS_PRIORITY.get(r.status, 99),
+            -(r.created_at.timestamp() if r.created_at else 0),
+        ),
+    )
+    for r in sorted_rows:
+        key = r.content_plan_day.isoformat()
+        if key in by_day:
+            continue
+        by_day[key] = {
+            "id": str(r.id),
+            "status": r.status,
+            "permalink": r.permalink,
+        }
+    for d in days:
+        d["scheduled_post"] = by_day.get(d["date"])
+
     return {"success": True, "data": {"days": days}, "meta": meta}
+
+
+# ── Content Plan: user-override of a single day's topic ────────────────
+
+class UpdateContentPlanTopicRequest(BaseModel):
+    social_account_id: str
+    language: LanguageParam = "en"
+    day_index: int = Field(..., ge=0, le=6)
+    new_topic: str = Field(..., min_length=1, max_length=200)
+
+
+@router.patch("/content-plan/topic")
+def update_content_plan_topic(
+    body: UpdateContentPlanTopicRequest = Body(...),
+    user: User = Depends(require_admin_or_manager),
+    _gated: User = Depends(RequireFeature("content_recommendations")),
+    db: Session = Depends(get_db),
+):
+    """Persist a user-edited Content Plan topic for a single day.
+
+    Powers the "Update the suggestion (until next refresh)" branch of the
+    Create-Post wizard's cancel dialog. Writes the new topic into the
+    existing ai_page_cache row keyed by (social_account_id, "content-plan",
+    language) and stamps `last_user_edit_at` — `generated_at` is left alone
+    so the SWR layer still treats the row as having its original AI-fresh
+    timestamp. The user override therefore survives until the next AI
+    regeneration overwrites the row, which matches the wizard copy.
+    """
+    # Validate social_account_id belongs to caller's organization.
+    account = (
+        db.query(SocialAccount)
+        .filter(
+            SocialAccount.id == body.social_account_id,
+            SocialAccount.organization_id == user.organization_id,
+        )
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Social account not found")
+
+    row = (
+        db.query(AiPageCache)
+        .filter(
+            AiPageCache.social_account_id == body.social_account_id,
+            AiPageCache.page_name == "content-plan",
+            AiPageCache.language == body.language,
+        )
+        .first()
+    )
+    if not row:
+        # GET /content-plan must materialize the row first — without it
+        # there's nothing to patch. Force the frontend to load the plan
+        # before editing rather than silently creating a partial row.
+        raise HTTPException(
+            status_code=422,
+            detail="No content plan cached for this account+language yet. Load /content-plan first.",
+        )
+
+    content = dict(row.content or {})
+    topics = dict(content.get("topics_by_idx") or {})
+    topics[str(body.day_index)] = body.new_topic.strip()
+    content["topics_by_idx"] = topics
+    row.content = content
+    row.last_user_edit_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "social_account_id": body.social_account_id,
+            "language": body.language,
+            "day_index": body.day_index,
+            "topic": topics[str(body.day_index)],
+            "last_user_edit_at": row.last_user_edit_at.isoformat(),
+        },
+    }
 
 
 # ── Sentiment: suggested response templates for needs-attention posts ────

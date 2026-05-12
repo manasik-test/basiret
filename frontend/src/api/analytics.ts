@@ -563,6 +563,15 @@ export async function fetchAudienceInsights(language: 'en' | 'ar' = 'en'): Promi
   return res.data
 }
 
+/** Scheduled-post info attached to a Content Plan day when the wizard
+ *  produced a post for that day. Backend computes this by joining
+ *  `scheduled_post.content_plan_day` against each day's date. */
+export interface ContentPlanDayScheduledPost {
+  id: string
+  status: 'draft' | 'scheduled' | 'publishing' | 'published' | 'failed'
+  permalink: string | null
+}
+
 export interface ContentPlanDay {
   day_index: number
   day_label: string
@@ -571,6 +580,7 @@ export interface ContentPlanDay {
   best_time: string
   estimated_reach: number
   topic: string
+  scheduled_post?: ContentPlanDayScheduledPost | null
 }
 
 export interface ContentPlanData {
@@ -624,5 +634,32 @@ export interface AskResponseData {
 // renders it as an assistant bubble per the degraded-UX spec.
 export async function askBasiret(req: AskRequest): Promise<AskResponseData> {
   const res = await api.post<unknown, ApiResponse<AskResponseData>>('/ai-pages/ask', req)
+  return res.data
+}
+
+// ── Content Plan — user override of a single day's topic ─────────────────
+
+export interface UpdateContentPlanTopicRequest {
+  social_account_id: string
+  language: 'en' | 'ar'
+  day_index: number
+  new_topic: string
+}
+
+export interface UpdateContentPlanTopicResponse {
+  social_account_id: string
+  language: 'en' | 'ar'
+  day_index: number
+  topic: string
+  last_user_edit_at: string
+}
+
+export async function updateContentPlanTopic(
+  body: UpdateContentPlanTopicRequest,
+): Promise<UpdateContentPlanTopicResponse> {
+  const res = await api.patch<unknown, ApiResponse<UpdateContentPlanTopicResponse>>(
+    '/ai-pages/content-plan/topic',
+    body,
+  )
   return res.data
 }

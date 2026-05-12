@@ -9,6 +9,7 @@ import Analytics from './pages/Analytics'
 import Audience from './pages/Audience'
 import Recommendations from './pages/Recommendations'
 const PostCreator = lazy(() => import('./pages/PostCreator'))
+const ContentPlanCreate = lazy(() => import('./pages/ContentPlanCreate'))
 import Sentiment from './pages/Sentiment'
 import Competitors from './pages/Competitors'
 import Trends from './pages/Trends'
@@ -147,6 +148,20 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AppLayout><PostCreator /></AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          {/* Content Plan → guided wizard. Requires location.state from the
+              "Create from this day" button; deep-links fall back to /content-plan. */}
+          <Route
+            path="/content-plan/create"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <Suspense fallback={<MarketingFallback />}>
+                    <ContentPlanCreate />
+                  </Suspense>
+                </AppLayout>
               </ProtectedRoute>
             }
           />

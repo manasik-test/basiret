@@ -62,7 +62,7 @@ const MAX_AI_IMAGE_GENERATIONS = 3
 const STEPS = ['media', 'caption', 'preview', 'schedule'] as const
 type Step = (typeof STEPS)[number]
 
-interface DraftPost {
+export interface DraftPost {
   media_urls: string[]
   media_type: MediaType | null
   ratio: ImageRatio
@@ -1130,7 +1130,7 @@ function StepCaption({
 
 /* ─────────────────── Step 3: Preview ─────────────────── */
 
-function StepPreview({ draft, accountUsername }: { draft: DraftPost; accountUsername: string }) {
+export function StepPreview({ draft, accountUsername }: { draft: DraftPost; accountUsername: string }) {
   const { t } = useTranslation()
   const [view, setView] = useState<'feed' | 'story'>('feed')
   const [expanded, setExpanded] = useState(false)
@@ -1464,7 +1464,7 @@ function StepSchedule({
 
 /* ─────────────────── Publishing modal ─────────────────── */
 
-function PublishingModal({
+export function PublishingModal({
   state,
   onClose,
 }: {

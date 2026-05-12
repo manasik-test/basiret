@@ -1,0 +1,51 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Brand</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 28px; background: var(--surface); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 18px; }
+  .stack { display: flex; flex-direction: column; gap: 22px; }
+  .row { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+  .wordmark-lg img { display: block; height: 80px; width: auto; }
+  .wordmark-md img { display: block; height: 48px; width: auto; }
+  .mark img { display: block; height: 64px; width: 64px; }
+  .mark-sm img { display: block; height: 36px; width: 36px; }
+  .clear { width: 1px; height: 64px; background: var(--line); }
+  .on-dark { padding: 18px 22px; border-radius: 16px; background: var(--ink-900); display: inline-flex; align-items: center; gap: 14px; }
+  .on-off { padding: 18px 22px; border-radius: 16px; background: var(--off-white); display: inline-flex; align-items: center; gap: 14px; }
+  .cap { font: 500 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin-top: 8px; }
+</style></head><body>
+<div class="lbl">Logo lockup (primary)</div>
+<div class="stack">
+  <div class="row">
+    <div class="wordmark-lg">
+      <img src="../assets/basiret-wordmark.png" alt="Basiret بصيرة">
+      <div class="cap">Wordmark · primary</div>
+    </div>
+    <div class="clear"></div>
+    <div class="wordmark-md">
+      <img src="../assets/basiret-wordmark.png" alt="Basiret بصيرة">
+      <div class="cap">Wordmark · compact</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="mark">
+      <img src="../assets/basiret-logo.png" alt="Basiret">
+      <div class="cap">Mark only · 64px</div>
+    </div>
+    <div class="mark-sm">
+      <img src="../assets/basiret-logo.png" alt="Basiret">
+      <div class="cap">Mark only · 36px</div>
+    </div>
+    <div class="clear"></div>
+    <div class="on-off">
+      <img src="../assets/basiret-wordmark.png" alt="Basiret" style="height:40px;width:auto;display:block">
+    </div>
+    <div class="on-dark">
+      <img src="../assets/basiret-logo.png" alt="Basiret" style="height:40px;width:40px;display:block">
+      <span style="color:#fff;font:700 22px/1 'IBM Plex Sans Arabic'">بصيرة</span>
+    </div>
+  </div>
+</div>
+</body></html>

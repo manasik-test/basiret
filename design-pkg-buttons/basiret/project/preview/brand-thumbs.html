@@ -1,0 +1,22 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Thumbnail palette</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 22px; background: var(--surface); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 14px; }
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+  .t { aspect-ratio: 1/1; border-radius: 12px; position: relative; overflow: hidden; }
+  .t::after { content:""; position: absolute; inset: 0; background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.22) 0 1px, transparent 1px 14px); }
+  .n { font: 500 10px/1 'Inter'; color: var(--ink-500); margin-top: 6px; text-align: center; }
+</style></head><body>
+<div class="lbl">Thumb gradients — for content placeholders</div>
+<div class="grid">
+  <div><div class="t" style="background:linear-gradient(135deg,#ede8ff,#c0b0ff)"></div><div class="n">violet</div></div>
+  <div><div class="t" style="background:linear-gradient(135deg,#fbf6ed,#f0e4cc)"></div><div class="n">cream</div></div>
+  <div><div class="t" style="background:linear-gradient(135deg,#fbeee7,#f2c8b4)"></div><div class="n">peach</div></div>
+  <div><div class="t" style="background:linear-gradient(135deg,#e8e0ff,#9b82f5)"></div><div class="n">purple</div></div>
+  <div><div class="t" style="background:linear-gradient(135deg,#e4f4ee,#b8e0ce)"></div><div class="n">mint</div></div>
+  <div><div class="t" style="background:linear-gradient(135deg,#e5eef9,#b8cfe7)"></div><div class="n">sky</div></div>
+  <div><div class="t" style="background:linear-gradient(135deg,#f3eefb,#d5c4ee)"></div><div class="n">lavender</div></div>
+</div>
+</body></html>

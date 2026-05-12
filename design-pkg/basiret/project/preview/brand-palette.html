@@ -1,0 +1,48 @@
+<!doctype html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Brand palette</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { padding: 22px; background: var(--surface); }
+  .lbl { font: 600 10px/1 'Inter'; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-400); margin: 0 0 14px; }
+  .row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .swatch { height: 64px; border-radius: 10px; margin-bottom: 10px; }
+  .name { font: 600 13px/1.2 'IBM Plex Sans Arabic'; color: var(--ink-900); }
+  .hex  { font: 600 11px/1.3 'Inter'; color: var(--ink-500); margin-top: 4px; letter-spacing: .04em; }
+  .role { font: 500 10px/1.3 'Inter'; color: var(--ink-400); margin-top: 6px; text-transform: uppercase; letter-spacing: .08em; }
+  .grad-card { grid-column: span 2; }
+</style></head><body>
+<div class="lbl">Official brand palette</div>
+<div class="row">
+  <div class="card">
+    <div class="swatch" style="background:#664FA1"></div>
+    <div class="name">Purple</div><div class="hex">#664FA1</div><div class="role">Primary</div>
+  </div>
+  <div class="card">
+    <div class="swatch" style="background:#BF499B"></div>
+    <div class="name">Pink</div><div class="hex">#BF499B</div><div class="role">Secondary</div>
+  </div>
+  <div class="card">
+    <div class="swatch" style="background:#A5DDEC"></div>
+    <div class="name">Sky</div><div class="hex">#A5DDEC</div><div class="role">Tertiary</div>
+  </div>
+  <div class="card">
+    <div class="swatch" style="background:#faf8f5; border:1px solid var(--line)"></div>
+    <div class="name">Off-white</div><div class="hex">#FAF8F5</div><div class="role">Surface</div>
+  </div>
+  <div class="card">
+    <div class="swatch" style="background:#1c1a28"></div>
+    <div class="name">Ink</div><div class="hex">#1C1A28</div><div class="role">Text / dark</div>
+  </div>
+</div>
+<div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div class="card">
+    <div class="swatch" style="background:linear-gradient(135deg,#664FA1 0%,#BF499B 100%)"></div>
+    <div class="name">Brand gradient</div><div class="hex">#664FA1 → #BF499B · 135°</div><div class="role">Logo · hero · accents</div>
+  </div>
+  <div class="card">
+    <div class="swatch" style="background:linear-gradient(135deg,#664FA1 0%,#A5DDEC 100%)"></div>
+    <div class="name">Cool gradient</div><div class="hex">#664FA1 → #A5DDEC · 135°</div><div class="role">Illustrations · backgrounds</div>
+  </div>
+</div>
+</body></html>

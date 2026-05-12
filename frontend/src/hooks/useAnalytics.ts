@@ -10,7 +10,9 @@ import {
   fetchRecommendationFeedback, submitRecommendationFeedback,
   fetchEngagementTimeline,
   fetchCompetitorLeaderboard, fetchCompetitorTopPosts, fetchHashtagTrends,
+  updateContentPlanTopic,
   type GenerateCaptionRequest, type RecFeedback,
+  type UpdateContentPlanTopicRequest,
 } from '../api/analytics'
 
 // Resolve the UI language to the two values our backend accepts (en|ar).
@@ -290,6 +292,18 @@ export function useContentPlan() {
     queryKey: ['ai-pages', 'content-plan', lang],
     queryFn: () => fetchContentPlan(lang),
     staleTime: 5 * 60_000,
+  })
+}
+
+export function useUpdateContentPlanTopic() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateContentPlanTopicRequest) => updateContentPlanTopic(body),
+    onSuccess: () => {
+      // Refresh the Content Plan query so the user sees their edit immediately
+      // on return to /content-plan.
+      queryClient.invalidateQueries({ queryKey: ['ai-pages', 'content-plan'] })
+    },
   })
 }
 

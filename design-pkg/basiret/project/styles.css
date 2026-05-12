@@ -1,0 +1,77 @@
+ /* Basiret — Redesigned Content Plan */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Purple system — richer, more deliberate */
+  --purple-50:  #f7f5ff;
+  --purple-100: #ede8ff;
+  --purple-200: #dcd2ff;
+  --purple-300: #c0b0ff;
+  --purple-400: #9b82f5;
+  --purple-500: #7c5cef;
+  --purple-600: #6341e0;
+  --purple-700: #5433c2;
+  --purple-800: #43299b;
+  --purple-900: #2e1b6b;
+
+  /* Warm neutrals (slight cool) */
+  --ink-950: #12101a;
+  --ink-900: #1c1a28;
+  --ink-800: #2a2839;
+  --ink-700: #3d3b50;
+  --ink-600: #55536b;
+  --ink-500: #74718a;
+  --ink-400: #9996ad;
+  --ink-300: #bfbdcc;
+  --ink-200: #e3e1ec;
+  --ink-150: #ecebf3;
+  --ink-100: #f3f2f8;
+  --ink-50:  #faf9fc;
+
+  /* Semantic */
+  --surface: #ffffff;
+  --canvas:  #f5f3f9;
+  --line:    #ebe9f2;
+  --line-strong: #d8d5e4;
+
+  /* Content-type hues (muted, share chroma) */
+  --video:    oklch(0.58 0.14 25);   /* warm coral */
+  --image:    oklch(0.58 0.14 180);  /* teal */
+  --carousel: oklch(0.58 0.14 295);  /* violet */
+
+  --radius-sm: 8px;
+  --radius:    12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-sm: 0 1px 2px rgba(30, 20, 70, 0.04);
+  --shadow:    0 4px 14px -4px rgba(30, 20, 70, 0.08), 0 1px 2px rgba(30, 20, 70, 0.04);
+  --shadow-lg: 0 18px 40px -18px rgba(30, 20, 70, 0.18);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'IBM Plex Sans Arabic', 'Inter', system-ui, sans-serif;
+  color: var(--ink-900);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[dir="rtl"] { font-family: 'IBM Plex Sans Arabic', system-ui, sans-serif; }
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+a { color: inherit; text-decoration: none; }
+
+.num { font-family: 'Inter', system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+
+/* Focus ring */
+:focus-visible { outline: 2px solid var(--purple-500); outline-offset: 2px; border-radius: 6px; }
+
+/* Scrollbar refinement */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--ink-200); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-300); }
