@@ -142,6 +142,163 @@ _BUSINESS_TAILORING_RULE = (
 )
 
 
+# ── Content-plan: anti-template guardrails ────────────────────────────────
+#
+# Without strong brand context, Gemini tends to fall back to generic weekday
+# templates ("Monday Motivation", "Throwback Thursday") instead of producing
+# topics anchored to the creator's actual industry. Three layers of defence:
+#   1. A forbidden-patterns rule injected into the system prompt up-front.
+#   2. A regex scan over Gemini's output. On hit → one retry with a stronger
+#      directive appended to the system prompt.
+#   3. If the retry STILL returns a forbidden topic, substitute that slot with
+#      a deterministic fallback drawn from the org's content_pillars.
+
+_FORBIDDEN_WEEKDAY_RULE = (
+    " FORBIDDEN PATTERNS: Do NOT use generic weekday templates "
+    "(e.g. 'Monday Motivation', 'Throwback Thursday', 'Fun Friday', "
+    "'Sunday Reflections', 'Weekend Vibes', 'Motivation Monday'). "
+    "Every topic must be specific to this account's industry, location, "
+    "and content patterns. A weekday template is a failure."
+)
+
+_RETRY_DIRECTIVE = (
+    " CRITICAL: Your previous response included a generic weekday template "
+    "(e.g. 'Monday Motivation'). This is forbidden. Every topic must be "
+    "directly tied to this account's industry and content patterns. "
+    "Replace the offending entry with a specific, on-brand topic."
+)
+
+FORBIDDEN_WEEKDAY_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(monday motivation|motivation monday)\b", re.I),
+    re.compile(r"\b(throwback thursday|tbt)\b", re.I),
+    re.compile(r"\b(fun friday|friday feels)\b", re.I),
+    re.compile(r"\b(sunday (reflections?|funday|vibes))\b", re.I),
+    re.compile(r"\b(weekend vibes|weekend mood)\b", re.I),
+    re.compile(r"\b(saturday selfie|self-?care saturday)\b", re.I),
+    re.compile(r"\b(wisdom wednesday|wellness wednesday)\b", re.I),
+    re.compile(r"\b(transformation tuesday)\b", re.I),
+]
+
+_GENERIC_FALLBACK_TOPIC = "Share an update from your business"
+
+
+def _topic_has_forbidden_pattern(topic: str | None) -> bool:
+    if not topic:
+        return False
+    return any(p.search(topic) for p in FORBIDDEN_WEEKDAY_PATTERNS)
+
+
+def _pillar_fallback(day_index: int, pillars: list[str]) -> str:
+    """Deterministic per-day-index fallback drawn from content_pillars.
+
+    Cycles through pillars when fewer than 7 are provided; falls back to a
+    generic placeholder when the org has no pillars saved.
+    """
+    cleaned = [p for p in (pillars or []) if isinstance(p, str) and p.strip()]
+    if not cleaned:
+        return _GENERIC_FALLBACK_TOPIC
+    return cleaned[day_index % len(cleaned)]
+
+
+# ── Inferred-context fallback (when brand identity is unset) ──────────────
+#
+# When BOTH business_profile and brand_identity are NULL we have no real
+# anchor — Gemini will reach for weekday templates by default. Mine the
+# top-performing captions for a soft signal: dominant language, location
+# hashtags, repeated content tokens. This is intentionally weak — it stops
+# being used the moment the creator fills the Brand Identity tab.
+
+_INFERRED_LOCATION_TERMS: dict[str, str] = {
+    # English / transliteration
+    "muscat": "Muscat, Oman",
+    "oman": "Oman",
+    "riyadh": "Riyadh, Saudi Arabia",
+    "jeddah": "Jeddah, Saudi Arabia",
+    "saudi": "Saudi Arabia",
+    "dubai": "Dubai, UAE",
+    "abu dhabi": "Abu Dhabi, UAE",
+    "uae": "UAE",
+    "cairo": "Cairo, Egypt",
+    "doha": "Doha, Qatar",
+    "kuwait": "Kuwait",
+    "amman": "Amman, Jordan",
+    "beirut": "Beirut, Lebanon",
+    # Arabic
+    "مسقط": "Muscat, Oman",
+    "الرياض": "Riyadh, Saudi Arabia",
+    "جدة": "Jeddah, Saudi Arabia",
+    "السعودية": "Saudi Arabia",
+    "دبي": "Dubai, UAE",
+    "أبوظبي": "Abu Dhabi, UAE",
+    "ابوظبي": "Abu Dhabi, UAE",
+    "الإمارات": "UAE",
+    "الامارات": "UAE",
+    "القاهرة": "Cairo, Egypt",
+    "الدوحة": "Doha, Qatar",
+    "الكويت": "Kuwait",
+    "بيروت": "Beirut, Lebanon",
+}
+
+_INFERRED_STOPWORDS: set[str] = {
+    # English
+    "the", "and", "for", "are", "with", "from", "this", "that", "your",
+    "you", "our", "but", "not", "all", "any", "can", "out", "now", "get",
+    "has", "have", "had", "was", "were", "will", "just", "more", "one",
+    "two", "new", "use", "see", "his", "her", "him", "she", "they",
+    "https", "http", "www", "com",
+    # Arabic
+    "في", "من", "إلى", "الى", "على", "عن", "هو", "هي", "ما", "ماذا", "كيف",
+    "أو", "او", "ثم", "كل", "بعض", "هذا", "هذه", "ذلك", "تلك", "أن", "ان",
+    "أنا", "انا", "نحن", "أنت", "انت", "هم", "هن", "كان", "كانت", "هل",
+    "مع", "بعد", "قبل", "عند", "حتى",
+}
+
+
+def _infer_context_from_captions(captions: list[str]) -> str:
+    """Build a soft INFERRED CONTEXT block from a sample of captions.
+
+    Returns "" when there is no usable signal (no captions). The output is
+    deliberately one short paragraph so it nests below real BUSINESS / BRAND
+    blocks without dominating the prompt.
+    """
+    cleaned = [c for c in captions if c]
+    if not cleaned:
+        return ""
+    text = "\n".join(cleaned)
+
+    ar_chars = sum(1 for ch in text if "؀" <= ch <= "ۿ")
+    en_chars = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+    if ar_chars > en_chars * 2:
+        language = "Arabic"
+    elif en_chars > ar_chars * 2:
+        language = "English"
+    else:
+        language = "a mix of Arabic and English"
+
+    lowered = text.lower()
+    location: str | None = None
+    for term, label in _INFERRED_LOCATION_TERMS.items():
+        if term in lowered:
+            location = label
+            break
+
+    tokens = re.findall(r"[\w؀-ۿ]+", text.lower())
+    counts: Counter[str] = Counter()
+    for tok in tokens:
+        if len(tok) < 4 or tok.isdigit() or tok in _INFERRED_STOPWORDS:
+            continue
+        counts[tok] += 1
+    top_nouns = [t for t, _ in counts.most_common(3)]
+
+    parts = [f"Account posts primarily in {language}"]
+    if top_nouns:
+        parts.append(f"content theme appears to be {', '.join(top_nouns)}")
+    if location:
+        parts.append(f"posts from {location}")
+    body = ", ".join(parts) + "."
+    return "INFERRED CONTEXT (no brand identity set yet):\n" + body + "\n\n"
+
+
 # ── AI page cache (24h TTL) ───────────────────────────────────────────────
 
 CACHE_TTL_HOURS = 24
@@ -1146,7 +1303,28 @@ def content_plan(
         return {"success": True, "data": {"days": days}, "meta": build_fresh_meta()}
 
     primary_account_id = str(account_ids[0])
-    bp = _business_profile_for_account(db, primary_account_id)
+    org_id = _organization_id_for_account(db, primary_account_id)
+    org = (
+        db.query(Organization).filter(Organization.id == org_id).first()
+        if org_id
+        else None
+    )
+    bp = org.business_profile if org else None
+    bi = org.brand_identity if org else None
+
+    business_block = _business_context_block(bp)
+    brand_block = format_brand_identity(org_id, db)
+    inferred_block = ""
+    if not business_block and not brand_block:
+        inferred_block = _infer_context_from_captions(
+            [(r.caption or "") for r in top_caps_rows]
+        )
+        if inferred_block:
+            logger.info(
+                "content_plan_inferred_context_used org_id=%s account_id=%s",
+                org_id, primary_account_id,
+            )
+
     sys = (
         "You are a content-planning advisor for an Instagram creator. "
         "Given the creator's top-performing captions and a 7-day plan skeleton "
@@ -1155,16 +1333,18 @@ def content_plan(
         "Topics must be 4-10 words, written as headlines (no markdown, no quotes). "
         "Do NOT repeat the same topic across days."
         + _BUSINESS_TAILORING_RULE
+        + _FORBIDDEN_WEEKDAY_RULE
         + " "
         + _language_rule(language)
     )
     skeleton_lines = [
-        f"Day {d['day_index']} ({d['day_label']}, {d['date']}, type={d['content_type']})"
+        f"Day {d['day_index']} ({d['date']}, type={d['content_type']})"
         for d in days
     ]
     user_msg = (
-        _business_context_block(bp)
-        + _brand_context_block(db, primary_account_id)
+        business_block
+        + brand_block
+        + inferred_block
         + "Top-performing captions from this account (for inspiration only):\n"
         + ("\n".join(top_caps_lines) or "(none yet)")
         + "\n\nWeek plan skeleton:\n"
@@ -1176,15 +1356,56 @@ def content_plan(
         "]}"
     )
 
-    def _compute() -> dict:
-        result = _gemini_json(
-            sys, user_msg, temperature=0.7, account_id=primary_account_id,
-        ) or {}
-        topics_by_idx = {
+    def _extract(result: dict) -> dict[str, str]:
+        return {
             str(int(t["day_index"])): (t.get("topic") or "").strip()
             for t in (result.get("topics") or [])
             if isinstance(t, dict) and "day_index" in t
         }
+
+    pillars_for_fallback = []
+    if isinstance(bi, dict):
+        pillars_for_fallback = bi.get("content_pillars") or []
+
+    def _compute() -> dict:
+        result = _gemini_json(
+            sys, user_msg, temperature=0.7, account_id=primary_account_id,
+        ) or {}
+        topics_by_idx = _extract(result)
+
+        offending = {
+            idx: t for idx, t in topics_by_idx.items()
+            if _topic_has_forbidden_pattern(t)
+        }
+        if offending:
+            logger.warning(
+                "content_plan_forbidden_pattern_retries org_id=%s account_id=%s hits=%s",
+                org_id, primary_account_id, offending,
+            )
+            retry_sys = sys + _RETRY_DIRECTIVE
+            retry_result = _gemini_json(
+                retry_sys, user_msg, temperature=0.7, account_id=primary_account_id,
+            ) or {}
+            topics_by_idx = _extract(retry_result)
+
+            still_offending = {
+                idx: t for idx, t in topics_by_idx.items()
+                if _topic_has_forbidden_pattern(t)
+            }
+            for idx, original in still_offending.items():
+                sub = _pillar_fallback(int(idx), pillars_for_fallback)
+                logger.warning(
+                    "content_plan_forbidden_pattern_fallbacks org_id=%s account_id=%s "
+                    "day_index=%s original=%r substitute=%r",
+                    org_id, primary_account_id, idx, original, sub,
+                )
+                topics_by_idx[idx] = sub
+        else:
+            logger.info(
+                "content_plan_topics_clean org_id=%s account_id=%s n=%s",
+                org_id, primary_account_id, len(topics_by_idx),
+            )
+
         return {"topics_by_idx": topics_by_idx}
 
     try:

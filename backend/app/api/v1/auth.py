@@ -402,6 +402,8 @@ def upsert_business_profile(
     runs before any role assignment beyond the auto-admin from /register.
     """
     user.organization.business_profile = body.model_dump()
+    # Bust AI caches — business_profile is injected into Gemini prompts.
+    _bust_ai_caches_for_org(db, user.organization_id)
     db.commit()
     db.refresh(user.organization)
     return {"success": True, "data": user.organization.business_profile}

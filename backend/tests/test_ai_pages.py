@@ -322,6 +322,278 @@ def test_content_plan_with_data_and_gemini(client, db, insights_user):
     assert all("content_type" in d and "best_time" in d and "date" in d for d in days)
 
 
+# ── /content-plan: inferred-context helper (unit) ──────────────
+
+
+def test_infer_context_arabic_dominant():
+    from app.api.v1.ai_pages import _infer_context_from_captions
+    captions = [
+        "تحلم يكون عندك مسبح خاص في بيتك بعمان؟ #مسقط #عمان",
+        "نحن في Smart Pools نساعدك نصمم المسبح",
+        "تواصل معنا واحصل على عرض السعر المناسب",
+    ]
+    block = _infer_context_from_captions(captions)
+    assert block.startswith("INFERRED CONTEXT")
+    assert "Arabic" in block
+    # Either the English-transliterated or Arabic location term should resolve
+    assert "Oman" in block or "Muscat" in block
+
+
+def test_infer_context_english_dominant():
+    from app.api.v1.ai_pages import _infer_context_from_captions
+    captions = [
+        "Pool maintenance tips for Riyadh homes — keep your water clear all summer",
+        "Cleaning pools every week the right way using professional equipment",
+        "Customer testimonial about our Saudi Arabia pool design services",
+    ]
+    block = _infer_context_from_captions(captions)
+    assert "English" in block
+    assert "Riyadh" in block or "Saudi" in block
+
+
+def test_infer_context_mixed_bilingual():
+    from app.api.v1.ai_pages import _infer_context_from_captions
+    # Roughly balanced Arabic + English (neither dominates by 2x) — should
+    # fall through to the bilingual bucket rather than picking one language.
+    captions = [
+        "Pool tip اليوم مسبح نظيف design idea",
+        "اهلا في صفحتنا hello welcome مرحبا بكم في المتجر",
+        "تواصل معنا للحصول على عرض السعر today",
+    ]
+    block = _infer_context_from_captions(captions)
+    assert "mix" in block.lower()
+
+
+def test_infer_context_empty_input():
+    from app.api.v1.ai_pages import _infer_context_from_captions
+    assert _infer_context_from_captions([]) == ""
+    assert _infer_context_from_captions(["", None, ""]) == ""  # type: ignore[list-item]
+
+
+# ── /content-plan: real brand identity > inferred context ──────
+
+
+def test_content_plan_real_brand_identity_skips_inferred(client, db, insights_user):
+    """When brand_identity is populated, the INFERRED CONTEXT block must NOT
+    appear in the prompt sent to Gemini."""
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    seed_social_account_with_posts(db, org.id, num_posts=3)
+
+    org.brand_identity = {
+        "tone": "friendly",
+        "language_style": "bilingual",
+        "emoji_usage": "occasionally",
+        "caption_length": "medium",
+        "content_pillars": ["Pool tips", "Before and after", "Customer stories"],
+        "primary_color": "#1E88E5",
+    }
+    db.commit()
+
+    captured: dict = {}
+    fake = {"topics": [{"day_index": i, "topic": f"Pool topic {i}"} for i in range(7)]}
+
+    def fake_gemini(system, user_msg, **kwargs):
+        captured["system"] = system
+        captured["user_msg"] = user_msg
+        return fake
+
+    from unittest.mock import patch as _patch
+    with _patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         _patch("app.api.v1.ai_pages._gemini_json", side_effect=fake_gemini), \
+         _patch("app.api.v1.ai_pages._gemini_text", return_value=""):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    # Real brand identity present → inferred block must not be injected.
+    assert "INFERRED CONTEXT" not in captured["user_msg"]
+    assert "BRAND IDENTITY" in captured["user_msg"]
+    # day_label removed from skeleton — keep only date + content type.
+    assert "Monday" not in captured["user_msg"]
+    assert "Tuesday" not in captured["user_msg"]
+
+
+def test_content_plan_empty_brand_uses_inferred_context(client, db, insights_user):
+    """When both business_profile and brand_identity are NULL, the inferred
+    context block is built from the top captions and injected."""
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    account = seed_social_account_with_posts(db, org.id, num_posts=3)
+
+    # Overwrite captions with Arabic pool-themed text so inferred context has signal
+    for i, post in enumerate(db.query(Post).filter(Post.social_account_id == account.id).all()):
+        post.caption = "تحلم يكون عندك مسبح خاص في بيتك #مسقط #عمان"
+    org.business_profile = None
+    org.brand_identity = None
+    db.commit()
+
+    captured: dict = {}
+    fake = {"topics": [{"day_index": i, "topic": f"Pool topic {i}"} for i in range(7)]}
+
+    def fake_gemini(system, user_msg, **kwargs):
+        captured["user_msg"] = user_msg
+        return fake
+
+    from unittest.mock import patch as _patch
+    with _patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         _patch("app.api.v1.ai_pages._gemini_json", side_effect=fake_gemini), \
+         _patch("app.api.v1.ai_pages._gemini_text", return_value=""):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    assert "INFERRED CONTEXT" in captured["user_msg"]
+    assert "Arabic" in captured["user_msg"]
+
+
+# ── /content-plan: forbidden-pattern retry + fallback ──────────
+
+
+def test_content_plan_clean_topics_no_retry(client, db, insights_user, caplog):
+    """Clean topics → no retry fires, INFO 'topics_clean' log line emitted."""
+    import logging
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    seed_social_account_with_posts(db, org.id, num_posts=3)
+
+    fake = {"topics": [{"day_index": i, "topic": f"Pool topic {i}"} for i in range(7)]}
+    call_count = {"n": 0}
+
+    def fake_gemini(*_args, **_kwargs):
+        call_count["n"] += 1
+        return fake
+
+    from unittest.mock import patch as _patch
+    with caplog.at_level(logging.INFO, logger="app.api.v1.ai_pages"), \
+         _patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         _patch("app.api.v1.ai_pages._gemini_json", side_effect=fake_gemini), \
+         _patch("app.api.v1.ai_pages._gemini_text", return_value=""):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    assert call_count["n"] == 1  # No retry
+    assert any("content_plan_topics_clean" in r.message for r in caplog.records)
+    assert not any("forbidden_pattern_retries" in r.message for r in caplog.records)
+
+
+def test_content_plan_forbidden_then_clean_retries_once(client, db, insights_user, caplog):
+    """First Gemini call returns 'Monday Motivation' → retry fires → clean output."""
+    import logging
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    seed_social_account_with_posts(db, org.id, num_posts=3)
+
+    bad = {
+        "topics": [
+            {"day_index": 0, "topic": "Monday Motivation: Start your week with a smile"},
+        ] + [{"day_index": i, "topic": f"Pool topic {i}"} for i in range(1, 7)]
+    }
+    good = {"topics": [{"day_index": i, "topic": f"Specific pool topic {i}"} for i in range(7)]}
+
+    from unittest.mock import patch as _patch
+    with caplog.at_level(logging.WARNING, logger="app.api.v1.ai_pages"), \
+         _patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         _patch("app.api.v1.ai_pages._gemini_json", side_effect=[bad, good]), \
+         _patch("app.api.v1.ai_pages._gemini_text", return_value=""):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    days = resp.json()["data"]["days"]
+    assert days[0]["topic"] == "Specific pool topic 0"
+    assert any("forbidden_pattern_retries" in r.message for r in caplog.records)
+    assert not any("forbidden_pattern_fallbacks" in r.message for r in caplog.records)
+
+
+def test_content_plan_forbidden_twice_uses_pillar_fallback(client, db, insights_user, caplog):
+    """Retry also returns 'Monday Motivation' → fallback to content_pillars."""
+    import logging
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    seed_social_account_with_posts(db, org.id, num_posts=3)
+
+    org.brand_identity = {
+        "tone": "friendly",
+        "language_style": "bilingual",
+        "emoji_usage": "occasionally",
+        "caption_length": "medium",
+        "content_pillars": [
+            "Pool maintenance tips",
+            "Before and after pool restoration",
+            "Pool design ideas",
+            "Customer testimonials",
+            "Behind the scenes",
+        ],
+        "primary_color": "#1E88E5",
+    }
+    db.commit()
+
+    bad = {
+        "topics": [
+            {"day_index": 0, "topic": "Monday Motivation: Start your week with a smile"},
+        ] + [{"day_index": i, "topic": f"Pool topic {i}"} for i in range(1, 7)]
+    }
+
+    from unittest.mock import patch as _patch
+    with caplog.at_level(logging.WARNING, logger="app.api.v1.ai_pages"), \
+         _patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         _patch("app.api.v1.ai_pages._gemini_json", side_effect=[bad, bad]), \
+         _patch("app.api.v1.ai_pages._gemini_text", return_value=""):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    days = resp.json()["data"]["days"]
+    # day_index=0 → pillars[0] = "Pool maintenance tips"
+    assert days[0]["topic"] == "Pool maintenance tips"
+    assert any("forbidden_pattern_retries" in r.message for r in caplog.records)
+    assert any("forbidden_pattern_fallbacks" in r.message for r in caplog.records)
+
+
+def test_content_plan_forbidden_twice_no_pillars_uses_generic_fallback(client, db, insights_user, caplog):
+    """Retry also forbidden + no content_pillars → generic placeholder topic."""
+    import logging
+    _, org, token = insights_user
+    ensure_feature_flag(db, "insights", "content_recommendations", True)
+    seed_social_account_with_posts(db, org.id, num_posts=3)
+    # Leave brand_identity NULL so the fallback path has no pillars.
+    org.brand_identity = None
+    db.commit()
+
+    bad = {
+        "topics": [
+            {"day_index": 0, "topic": "Monday Motivation"},
+        ] + [{"day_index": i, "topic": f"Pool topic {i}"} for i in range(1, 7)]
+    }
+
+    from unittest.mock import patch as _patch
+    with caplog.at_level(logging.WARNING, logger="app.api.v1.ai_pages"), \
+         _patch("app.api.v1.ai_pages._gemini_available", return_value=True), \
+         _patch("app.api.v1.ai_pages._gemini_json", side_effect=[bad, bad]), \
+         _patch("app.api.v1.ai_pages._gemini_text", return_value=""):
+        resp = client.get(
+            "/api/v1/ai-pages/content-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    days = resp.json()["data"]["days"]
+    assert days[0]["topic"] == "Share an update from your business"
+    assert any("forbidden_pattern_fallbacks" in r.message for r in caplog.records)
+
+
 # ── /sentiment-responses ───────────────────────────────────────
 
 
