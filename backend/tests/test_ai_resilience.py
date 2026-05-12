@@ -61,8 +61,10 @@ def _clear_page_cache(db, account_id):
 # ── Task 1: graceful error handling ─────────────────────────
 
 
-def test_posts_insights_quota_with_no_cache_returns_503(client, db, starter_user):
-    """First call after quota outage with no cache row → 503 + structured body."""
+def test_posts_insights_quota_with_no_cache_serves_data_only(client, db, starter_user):
+    """When AI is out and there's no cache, the endpoint still returns the
+    DB-derived best_post (so the page doesn't show 'no posts yet' when posts
+    exist), with empty AI text and a degraded meta."""
     _, org, token = starter_user
     account = seed_social_account_with_posts(db, org.id, num_posts=4)
     _clear_page_cache(db, account.id)
@@ -73,9 +75,13 @@ def test_posts_insights_quota_with_no_cache_returns_503(client, db, starter_user
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    assert resp.status_code == 503
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["success"] is False
+    assert body["success"] is True
+    assert body["data"]["best_post"] is not None
+    assert body["data"]["why_it_worked"] == ""
+    assert body["data"]["low_performers_pattern"] == ""
+    assert body["data"]["what_to_change"] == ""
     assert body["meta"]["status"] == "degraded"
     assert body["meta"]["cached"] is False
     assert body["meta"]["retry_after_hours"] == 24
@@ -152,9 +158,14 @@ def test_invalid_response_treated_as_degraded(client, db, starter_user):
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    # No cache → 503 with degraded body
-    assert resp.status_code == 503
-    assert resp.json()["meta"]["status"] == "degraded"
+    # No cache → 200 with data-only payload + degraded meta (best_post is from DB,
+    # only the AI prose is missing).
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"]["best_post"] is not None
+    assert body["data"]["why_it_worked"] == ""
+    assert body["meta"]["status"] == "degraded"
+    assert body["meta"]["cached"] is False
 
 
 def test_fresh_response_marks_meta_status_fresh(client, db, starter_user):

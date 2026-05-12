@@ -698,7 +698,19 @@ def posts_insights(
             db, primary_account_id, "posts-insights", language, _compute,
         )
     except AIProviderError as exc:
-        return degraded_no_cache_response(exc)
+        # best_post is data we already computed from the DB — don't lose it just
+        # because the AI couldn't write the accompanying prose. Surface the
+        # degraded state in meta so the UI can flag it, but render the post.
+        return {
+            "success": True,
+            "data": payload,
+            "meta": {
+                "status": "degraded",
+                "cached": False,
+                "message": exc.user_message,
+                "retry_after_hours": exc.retry_after_hours,
+            },
+        }
 
     payload["why_it_worked"] = cached.get("why_it_worked", "")
     payload["low_performers_pattern"] = cached.get("low_performers_pattern", "")
@@ -1182,7 +1194,13 @@ def audience_insights(
             db, primary_account_id, "audience-insights", language, _compute,
         )
     except AIProviderError as exc:
-        return degraded_no_cache_response(exc)
+        cached = {}
+        meta = {
+            "status": "degraded",
+            "cached": False,
+            "message": exc.user_message,
+            "retry_after_hours": exc.retry_after_hours,
+        }
 
     payload["behavior_summary"] = cached.get("behavior_summary", "")
     payload["what_they_want"] = cached.get("what_they_want", [])
@@ -1414,7 +1432,13 @@ def content_plan(
             db, primary_account_id, "content-plan", language, _compute,
         )
     except AIProviderError as exc:
-        return degraded_no_cache_response(exc)
+        cached = {"topics_by_idx": {}}
+        meta = {
+            "status": "degraded",
+            "cached": False,
+            "message": exc.user_message,
+            "retry_after_hours": exc.retry_after_hours,
+        }
 
     topics_by_idx = cached.get("topics_by_idx", {}) or {}
     for d in days:
@@ -1668,7 +1692,13 @@ def sentiment_responses(
             db, primary_account_id, "sentiment-responses", language, _compute,
         )
     except AIProviderError as exc:
-        return degraded_no_cache_response(exc)
+        cached = {"templates_by_id": {}}
+        meta = {
+            "status": "degraded",
+            "cached": False,
+            "message": exc.user_message,
+            "retry_after_hours": exc.retry_after_hours,
+        }
 
     templates_by_id = cached.get("templates_by_id", {}) or {}
 
