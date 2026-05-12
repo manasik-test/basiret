@@ -112,7 +112,10 @@ export default function WizardPreviewStep(props: WizardPreviewStepProps) {
   const { t } = useTranslation()
 
   const accounts = useAccounts()
-  const accountUsername = accounts.data?.[0]?.username ?? 'me'
+  // SocialAccount.account_name carries the IG username/handle. Fall back to
+  // a generic placeholder so the StepPreview phone-frame still renders
+  // when the account is loading or absent.
+  const accountUsername = accounts.data?.[0]?.account_name ?? 'me'
 
   const createPost = useCreatePost()
   const [error, setError] = useState<string | null>(null)
