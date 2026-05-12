@@ -3,7 +3,11 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# `npm install` (not `npm ci`) — the dev Dockerfile uses the same. `npm ci`
+# fails on cross-platform optional-dep drift (e.g. @emnapi/core 1.7.x on
+# the lockfile-author's OS vs 1.10.x resolved on Linux Alpine). The CI
+# workflow also uses `npm install` for the same reason.
+RUN npm install --no-audit --no-fund
 
 COPY . .
 RUN npm run build
