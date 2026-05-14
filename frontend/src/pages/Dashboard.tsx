@@ -117,6 +117,12 @@ export function periodDelta(
   const half = Math.floor(entries.length / 2)
   const prev = entries.slice(0, half).reduce((s, e) => s + e[field], 0)
   const curr = entries.slice(half).reduce((s, e) => s + e[field], 0)
+  // TODO: This guard hides legitimate signal when a user genuinely had
+  // engagement last period and zero this period (real -100% drop). Kept as
+  // conservative belt-and-suspenders alongside the timeline window swap.
+  // Revisit when we have customer data to verify whether the window swap
+  // alone is sufficient. If yes, drop this guard to preserve real negative
+  // trend signal.
   if (prev === 0 || curr === 0) return null
   return Math.round(((curr - prev) / prev) * 100)
 }
