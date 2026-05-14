@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import {
   usePostsBreakdown,
   usePostsInsights,
   useGenerateCaption,
   useAccounts,
+  useContentPlan,
   useTopPosts,
 } from '../hooks/useAnalytics'
 import { Icon, I, TypeIcon, normalizeContentType, type ContentTypeKey } from '../components/redesign/icons'
@@ -130,6 +132,7 @@ interface ChartRow {
 
 function EngagementBubble({ isAr }: { isAr: boolean }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { data } = usePostsBreakdown()
 
   const rows: ChartRow[] = useMemo(() => {
@@ -212,6 +215,18 @@ function EngagementBubble({ isAr }: { isAr: boolean }) {
           </div>
         ))}
       </div>
+
+      <button
+        type="button"
+        className="mp-bubble-cta"
+        onClick={() =>
+          navigate('/content-plan', {
+            state: { preferContentType: top.type },
+          })
+        }
+      >
+        {t('myPostsPage.suggestTopicsCta', { type: typeLabel(top.type) })}
+      </button>
     </article>
   )
 }
@@ -356,11 +371,34 @@ function WinnerBubble({ isAr }: { isAr: boolean }) {
 /* Bubble 3 — Weakness                                                */
 /* ------------------------------------------------------------------ */
 
-function WeaknessBubble() {
+function WeaknessBubble({ isAr }: { isAr: boolean }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { data } = usePostsInsights()
+  const { data: breakdown } = usePostsBreakdown()
+  const { data: plan } = useContentPlan()
+
   const pattern = (data?.low_performers_pattern || '').trim() || t('myPostsPage.changeFallback')
   const change = (data?.what_to_change || '').trim() || t('myPostsPage.changeFallback')
+
+  // Top-performing content type from the breakdown — same ranking the
+  // EngagementBubble uses. Default 'video' is a safe fallback when no data.
+  const topPerformingType: 'video' | 'image' | 'carousel' = useMemo(() => {
+    const types = (breakdown?.by_type ?? [])
+      .map((b) => ({
+        type: normalizeContentType(b.content_type),
+        eng: (b.avg_likes || 0) + (b.avg_comments || 0),
+      }))
+      .sort((a, b) => b.eng - a.eng)
+    return types[0]?.type ?? 'video'
+  }, [breakdown])
+
+  // Hand the wizard the next available day in the plan, or fall back to
+  // today's date. ContentPlanCreate.tsx validates content_plan_day is a
+  // YYYY-MM-DD string — both branches produce that shape.
+  const firstPlanDay = plan?.days?.[0]
+  const nextContentPlanDay = firstPlanDay?.date ?? new Date().toISOString().slice(0, 10)
+  const bestTime = firstPlanDay?.best_time ?? '18:00'
 
   return (
     <article className="mp-bubble">
@@ -370,6 +408,24 @@ function WeaknessBubble() {
       <div className="mp-rec" dir="auto">
         <strong>{t('myPostsPage.weaknessTipPrefix')}</strong> {change}
       </div>
+      <button
+        type="button"
+        className="mp-bubble-cta"
+        onClick={() =>
+          navigate('/content-plan/create', {
+            state: {
+              day_index: 0,
+              suggestion_topic: change,
+              content_plan_day: nextContentPlanDay,
+              content_type: topPerformingType,
+              best_time: bestTime,
+              language: isAr ? 'ar' : 'en',
+            },
+          })
+        }
+      >
+        {t('myPostsPage.fixThisCta')}
+      </button>
     </article>
   )
 }
@@ -574,7 +630,7 @@ export default function Analytics() {
           <section className="mp-thread">
             <EngagementBubble isAr={isAr} />
             <WinnerBubble isAr={isAr} />
-            <WeaknessBubble />
+            <WeaknessBubble isAr={isAr} />
           </section>
 
           {/* RIGHT — sticky cockpit (rankings + distribution) */}
@@ -658,6 +714,12 @@ const MP_STYLES = `
 /* Weakness recommendation block */
 .mp-rec { padding:14px 16px; background:var(--purple-50); border-radius:10px; font-size:14px; line-height:1.65; color:var(--ink-900); }
 .mp-rec strong { color:var(--purple-800); font-weight:700; }
+
+/* Action CTA on insight bubbles — leads the user from a finding into the
+   wizard or content plan with state pre-filled. */
+.mp-bubble-cta { align-self:flex-start; margin-top:14px; padding:10px 16px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84,51,194,.55), inset 0 1px 0 rgba(255,255,255,.15); transition:background .12s, transform .12s; }
+.mp-bubble-cta:hover { background:var(--purple-700); transform:translateY(-1px); }
+.mp-bubble-cta:active { transform:translateY(0); }
 
 /* COCKPIT (right column, sticky) */
 .mp-cockpit { display:flex; flex-direction:column; gap:14px; position:sticky; top:28px; }

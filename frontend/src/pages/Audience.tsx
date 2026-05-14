@@ -62,7 +62,8 @@ const REGEN_COOLDOWN_SECONDS = 30
 /* ------------------------------------------------------------------ */
 
 function AudHero({ segments }: { segments: SegmentsData | undefined }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const isAr = !!i18n.language?.startsWith('ar')
   const insights = useAudienceInsights()
   const totalSize = useMemo(
     () => segments?.segments?.reduce((s, x) => s + x.size, 0) ?? 0,
@@ -75,7 +76,19 @@ function AudHero({ segments }: { segments: SegmentsData | undefined }) {
   const headline = sentences[0]?.trim() || headlineText
   const body = sentences.slice(1).join('. ').trim()
 
-  const segs = segments?.segments ?? []
+  // Sort by size desc to match the persona list below (Audience.tsx:336).
+  // Both halves of the hero (stacked bar + legend) and the persona cards use
+  // PALETTES[i % PALETTES.length], so identical ordering = identical colors
+  // row-by-row between bar and list. Without this sort, the bar showed
+  // source-order colors while the list showed sorted-order colors, breaking
+  // the visual link between the two surfaces.
+  const segs = useMemo(
+    () => [...(segments?.segments ?? [])].sort((a, b) => b.size - a.size),
+    [segments],
+  )
+
+  const CONFIDENCE_THRESHOLD = 100
+  const fmtCount = (n: number) => (isAr ? toArDigits(n) : String(n))
 
   return (
     <section className="aud-hero">
@@ -93,8 +106,14 @@ function AudHero({ segments }: { segments: SegmentsData | undefined }) {
       </div>
       <div className="aud-hero-r">
         <div className="aud-hero-num">
-          <div className="num">{totalSize}</div>
+          <div className="num">{fmtCount(totalSize)}</div>
           <div>{t('myAudiencePage.audHeroTotalLabel')}</div>
+        </div>
+        <div className="aud-hero-note" dir="auto">
+          {t('myAudiencePage.confidenceNote', {
+            count: fmtCount(totalSize),
+            threshold: fmtCount(CONFIDENCE_THRESHOLD),
+          })}
         </div>
         {segs.length > 0 && (
           <>
@@ -462,6 +481,7 @@ const AUD_STYLES = `
 .aud-hero-num { text-align:start; margin-bottom:14px; }
 .aud-hero-num .num { font-size:28px; font-weight:700; color:var(--ink-950); letter-spacing:-0.02em; line-height:1; }
 .aud-hero-num > div:last-child { font-size:11.5px; color:var(--ink-500); font-weight:500; margin-top:4px; }
+.aud-hero-note { font-size:11.5px; color:var(--ink-500); line-height:1.55; margin:0 0 14px; padding:8px 10px; background:var(--ink-50); border-radius:8px; }
 .aud-hero-segs { display:flex; gap:3px; height:14px; margin-bottom:10px; border-radius:4px; overflow:hidden; }
 .aud-hero-seg { border-radius:3px; transition:opacity .15s; }
 .aud-hero-seg:hover { opacity:.8; }

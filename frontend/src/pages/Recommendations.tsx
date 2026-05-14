@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   useContentPlan,
   useGenerateCaption,
   useAccounts,
+  useRegenerateContentPlan,
 } from '../hooks/useAnalytics'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
@@ -137,11 +138,27 @@ const TYPE_THUMB_BG: Record<string, string> = {
 function ContentPlanContent() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const isAr = !!i18n.language?.startsWith('ar')
   const { data, isLoading } = useContentPlan()
   const { data: accounts } = useAccounts()
   const accountId = accounts?.[0]?.id
   const generate = useGenerateCaption()
+  const regenerate = useRegenerateContentPlan()
+
+  // Read /my-posts → /content-plan handoff. preferContentType arrives as
+  // location.state when the user clicks "Suggest 3 <type> topics" on the My
+  // Posts page. We show a banner suggesting they regenerate, then strip the
+  // state so a refresh doesn't re-surface the banner forever.
+  const incomingPreferType =
+    (location.state as { preferContentType?: string } | null)?.preferContentType ?? null
+  const [preferType, setPreferType] = useState<string | null>(incomingPreferType)
+  useEffect(() => {
+    if (incomingPreferType) {
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [filter, setFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all')
@@ -271,9 +288,18 @@ function ContentPlanContent() {
             <span>{t('contentPlanPage.searchPlaceholder')}</span>
             <kbd>⌘K</kbd>
           </div>
-          <button className="cp-regen">
+          <button
+            className="cp-regen"
+            type="button"
+            disabled={regenerate.isPending}
+            onClick={() => regenerate.mutate()}
+          >
             <Icon path={I.spark} size={14} />
-            <span>{t('contentPlanPage.regeneratePlan')}</span>
+            <span>
+              {regenerate.isPending
+                ? t('contentPlanPage.regenerating')
+                : t('contentPlanPage.regeneratePlan')}
+            </span>
           </button>
           <button
             className="cp-create"
@@ -285,6 +311,31 @@ function ContentPlanContent() {
           </button>
         </div>
       </header>
+
+      {preferType && (
+        <div className="cp-prefer-banner" role="status" dir="auto">
+          <Icon path={I.spark} size={14} />
+          <span>
+            {t('contentPlanPage.preferContentTypeBanner', {
+              type: t(`contentPlanPage.contentType.${preferType}` as 'contentPlanPage.contentType.video'),
+            })}
+          </span>
+          <button
+            type="button"
+            className="cp-prefer-banner-cta"
+            disabled={regenerate.isPending}
+            onClick={() => {
+              regenerate.mutate(undefined, {
+                onSuccess: () => setPreferType(null),
+              })
+            }}
+          >
+            {regenerate.isPending
+              ? t('contentPlanPage.regenerating')
+              : t('contentPlanPage.regeneratePlan')}
+          </button>
+        </div>
+      )}
 
       {/* Split: list + sticky preview */}
       <div className="cp-split">
@@ -1122,7 +1173,17 @@ const CP_STYLES = `
 .cp-search { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface); border:1px solid var(--line); border-radius:10px; font-size:13px; color:var(--ink-500); min-width:260px; }
 .cp-search kbd { margin-inline-start:auto; font-size:10.5px; background:var(--ink-100); padding:2px 6px; border-radius:4px; color:var(--ink-600); }
 .cp-regen { display:flex; align-items:center; gap:8px; padding:11px 18px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84,51,194,.55), inset 0 1px 0 rgba(255,255,255,.15); transition:background .12s, transform .12s; }
-.cp-regen:hover { background:var(--purple-700); transform:translateY(-1px); }
+.cp-regen:hover:not(:disabled) { background:var(--purple-700); transform:translateY(-1px); }
+.cp-regen:disabled { opacity:.6; cursor:wait; }
+
+/* Prefer-content-type banner — shown when the user lands here from a "Suggest
+   <type> topics" CTA on My Posts. Same accent-blue treatment used elsewhere
+   for informational callouts; persists until the user regenerates. */
+.cp-prefer-banner { display:flex; align-items:center; gap:10px; padding:12px 16px; margin:0 0 14px; background:rgba(165,221,236,.22); border:1px solid rgba(84,51,194,.18); border-radius:12px; font-size:13px; color:var(--text); }
+.cp-prefer-banner > span { flex:1; }
+.cp-prefer-banner-cta { padding:7px 14px; background:var(--purple-600); color:#fff; border-radius:8px; font-size:12px; font-weight:600; transition:background .12s; }
+.cp-prefer-banner-cta:hover:not(:disabled) { background:var(--purple-700); }
+.cp-prefer-banner-cta:disabled { opacity:.6; cursor:wait; }
 
 /* Split */
 .cp-split { display:grid; grid-template-columns:1.35fr 1fr; gap:18px; min-height:0; }

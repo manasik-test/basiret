@@ -663,3 +663,19 @@ export async function updateContentPlanTopic(
   )
   return res.data
 }
+
+export interface RegenerateContentPlanResponse {
+  social_account_id: string
+  language: 'en' | 'ar'
+  deleted: number
+}
+
+export async function regenerateContentPlan(
+  language: 'en' | 'ar' = 'en',
+): Promise<RegenerateContentPlanResponse> {
+  const res = await api.post<unknown, ApiResponse<RegenerateContentPlanResponse>>(
+    '/ai-pages/content-plan/regenerate',
+    { language },
+  )
+  return res.data
+}

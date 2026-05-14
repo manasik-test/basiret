@@ -55,6 +55,7 @@ vi.mock('../hooks/useAnalytics', () => ({
     isLoading: false,
   }),
   useGenerateCaption: () => ({ mutate: vi.fn(), isPending: false }),
+  useRegenerateContentPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useLanguageCacheInvalidation: () => {},
 }))
 

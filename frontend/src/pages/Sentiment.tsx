@@ -64,27 +64,34 @@ function formatRelative(iso: string | null, t: (key: string, opts?: Record<strin
 /* Hero                                                               */
 /* ------------------------------------------------------------------ */
 
+const SENTIMENT_UNLOCK_THRESHOLD = 10
+
 function SentHero({ summary }: { summary: SentimentSummaryData | undefined }) {
   const { t } = useTranslation()
   const counts = summary?.current_counts ?? { positive: 0, neutral: 0, negative: 0 }
-  const total = (counts.positive + counts.neutral + counts.negative) || 1
+  const analyzedTotal = counts.positive + counts.neutral + counts.negative
+  // Until we have enough analyzed comments, every ring renders as "0%
+  // Positive / 0% Neutral / 0% Negative" which reads like a data error.
+  // Replace with a single explanatory card explaining what unlocks at 10.
+  const isUnlocked = analyzedTotal >= SENTIMENT_UNLOCK_THRESHOLD
+  const totalForPct = analyzedTotal || 1
   const data = [
     {
       key: 'positive' as const,
       mood: 'pos' as const,
-      pct: Math.round((counts.positive / total) * 100),
+      pct: Math.round((counts.positive / totalForPct) * 100),
       label: t('sentimentPage.ringPositive'),
     },
     {
       key: 'neutral' as const,
       mood: 'neu' as const,
-      pct: Math.round((counts.neutral / total) * 100),
+      pct: Math.round((counts.neutral / totalForPct) * 100),
       label: t('sentimentPage.ringNeutral'),
     },
     {
       key: 'negative' as const,
       mood: 'neg' as const,
-      pct: Math.round((counts.negative / total) * 100),
+      pct: Math.round((counts.negative / totalForPct) * 100),
       label: t('sentimentPage.ringNegative'),
     },
   ]
@@ -96,40 +103,50 @@ function SentHero({ summary }: { summary: SentimentSummaryData | undefined }) {
         <div className="snt-hero-k">{t('sentimentPage.heroEyebrow')}</div>
         <h2 dir="auto">{headline}</h2>
         <div className="snt-hero-acts">
-          <button className="snt-hero-btn primary">
-            <Icon path={I.wand} size={13} />
-            {t('sentimentPage.heroCta1')}
-          </button>
+          {isUnlocked && (
+            <button className="snt-hero-btn primary">
+              <Icon path={I.wand} size={13} />
+              {t('sentimentPage.heroCta1')}
+            </button>
+          )}
           <button className="snt-hero-btn ghost">{t('sentimentPage.heroCta2')}</button>
         </div>
       </div>
 
       <div className="snt-hero-r">
-        <div className="snt-hero-rings">
-          {data.map((d) => {
-            const m = MOOD[d.mood]
-            return (
-              <div key={d.key} className="snt-ring">
-                <div
-                  className="snt-ring-svg"
-                  style={
-                    {
-                      ['--p' as string]: d.pct.toString(),
-                      ['--c' as string]: m.solid,
-                    } as React.CSSProperties
-                  }
-                >
-                  <div className="snt-ring-c">
-                    <div className="num">{d.pct}%</div>
+        {isUnlocked ? (
+          <div className="snt-hero-rings">
+            {data.map((d) => {
+              const m = MOOD[d.mood]
+              return (
+                <div key={d.key} className="snt-ring">
+                  <div
+                    className="snt-ring-svg"
+                    style={
+                      {
+                        ['--p' as string]: d.pct.toString(),
+                        ['--c' as string]: m.solid,
+                      } as React.CSSProperties
+                    }
+                  >
+                    <div className="snt-ring-c">
+                      <div className="num">{d.pct}%</div>
+                    </div>
+                  </div>
+                  <div className="snt-ring-l" style={{ color: m.fg }}>
+                    {d.label}
                   </div>
                 </div>
-                <div className="snt-ring-l" style={{ color: m.fg }}>
-                  {d.label}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="snt-hero-unlock" dir="auto">
+            <div className="snt-hero-unlock-icon" aria-hidden>🎯</div>
+            <h3>{t('sentimentPage.unlockTitle')}</h3>
+            <p>{t('sentimentPage.unlockBody')}</p>
+          </div>
+        )}
       </div>
     </section>
   )
@@ -200,7 +217,8 @@ function TriageList({
       <div className="snt-inbox">
         {filtered.length === 0 ? (
           <div className="snt-inbox-empty" dir="auto">
-            {t('sentimentPage.inboxEmpty')}
+            <div className="snt-inbox-empty-t">{t('sentimentPage.inboxEmptyTitle')}</div>
+            <div className="snt-inbox-empty-s">{t('sentimentPage.inboxEmptySub')}</div>
           </div>
         ) : (
           filtered.map((c) => {
@@ -604,6 +622,10 @@ const SNT_STYLES = `
 .snt-hero-btn.ghost { background:transparent; color:var(--purple-800); }
 
 .snt-hero-rings { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+.snt-hero-unlock { background:var(--surface); border-radius:14px; padding:24px 22px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px; min-height:208px; justify-content:center; }
+.snt-hero-unlock-icon { font-size:38px; line-height:1; }
+.snt-hero-unlock h3 { font-size:15px; font-weight:700; color:var(--ink-950); letter-spacing:-0.01em; }
+.snt-hero-unlock p { font-size:12.5px; color:var(--ink-600); line-height:1.55; max-width:32ch; }
 .snt-ring { background:var(--surface); border-radius:14px; padding:14px 8px; text-align:center; }
 .snt-ring-svg { width:80px; height:80px; margin:0 auto 6px; border-radius:50%; background:conic-gradient(var(--c) calc(var(--p) * 1%), var(--ink-100) 0); display:grid; place-items:center; }
 .snt-ring-c { width:60px; height:60px; background:var(--surface); border-radius:50%; display:grid; place-items:center; }
@@ -619,7 +641,9 @@ const SNT_STYLES = `
 .snt-panel h3, .snt-mini h3 { font-size:14px; font-weight:700; color:var(--ink-950); letter-spacing:-0.005em; }
 .snt-panel-s, .snt-mini-s { font-size:11.5px; color:var(--ink-500); font-weight:500; margin:2px 0 14px; }
 .snt-mini-empty { padding:18px; text-align:center; font-size:12px; color:var(--ink-500); border:1px dashed var(--line); border-radius:10px; }
-.snt-inbox-empty { padding:36px; text-align:center; font-size:13px; color:var(--ink-500); border:1px dashed var(--line); border-radius:12px; }
+.snt-inbox-empty { padding:32px 24px; text-align:center; border:1px dashed var(--line); border-radius:12px; display:flex; flex-direction:column; gap:4px; }
+.snt-inbox-empty-t { font-size:14px; font-weight:600; color:var(--ink-800); }
+.snt-inbox-empty-s { font-size:12px; color:var(--ink-500); line-height:1.5; }
 
 .snt-panel-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
 .snt-panel-head h3 { margin-bottom:2px; }

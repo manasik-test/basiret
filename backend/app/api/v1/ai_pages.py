@@ -26,7 +26,7 @@ import re
 import threading
 from collections import Counter
 from datetime import date as _date, datetime, timedelta, timezone
-from typing import Callable, Literal
+from typing import Callable, Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -1574,6 +1574,60 @@ def update_content_plan_topic(
             "day_index": body.day_index,
             "topic": topics[str(body.day_index)],
             "last_user_edit_at": row.last_user_edit_at.isoformat(),
+        },
+    }
+
+
+# ── Content Plan: bust the cache so the next GET regenerates ────────────
+
+
+class RegenerateContentPlanRequest(BaseModel):
+    """Optional payload. Defaulting both fields makes the endpoint callable as
+    a bare POST when the frontend just wants "regenerate for whatever's
+    primary right now."""
+
+    social_account_id: Optional[str] = None
+    language: LanguageParam = "en"
+
+
+@router.post("/content-plan/regenerate")
+def regenerate_content_plan(
+    body: RegenerateContentPlanRequest = Body(default_factory=RegenerateContentPlanRequest),
+    user: User = Depends(require_admin_or_manager),
+    _gated: User = Depends(RequireFeature("content_recommendations")),
+    db: Session = Depends(get_db),
+):
+    """Delete the cached content plan row so the next GET /content-plan rebuilds
+    it from Gemini. The actual regeneration happens lazily on the follow-up
+    GET — the frontend invalidates its React Query cache on success and the
+    re-fetch sees an empty `ai_page_cache` row → inline recompute.
+    """
+    account_ids = _org_account_ids(db, user)
+    if not account_ids:
+        raise HTTPException(status_code=422, detail="No active social accounts.")
+
+    target = body.social_account_id or str(account_ids[0])
+    # Multi-tenant guard: only delete cache rows for accounts in the caller's org.
+    if target not in [str(a) for a in account_ids]:
+        raise HTTPException(status_code=404, detail="Social account not found")
+
+    deleted = (
+        db.query(AiPageCache)
+        .filter(
+            AiPageCache.social_account_id == target,
+            AiPageCache.page_name == "content-plan",
+            AiPageCache.language == body.language,
+        )
+        .delete()
+    )
+    db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "social_account_id": target,
+            "language": body.language,
+            "deleted": int(deleted),
         },
     }
 

@@ -10,7 +10,7 @@ import {
   fetchRecommendationFeedback, submitRecommendationFeedback,
   fetchEngagementTimeline,
   fetchCompetitorLeaderboard, fetchCompetitorTopPosts, fetchHashtagTrends,
-  updateContentPlanTopic,
+  updateContentPlanTopic, regenerateContentPlan,
   type GenerateCaptionRequest, type RecFeedback,
   type UpdateContentPlanTopicRequest,
 } from '../api/analytics'
@@ -302,6 +302,20 @@ export function useUpdateContentPlanTopic() {
     onSuccess: () => {
       // Refresh the Content Plan query so the user sees their edit immediately
       // on return to /content-plan.
+      queryClient.invalidateQueries({ queryKey: ['ai-pages', 'content-plan'] })
+    },
+  })
+}
+
+export function useRegenerateContentPlan() {
+  const lang = useUiLanguage()
+  const queryClient = useQueryClient()
+  return useMutation({
+    // Server deletes the cached row for (account, "content-plan", language);
+    // invalidating the query then refetches and the GET endpoint regenerates
+    // the plan inline since there's nothing in cache.
+    mutationFn: () => regenerateContentPlan(lang),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ai-pages', 'content-plan'] })
     },
   })

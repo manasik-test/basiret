@@ -105,9 +105,11 @@ function maxOr1(arr: number[]): number {
 
 // Compute the period-over-period delta from a timeline by comparing the first
 // half of the window against the second half. Returns the percentage change as
-// a signed number (e.g. 17 means +17%). Returns null when we don't have enough
-// data or the prior half is zero (avoids divide-by-zero / misleading +∞%).
-function periodDelta(
+// a signed number (e.g. 17 means +17%). Returns null when one of the halves
+// is empty — both directions are meaningless: prev=0 is the divide-by-zero /
+// "+∞%" case, and curr=0 means recent activity collapsed to nothing which
+// reads as "-100%" but is really "no recent data to compare against."
+export function periodDelta(
   entries: EngagementTimelineEntry[] | undefined,
   field: 'engagement' | 'reach' | 'posts',
 ): number | null {
@@ -115,7 +117,7 @@ function periodDelta(
   const half = Math.floor(entries.length / 2)
   const prev = entries.slice(0, half).reduce((s, e) => s + e[field], 0)
   const curr = entries.slice(half).reduce((s, e) => s + e[field], 0)
-  if (prev === 0) return null
+  if (prev === 0 || curr === 0) return null
   return Math.round(((curr - prev) / prev) * 100)
 }
 
@@ -302,9 +304,14 @@ function KpiStrip({
   const reachBuckets = sparkFromTimeline(sparkSource, 'reach')
   const postBuckets = sparkFromTimeline(sparkSource, 'posts')
 
-  const engDelta = periodDelta(sparkSource, 'engagement')
-  const reachDelta = periodDelta(sparkSource, 'reach')
-  const postDelta = periodDelta(sparkSource, 'posts')
+  // Deltas use the selected-range timeline (7/30/90d) — what the user thinks
+  // "vs previous period" means. sparkSource is the wider 365d window used
+  // only for sparkline visual density; comparing its halves cross-correlates
+  // a 6-month chunk against another 6-month chunk and produces -100% for any
+  // account that's been recently quiet.
+  const engDelta = periodDelta(timeline, 'engagement')
+  const reachDelta = periodDelta(timeline, 'reach')
+  const postDelta = periodDelta(timeline, 'posts')
 
   // Honest empty state: the connected account has nothing to summarize yet.
   // Trigger only when overview is loaded AND every aggregate is zero — avoids
@@ -404,38 +411,6 @@ function KpiCard({
         </>
       )}
     </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* NBA banner                                                         */
-/* ------------------------------------------------------------------ */
-
-function NBABanner({ insight, summary }: { insight: InsightAction | null; summary: string }) {
-  const { t } = useTranslation()
-  return (
-    <section className="hm-nba">
-      <div className="hm-nba-l">
-        <span className="hm-nba-av">✦</span>
-        <div>
-          <div className="hm-nba-k">{t('home.nba.label')}</div>
-          <div className="hm-nba-t" dir="auto">
-            {insight ? (
-              <>
-                <strong>{insight.title}</strong>
-                {insight.finding ? <> — {insight.finding}</> : null}
-              </>
-            ) : (
-              summary || t('home.nba.fallback')
-            )}
-          </div>
-        </div>
-      </div>
-      <button className="hm-nba-btn">
-        {t('home.nba.cta')}
-        <Icon path={I.chevR} size={12} />
-      </button>
-    </section>
   )
 }
 
@@ -835,11 +810,6 @@ export default function Dashboard() {
           varietyValue={variety}
           igPerfValue={igPerformance}
           isAr={isAr}
-        />
-
-        <NBABanner
-          insight={insights.data?.insights?.[0] ?? null}
-          summary={insights.data?.summary ?? ''}
         />
 
         <ActionsList actions={actions} isAr={isAr} />
