@@ -164,6 +164,7 @@ def _generate_highlights(
     return get_provider("insights").generate_text(
         sys_prompt, user_msg, temperature=0.4,
         account_id=account_id, task="insights", source=source,
+        language=language,
     )
 
 router = APIRouter()
@@ -1060,10 +1061,20 @@ def list_accounts(
 @router.get("/segments")
 def get_segments(
     social_account_id: str,
+    language: Literal["en", "ar"] = "en",
     user: User = Depends(RequireFeature("audience_segmentation")),
     db: Session = Depends(get_db),
 ):
-    """Return audience segments for a social account (Pro)."""
+    """Return audience segments for a social account (Pro).
+
+    `language` selects which language partition of the per-cluster rows to
+    return (added 2026-05-15 for Bug 2). Falls back to whatever language
+    rows exist when the requested language has no rows yet — e.g. legacy
+    accounts whose latest regenerate predates the dual-language change all
+    have `language='en'` rows by backfill default. The fallback lets those
+    accounts keep working until the user clicks Regenerate Segments while
+    on the new code path; once that fires, both EN and AR rows exist.
+    """
 
     # Verify account belongs to user's org
     account = db.query(SocialAccount).filter(
@@ -1075,15 +1086,31 @@ def get_segments(
 
     segments = (
         db.query(AudienceSegment)
-        .filter(AudienceSegment.social_account_id == social_account_id)
+        .filter(
+            AudienceSegment.social_account_id == social_account_id,
+            AudienceSegment.language == language,
+        )
         .order_by(AudienceSegment.cluster_id)
         .all()
     )
+
+    # Legacy fallback: if no rows match the requested language but rows DO
+    # exist under another language (the backfill default), serve those so
+    # the page isn't blank. The persona prose will be in the wrong language
+    # until the user regenerates, but the rest of the surface is correct.
+    if not segments:
+        segments = (
+            db.query(AudienceSegment)
+            .filter(AudienceSegment.social_account_id == social_account_id)
+            .order_by(AudienceSegment.cluster_id)
+            .all()
+        )
 
     return {
         "success": True,
         "data": {
             "social_account_id": social_account_id,
+            "language": language,
             "segment_count": len(segments),
             "generated_at": str(segments[0].created_at) if segments else None,
             "segments": [

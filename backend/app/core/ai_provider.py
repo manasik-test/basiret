@@ -2,8 +2,8 @@
 Swappable AI provider layer.
 
 Each concrete provider implements two methods:
-    generate_text(system, user, *, account_id, task, source) -> str
-    generate_json(system, user, *, account_id, task, source) -> dict
+    generate_text(system, user, *, account_id, task, source, language) -> str
+    generate_json(system, user, *, account_id, task, source, language) -> dict
 
 `get_provider(task)` returns the right provider for a given task based on
 runtime config:
@@ -21,11 +21,20 @@ Every successful call is logged in `ai_usage_log` for per-account rate limiting
 and admin visibility. Before each call we check the past 24 hours of usage for
 the account+provider; if the limit is exceeded we raise
 `AIQuotaExceededError` without contacting the upstream API.
+
+When the caller passes a `language` ("en" or "ar"), the response is checked
+post-hoc with langdetect; on a violation we retry once with a stronger
+directive. The retry call counts against rate-limit and is logged in
+ai_usage_log. If the retry also fails the language check, we serve the
+original response (degraded) and log a warning so we can grep for repeat
+offenders later. Callers can opt out via `skip_language_check=True` for
+endpoints where mixed-language output is legitimate (Ask BASIRET).
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -99,6 +108,105 @@ class AIBillingLimitError(AIProviderError):
         "Please try again later or contact support."
     )
     retry_after_hours = None
+
+
+# ── Language compliance ──────────────────────────────────────────────────
+
+
+# Languages we currently render in. Adding a third (e.g. French) requires
+# both UI translation and a langdetect mapping entry below.
+_SUPPORTED_LANGS = {"en", "ar"}
+
+# langdetect needs ~10+ words to be reliable. Short responses (single labels,
+# numeric snippets) are skipped to avoid false-positives on phrases like
+# "Reach +22%" or "Today" that langdetect can't pin down.
+_LANG_CHECK_MIN_WORDS = 10
+
+_ARABIC_CHAR_RE = re.compile(r"[؀-ۿ]")
+_LATIN_CHAR_RE = re.compile(r"[A-Za-z]")
+
+
+def _extract_prose(value: Any) -> str:
+    """Flatten all string values in a JSON-like tree into one space-joined
+    string. Used to feed langdetect on JSON responses without polluting the
+    detection with structural keys."""
+    parts: list[str] = []
+
+    def _walk(v: Any) -> None:
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                _walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                _walk(x)
+
+    _walk(value)
+    return " ".join(parts)
+
+
+def _detect_language(text: str) -> str | None:
+    """Return "en", "ar", or None when the dominant language can't be pinned
+    down. Combines a fast character-class check (Arabic vs Latin script) with
+    langdetect for everything else. Skips short samples — langdetect is noisy
+    on <10 words."""
+    if not text:
+        return None
+    stripped = text.strip()
+    if len(stripped.split()) < _LANG_CHECK_MIN_WORDS:
+        return None
+    arabic = len(_ARABIC_CHAR_RE.findall(stripped))
+    latin = len(_LATIN_CHAR_RE.findall(stripped))
+    total = arabic + latin
+    if total >= 20:
+        # Char-class is fast and unambiguous for EN vs AR: any text with >60%
+        # of its letter-class in one script is overwhelmingly that language.
+        if arabic / total > 0.6:
+            return "ar"
+        if latin / total > 0.6:
+            return "en"
+    # Fall back to langdetect for mixed-script or ambiguous text.
+    try:
+        from langdetect import detect, LangDetectException
+    except ImportError:  # langdetect is in requirements.txt but be safe
+        return None
+    try:
+        detected = detect(stripped)
+    except LangDetectException:
+        return None
+    return detected if detected in _SUPPORTED_LANGS else None
+
+
+def _check_language_compliance(
+    text: str, requested_language: str | None
+) -> str | None:
+    """Return None if `text` is in the requested language (or can't be
+    detected reliably). Return a short violation string otherwise.
+
+    Conservative defaults: when in doubt, return None and let the response
+    through — we'd rather pass a borderline mismatch than fire a retry on
+    every short label.
+    """
+    if not requested_language or requested_language not in _SUPPORTED_LANGS:
+        return None
+    detected = _detect_language(text)
+    if detected is None or detected == requested_language:
+        return None
+    return f"detected={detected} expected={requested_language}"
+
+
+def _retry_language_directive(language: str, violation: str) -> str:
+    """Strong directive appended to the system prompt on retry. Concrete
+    enough that Gemini can't soft-interpret 'mostly in {language}'."""
+    label = "Arabic" if language == "ar" else "English"
+    return (
+        f"\n\nCRITICAL: Your previous response was not in {label} ({violation}). "
+        f"Re-translate ALL prose fields to {label}. If the source data is in a "
+        f"different language, you MUST still respond in {label}. Translating "
+        f"cross-language content is correct; preserving source language is "
+        f"forbidden."
+    )
 
 
 # ── Usage logging + rate limiting ────────────────────────────────────────
@@ -199,6 +307,8 @@ class AIProvider(ABC):
         account_id: str | None = None,
         task: str = "pages",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> str: ...
 
     @abstractmethod
@@ -211,6 +321,8 @@ class AIProvider(ABC):
         account_id: str | None = None,
         task: str = "pages",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> dict: ...
 
     def generate_chat(
@@ -223,6 +335,8 @@ class AIProvider(ABC):
         account_id: str | None = None,
         task: str = "ask",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> str:
         """Multi-turn chat. `history` is a list of {role: 'user'|'assistant', content: str}
         in chronological order; `new_user_message` is the latest turn (kept
@@ -238,6 +352,7 @@ class AIProvider(ABC):
         return self.generate_text(
             system, "\n\n".join(flat), temperature,
             account_id=account_id, task=task, source=source,
+            language=language, skip_language_check=skip_language_check,
         )
 
 
@@ -309,6 +424,8 @@ class GeminiProvider(AIProvider):
         account_id: str | None = None,
         task: str = "pages",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> str:
         if source == "user":
             _check_rate_limit(provider=self.name, account_id=account_id, task=task)
@@ -320,7 +437,63 @@ class GeminiProvider(AIProvider):
             provider=self.name, task=task, account_id=account_id,
             source=source, tokens_used=self._tokens_used(resp),
         )
+        if language and not skip_language_check:
+            violation = _check_language_compliance(text, language)
+            if violation:
+                logger.warning(
+                    "language_compliance_violation provider=%s task=%s account=%s %s",
+                    self.name, task, account_id, violation,
+                )
+                retry_text = self._retry_text_for_language(
+                    system, user, temperature, language, violation,
+                    account_id=account_id, task=task, source=source,
+                )
+                if retry_text is not None:
+                    return retry_text
         return text
+
+    def _retry_text_for_language(
+        self,
+        system: str,
+        user: str,
+        temperature: float,
+        language: str,
+        violation: str,
+        *,
+        account_id: str | None,
+        task: str,
+        source: AISource,
+    ) -> str | None:
+        """Retry once with a stronger language directive. Returns the retry
+        text on compliance; returns None when the retry also violates or
+        upstream errored (caller then serves the original)."""
+        retry_system = system + _retry_language_directive(language, violation)
+        try:
+            resp = self._invoke(retry_system, user, temperature, json_mode=False)
+        except AIProviderError as exc:
+            logger.warning(
+                "language_compliance_retry_errored provider=%s task=%s account=%s %s",
+                self.name, task, account_id, exc,
+            )
+            return None
+        text = (getattr(resp, "text", None) or "").strip()
+        if not text:
+            return None
+        _log_usage(
+            provider=self.name, task=task, account_id=account_id,
+            source=source, tokens_used=self._tokens_used(resp),
+        )
+        if _check_language_compliance(text, language) is None:
+            logger.info(
+                "language_compliance_retry_succeeded provider=%s task=%s account=%s",
+                self.name, task, account_id,
+            )
+            return text
+        logger.warning(
+            "language_compliance_retry_failed provider=%s task=%s account=%s",
+            self.name, task, account_id,
+        )
+        return None
 
     def generate_json(
         self,
@@ -331,6 +504,8 @@ class GeminiProvider(AIProvider):
         account_id: str | None = None,
         task: str = "pages",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> dict:
         if source == "user":
             _check_rate_limit(provider=self.name, account_id=account_id, task=task)
@@ -352,7 +527,69 @@ class GeminiProvider(AIProvider):
             provider=self.name, task=task, account_id=account_id,
             source=source, tokens_used=self._tokens_used(resp),
         )
-        return parsed if isinstance(parsed, dict) else {"items": parsed}
+        result = parsed if isinstance(parsed, dict) else {"items": parsed}
+        if language and not skip_language_check:
+            violation = _check_language_compliance(_extract_prose(result), language)
+            if violation:
+                logger.warning(
+                    "language_compliance_violation provider=%s task=%s account=%s %s",
+                    self.name, task, account_id, violation,
+                )
+                retry_result = self._retry_json_for_language(
+                    system, user, temperature, language, violation,
+                    account_id=account_id, task=task, source=source,
+                )
+                if retry_result is not None:
+                    return retry_result
+        return result
+
+    def _retry_json_for_language(
+        self,
+        system: str,
+        user: str,
+        temperature: float,
+        language: str,
+        violation: str,
+        *,
+        account_id: str | None,
+        task: str,
+        source: AISource,
+    ) -> dict | None:
+        """JSON variant of the retry. Same semantics as `_retry_text_for_language`."""
+        retry_system = system + _retry_language_directive(language, violation)
+        try:
+            resp = self._invoke(retry_system, user, temperature, json_mode=True)
+        except AIProviderError as exc:
+            logger.warning(
+                "language_compliance_retry_errored provider=%s task=%s account=%s %s",
+                self.name, task, account_id, exc,
+            )
+            return None
+        raw = (getattr(resp, "text", None) or "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(parsed, (dict, list)):
+            return None
+        _log_usage(
+            provider=self.name, task=task, account_id=account_id,
+            source=source, tokens_used=self._tokens_used(resp),
+        )
+        result = parsed if isinstance(parsed, dict) else {"items": parsed}
+        if _check_language_compliance(_extract_prose(result), language) is None:
+            logger.info(
+                "language_compliance_retry_succeeded provider=%s task=%s account=%s",
+                self.name, task, account_id,
+            )
+            return result
+        logger.warning(
+            "language_compliance_retry_failed provider=%s task=%s account=%s",
+            self.name, task, account_id,
+        )
+        return None
 
     def generate_chat(
         self,
@@ -364,7 +601,14 @@ class GeminiProvider(AIProvider):
         account_id: str | None = None,
         task: str = "ask",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> str:
+        # `language` and `skip_language_check` are accepted for API uniformity
+        # but Ask BASIRET (the primary caller) intentionally opts out — mixed-
+        # language input/output is legitimate in conversational mode, and the
+        # post-hoc check would false-positive on bilingual replies.
+        del language, skip_language_check
         if source == "user":
             _check_rate_limit(provider=self.name, account_id=account_id, task=task)
         if not self._configured():
@@ -473,6 +717,16 @@ class OpenAIProvider(AIProvider):
             return None
         return getattr(usage, "total_tokens", None)
 
+    @staticmethod
+    def _openai_text(resp) -> str:
+        try:
+            return (resp.choices[0].message.content or "").strip()
+        except (IndexError, AttributeError) as exc:
+            raise AIInvalidResponseError(
+                f"OpenAI response missing choices[0].message.content: {exc}",
+                provider="openai",
+            ) from exc
+
     def generate_text(
         self,
         system: str,
@@ -482,23 +736,51 @@ class OpenAIProvider(AIProvider):
         account_id: str | None = None,
         task: str = "captions",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> str:
         if source == "user":
             _check_rate_limit(provider=self.name, account_id=account_id, task=task)
         resp = self._invoke(system, user, temperature, json_mode=False)
-        try:
-            text = (resp.choices[0].message.content or "").strip()
-        except (IndexError, AttributeError) as exc:
-            raise AIInvalidResponseError(
-                f"OpenAI response missing choices[0].message.content: {exc}",
-                provider=self.name,
-            ) from exc
+        text = self._openai_text(resp)
         if not text:
             raise AIInvalidResponseError("OpenAI returned empty text", provider=self.name)
         _log_usage(
             provider=self.name, task=task, account_id=account_id,
             source=source, tokens_used=self._tokens_used(resp),
         )
+        if language and not skip_language_check:
+            violation = _check_language_compliance(text, language)
+            if violation:
+                logger.warning(
+                    "language_compliance_violation provider=%s task=%s account=%s %s",
+                    self.name, task, account_id, violation,
+                )
+                retry_system = system + _retry_language_directive(language, violation)
+                try:
+                    retry_resp = self._invoke(retry_system, user, temperature, json_mode=False)
+                    retry_text = self._openai_text(retry_resp)
+                except AIProviderError as exc:
+                    logger.warning(
+                        "language_compliance_retry_errored provider=%s task=%s %s",
+                        self.name, task, exc,
+                    )
+                    return text
+                if retry_text:
+                    _log_usage(
+                        provider=self.name, task=task, account_id=account_id,
+                        source=source, tokens_used=self._tokens_used(retry_resp),
+                    )
+                    if _check_language_compliance(retry_text, language) is None:
+                        logger.info(
+                            "language_compliance_retry_succeeded provider=%s task=%s account=%s",
+                            self.name, task, account_id,
+                        )
+                        return retry_text
+                logger.warning(
+                    "language_compliance_retry_failed provider=%s task=%s account=%s",
+                    self.name, task, account_id,
+                )
         return text
 
     def generate_json(
@@ -510,17 +792,13 @@ class OpenAIProvider(AIProvider):
         account_id: str | None = None,
         task: str = "captions",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> dict:
         if source == "user":
             _check_rate_limit(provider=self.name, account_id=account_id, task=task)
         resp = self._invoke(system, user, temperature, json_mode=True)
-        try:
-            raw = (resp.choices[0].message.content or "").strip()
-        except (IndexError, AttributeError) as exc:
-            raise AIInvalidResponseError(
-                f"OpenAI response missing choices[0].message.content: {exc}",
-                provider=self.name,
-            ) from exc
+        raw = self._openai_text(resp)
         if not raw:
             raise AIInvalidResponseError("OpenAI returned empty JSON body", provider=self.name)
         try:
@@ -537,7 +815,49 @@ class OpenAIProvider(AIProvider):
             provider=self.name, task=task, account_id=account_id,
             source=source, tokens_used=self._tokens_used(resp),
         )
-        return parsed if isinstance(parsed, dict) else {"items": parsed}
+        result = parsed if isinstance(parsed, dict) else {"items": parsed}
+        if language and not skip_language_check:
+            violation = _check_language_compliance(_extract_prose(result), language)
+            if violation:
+                logger.warning(
+                    "language_compliance_violation provider=%s task=%s account=%s %s",
+                    self.name, task, account_id, violation,
+                )
+                retry_system = system + _retry_language_directive(language, violation)
+                try:
+                    retry_resp = self._invoke(retry_system, user, temperature, json_mode=True)
+                    retry_raw = self._openai_text(retry_resp)
+                except AIProviderError as exc:
+                    logger.warning(
+                        "language_compliance_retry_errored provider=%s task=%s %s",
+                        self.name, task, exc,
+                    )
+                    return result
+                if retry_raw:
+                    try:
+                        retry_parsed = json.loads(retry_raw)
+                    except (json.JSONDecodeError, ValueError):
+                        retry_parsed = None
+                    if isinstance(retry_parsed, (dict, list)):
+                        _log_usage(
+                            provider=self.name, task=task, account_id=account_id,
+                            source=source, tokens_used=self._tokens_used(retry_resp),
+                        )
+                        retry_result = (
+                            retry_parsed if isinstance(retry_parsed, dict)
+                            else {"items": retry_parsed}
+                        )
+                        if _check_language_compliance(_extract_prose(retry_result), language) is None:
+                            logger.info(
+                                "language_compliance_retry_succeeded provider=%s task=%s account=%s",
+                                self.name, task, account_id,
+                            )
+                            return retry_result
+                logger.warning(
+                    "language_compliance_retry_failed provider=%s task=%s account=%s",
+                    self.name, task, account_id,
+                )
+        return result
 
     def generate_chat(
         self,
@@ -549,7 +869,10 @@ class OpenAIProvider(AIProvider):
         account_id: str | None = None,
         task: str = "ask",
         source: AISource = "user",
+        language: str | None = None,
+        skip_language_check: bool = False,
     ) -> str:
+        del language, skip_language_check  # Same opt-out reasoning as Gemini.generate_chat
         if source == "user":
             _check_rate_limit(provider=self.name, account_id=account_id, task=task)
         if not self._configured():

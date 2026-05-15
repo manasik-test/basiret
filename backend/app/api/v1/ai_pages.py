@@ -72,14 +72,24 @@ def _lang_label(language: str) -> str:
 
 
 def _language_rule(language: str) -> str:
-    """Hard-output-language directive appended to every system prompt."""
+    """Hard-output-language directive appended to every system prompt.
+
+    Provider-level langdetect (ai_provider._check_language_compliance) catches
+    violations and retries once with a stronger directive, but a precise
+    system-prompt rule reduces the violation rate in the first place — fewer
+    retries = lower latency and Gemini cost. The negative example below was
+    added 2026-05-15 after a real production incident where an account with
+    Arabic captions had Arabic AI prose cached under the English language key.
+    """
     label = _lang_label(language)
+    other = "Arabic" if label == "English" else "English"
     return (
-        f"Respond ENTIRELY in {label}. "
-        f"Every string value in the JSON response MUST be in {label}, "
-        f"including titles, summaries, reasons, and any labels you generate. "
-        f"This is a hard requirement — do not switch languages even if the "
-        f"input data is in a different language."
+        f"Respond ENTIRELY in {label}. Every string value in the JSON response "
+        f"MUST be in {label}, including titles, summaries, reasons, and any "
+        f"labels you generate. If captions, comments, or other source data are "
+        f"in {other}, you MUST still respond in {label}. Translating "
+        f"cross-language content into {label} is correct; copying {other} "
+        f"content into the JSON is forbidden."
     )
 
 
@@ -551,12 +561,20 @@ def _gemini_text(
     temperature: float = 0.5,
     *,
     account_id: str | None = None,
+    language: str | None = None,
 ) -> str:
     """Plain-text Gemini call. Raises `AIProviderError` on failure (no silent
-    empty string) so the endpoint can decide to serve stale cache."""
+    empty string) so the endpoint can decide to serve stale cache.
+
+    Passing `language` (`'en'` or `'ar'`) opts into the provider-level
+    compliance check + retry. Recommended for every prose-producing call
+    site — provider falls back to the original response if both attempts
+    violate, so the worst case is "same behavior as before".
+    """
     return get_provider("pages").generate_text(
         system_instruction, user_message, temperature,
         account_id=account_id, task="pages", source="user",
+        language=language,
     )
 
 
@@ -566,11 +584,13 @@ def _gemini_json(
     temperature: float = 0.4,
     *,
     account_id: str | None = None,
+    language: str | None = None,
 ) -> dict:
     """Structured-JSON Gemini call. Raises `AIProviderError` on failure."""
     return get_provider("pages").generate_json(
         system_instruction, user_message, temperature,
         account_id=account_id, task="pages", source="user",
+        language=language,
     )
 
 
@@ -686,7 +706,7 @@ def posts_insights(
     )
 
     def _compute() -> dict:
-        result = _gemini_json(sys, user_msg, account_id=primary_account_id) or {}
+        result = _gemini_json(sys, user_msg, account_id=primary_account_id, language=language) or {}
         return {
             "why_it_worked": (result.get("why_it_worked") or "").strip(),
             "low_performers_pattern": (result.get("low_performers_pattern") or "").strip(),
@@ -1003,6 +1023,7 @@ def generate_caption(
         text = provider.generate_text(
             sys, user_msg, temperature=0.85,
             account_id=primary_account_id, task="captions", source="user",
+            language=body.language,
         )
     except AIProviderError as exc:
         # Captions have no useful data-only fallback — entire response is AI.
@@ -1174,7 +1195,7 @@ def audience_insights(
     )
 
     def _compute() -> dict:
-        result = _gemini_json(sys, user_msg, account_id=primary_account_id) or {}
+        result = _gemini_json(sys, user_msg, account_id=primary_account_id, language=language) or {}
         what = result.get("what_they_want") or []
         return {
             "behavior_summary": (result.get("behavior_summary") or "").strip(),
@@ -1388,7 +1409,8 @@ def content_plan(
 
     def _compute() -> dict:
         result = _gemini_json(
-            sys, user_msg, temperature=0.7, account_id=primary_account_id,
+            sys, user_msg, temperature=0.7,
+            account_id=primary_account_id, language=language,
         ) or {}
         topics_by_idx = _extract(result)
 
@@ -1403,7 +1425,8 @@ def content_plan(
             )
             retry_sys = sys + _RETRY_DIRECTIVE
             retry_result = _gemini_json(
-                retry_sys, user_msg, temperature=0.7, account_id=primary_account_id,
+                retry_sys, user_msg, temperature=0.7,
+                account_id=primary_account_id, language=language,
             ) or {}
             topics_by_idx = _extract(retry_result)
 
@@ -1733,7 +1756,8 @@ def sentiment_responses(
 
     def _compute() -> dict:
         result = _gemini_json(
-            sys, user_msg, temperature=0.6, account_id=primary_account_id,
+            sys, user_msg, temperature=0.6,
+            account_id=primary_account_id, language=language,
         ) or {}
         templates_by_id: dict[str, str] = {}
         for t in result.get("templates") or []:

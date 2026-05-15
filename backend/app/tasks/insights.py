@@ -384,8 +384,17 @@ HISTORICAL CONTEXT:
 - Account goal: growth"""
 
 
-def _call_gemini(user_message: str, *, account_id: str | None = None) -> dict:
+def _call_gemini(
+    user_message: str,
+    *,
+    account_id: str | None = None,
+    language: str | None = None,
+) -> dict:
     """Call the configured insights provider (Gemini) and return parsed JSON.
+
+    `language` opts into the provider-level langdetect compliance check + retry
+    (Bug 1 hardening, 2026-05-15). Caller is expected to pass the same lang
+    code that ends up in `insight_result.language` so we don't poison rows.
 
     Raises `AIProviderError` (or one of its subclasses) on any failure — the
     Celery task wrapper decides whether to retry or surface as terminal.
@@ -393,6 +402,7 @@ def _call_gemini(user_message: str, *, account_id: str | None = None) -> dict:
     return get_provider("insights").generate_json(
         SYSTEM_PROMPT, user_message, temperature=0.4,
         account_id=account_id, task="insights", source="user",
+        language=language,
     )
 
 
@@ -442,7 +452,9 @@ def generate_weekly_insights(self, social_account_id: str, language: str = "Engl
 
         user_message = _build_user_message(data, language, db=db)
         try:
-            result = _call_gemini(user_message, account_id=social_account_id)
+            result = _call_gemini(
+                user_message, account_id=social_account_id, language=lang_code,
+            )
         except AIQuotaExceededError as exc:
             # Quota retries don't help — they just spend more quota. Surface
             # as a terminal error and let the next scheduled run pick it up.
