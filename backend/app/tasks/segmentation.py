@@ -291,6 +291,7 @@ def _generate_persona_descriptions(
         parsed = get_provider("personas").generate_json(
             sys_prompt, prompt, temperature=0.5,
             account_id=account_id, task="personas", source="user",
+            language=language,
         )
     except AIProviderError as exc:
         logger.warning(
@@ -424,14 +425,31 @@ def _compute_segment_extras(db, cluster_post_ids: list):
 
 
 def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, silhouette, language: str = "en"):
-    """Delete old segments and insert new cluster rows with AI persona descriptions."""
+    """Delete old segments and insert TWO rows per cluster (one per supported
+    language) with AI persona descriptions.
+
+    Clustering itself is language-agnostic, but the persona prose
+    (`persona_name` / `persona_tagline` / `persona_description`) is AI-
+    generated and was previously stuck in whatever language the regenerate
+    happened to be in. As of 2026-05-15 we generate both EN and AR per
+    regeneration so toggling UI language picks the matching row instantly —
+    `GET /segments?language=ar` and `GET /segments?language=en` both work.
+
+    `language` is retained for backward compatibility (older test paths pass
+    it) but is no longer the sole language we generate — see `_LANGUAGES`.
+    The caller's `language` decides which row's persona prose the immediate
+    return-value path could highlight if needed, but both rows are always
+    written.
+    """
+    del language  # retained for signature stability; both langs now generated
     db.query(AudienceSegment).filter(
         AudienceSegment.social_account_id == social_account_id,
     ).delete()
 
     labels_arr = np.array(labels)
 
-    # Pre-compute segment data for Gemini batch call
+    # Pre-compute segment data for Gemini batch call (language-neutral —
+    # cluster math doesn't change between EN and AR).
     segments_data = []
     for cluster_id in range(k):
         mask = labels_arr == cluster_id
@@ -458,9 +476,7 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
             "avg_comments": round(float(centroid[1]), 2),
         })
 
-    # Get AI personas (best-effort — empty fields on AI failure). The brand
-    # block, when non-empty, nudges Gemini to align persona name + description
-    # tone with the creator's saved brand voice.
+    # Brand block is org-scoped (not language-scoped) so we look it up once.
     from app.core.brand_context import format_brand_identity
     from app.models.social_account import SocialAccount as _SA
     org_row = (
@@ -471,60 +487,80 @@ def _save_segments(db, social_account_id: str, labels, centroids, post_ids, k, s
     brand_block = (
         format_brand_identity(org_row[0], db) if org_row and org_row[0] else ""
     )
-    personas = _generate_persona_descriptions(
-        segments_data,
-        account_id=str(social_account_id),
-        language=language,
-        brand_block=brand_block,
-    )
 
+    # Per-cluster extras are language-neutral (content-type breakdown, top
+    # topics from post tags, best day/hour from engagement metrics). Compute
+    # once per cluster, reuse across both language rows.
+    extras_by_cluster: dict[int, dict] = {}
+    cluster_post_ids_by_cluster: dict[int, list] = {}
     for cluster_id in range(k):
         mask = labels_arr == cluster_id
         cluster_post_ids = [post_ids[i] for i in range(len(post_ids)) if mask[i]]
-        centroid = centroids[cluster_id]
-        extras = _compute_segment_extras(db, cluster_post_ids)
-        persona = personas[cluster_id] if cluster_id < len(personas) else {
-            "name": "", "tagline": "", "description": "",
-        }
+        cluster_post_ids_by_cluster[cluster_id] = cluster_post_ids
+        extras_by_cluster[cluster_id] = _compute_segment_extras(db, cluster_post_ids)
 
-        segment = AudienceSegment(
-            social_account_id=social_account_id,
-            cluster_id=cluster_id,
-            segment_label=_generate_cluster_label(centroid),
-            size_estimate=int(mask.sum()),
-            characteristics={
-                "centroid": {
-                    name: round(float(centroid[i]), 4)
-                    for i, name in enumerate(FEATURE_NAMES)
-                },
-                "post_ids": cluster_post_ids,
-                "silhouette_score": round(silhouette, 4),
-                "k": k,
-                "dominant_content_type": segments_data[cluster_id]["dominant_content_type"],
-                "avg_engagement": {
-                    "likes": round(float(centroid[0]), 2),
-                    "comments": round(float(centroid[1]), 2),
-                    "engagement_rate": round(float(centroid[2]), 4),
-                },
-                "dominant_sentiment": segments_data[cluster_id]["dominant_sentiment"],
-                "typical_posting_time": segments_data[cluster_id]["typical_posting_time"],
-                # Structured persona (preferred — name + tagline + description).
-                "persona_name": persona["name"],
-                "persona_tagline": persona["tagline"],
-                "persona_description": persona["description"],
-                # New computed fields surfacing on the redesigned audience cards.
-                "content_type_breakdown": extras["content_type_breakdown"],
-                "top_topics": extras["top_topics"],
-                "best_day_hour": extras["best_day_hour"],
-            },
+    # Generate personas in BOTH languages — 2× Gemini calls per regen, but
+    # the result is that EN-UI users and AR-UI users both see prose in their
+    # own language without re-clustering. Each call is best-effort: a failure
+    # in one language just gives empty strings for that language's rows,
+    # leaving the other language intact.
+    for lang in _LANGUAGES:
+        personas = _generate_persona_descriptions(
+            segments_data,
+            account_id=str(social_account_id),
+            language=lang,
+            brand_block=brand_block,
         )
-        db.add(segment)
+        for cluster_id in range(k):
+            mask = labels_arr == cluster_id
+            centroid = centroids[cluster_id]
+            extras = extras_by_cluster[cluster_id]
+            persona = personas[cluster_id] if cluster_id < len(personas) else {
+                "name": "", "tagline": "", "description": "",
+            }
+
+            segment = AudienceSegment(
+                social_account_id=social_account_id,
+                cluster_id=cluster_id,
+                language=lang,
+                segment_label=_generate_cluster_label(centroid),
+                size_estimate=int(mask.sum()),
+                characteristics={
+                    "centroid": {
+                        name: round(float(centroid[i]), 4)
+                        for i, name in enumerate(FEATURE_NAMES)
+                    },
+                    "post_ids": cluster_post_ids_by_cluster[cluster_id],
+                    "silhouette_score": round(silhouette, 4),
+                    "k": k,
+                    "dominant_content_type": segments_data[cluster_id]["dominant_content_type"],
+                    "avg_engagement": {
+                        "likes": round(float(centroid[0]), 2),
+                        "comments": round(float(centroid[1]), 2),
+                        "engagement_rate": round(float(centroid[2]), 4),
+                    },
+                    "dominant_sentiment": segments_data[cluster_id]["dominant_sentiment"],
+                    "typical_posting_time": segments_data[cluster_id]["typical_posting_time"],
+                    "persona_name": persona["name"],
+                    "persona_tagline": persona["tagline"],
+                    "persona_description": persona["description"],
+                    "content_type_breakdown": extras["content_type_breakdown"],
+                    "top_topics": extras["top_topics"],
+                    "best_day_hour": extras["best_day_hour"],
+                },
+            )
+            db.add(segment)
 
     db.commit()
     logger.info(
-        "Saved %d segments for social_account %s (silhouette=%.3f)",
-        k, social_account_id, silhouette,
+        "Saved %d×%d segments for social_account %s (silhouette=%.3f)",
+        k, len(_LANGUAGES), social_account_id, silhouette,
     )
+
+
+# Supported UI languages — segmentation generates one persona-prose set per
+# entry. Keep ordered for log/test predictability.
+_LANGUAGES: tuple[str, ...] = ("en", "ar")
 
 
 @celery.task(name="segment_audience", bind=True, max_retries=2)

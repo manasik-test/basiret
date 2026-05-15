@@ -116,9 +116,15 @@ export async function fetchAccounts(): Promise<SocialAccount[]> {
   return res.data.accounts
 }
 
-export async function fetchSegments(socialAccountId: string): Promise<SegmentsData> {
+export async function fetchSegments(
+  socialAccountId: string,
+  language: 'en' | 'ar' = 'en',
+): Promise<SegmentsData> {
+  // `language` selects which language partition of persona prose to render.
+  // Backend falls back to legacy-default rows if the requested language has
+  // none — keeps pre-migration accounts working until they regenerate.
   const res = await api.get<unknown, ApiResponse<SegmentsData>>(
-    `/analytics/segments?social_account_id=${socialAccountId}`,
+    `/analytics/segments?social_account_id=${socialAccountId}&language=${language}`,
   )
   return res.data
 }

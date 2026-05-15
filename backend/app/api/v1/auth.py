@@ -438,10 +438,14 @@ def _bust_ai_caches_for_org(db: Session, organization_id) -> None:
     given org's social accounts.
 
     Brand identity feeds into every AI surface: caption generation, posts
-    insights, audience insights, content plan, sentiment responses, and the
-    weekly insight_result that powers the Home dashboard. Stale cache after a
-    brand-voice change would mask the user's update for up to 24-72 hours.
+    insights, audience insights, content plan, sentiment responses, the
+    weekly insight_result that powers the Home dashboard, AND the persona
+    prose embedded in audience_segment rows. Stale cache after a brand-voice
+    change would mask the user's update for up to 24-72h on the page caches
+    and indefinitely on segments (they only refresh on Regenerate Segments).
     """
+    from app.models.audience_segment import AudienceSegment
+
     # Materialize the account IDs once and reuse — SQLAlchemy 2.x prefers a
     # plain list to .in_() over a Subquery (the latter triggers a coercion
     # warning and forces a DELETE…WHERE id IN (SELECT…) plan we don't need
@@ -459,6 +463,14 @@ def _bust_ai_caches_for_org(db: Session, organization_id) -> None:
     ).delete(synchronize_session=False)
     db.query(InsightResult).filter(
         InsightResult.social_account_id.in_(account_ids)
+    ).delete(synchronize_session=False)
+    # audience_segment was added to the bust set 2026-05-15 (Bug 2 fix gap
+    # surfaced in the three-bug diagnostic). Persona prose lives on these
+    # rows and is otherwise only refreshed via the Regenerate Segments
+    # button — without this delete, a brand-voice change would leave stale
+    # persona prose visible until the user explicitly regenerated.
+    db.query(AudienceSegment).filter(
+        AudienceSegment.social_account_id.in_(account_ids)
     ).delete(synchronize_session=False)
 
 

@@ -150,8 +150,15 @@ CREATE TABLE audience_segment (
     cluster_id INT,
     characteristics JSONB,
     size_estimate INT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    -- Per-language partition (Bug 2 fix, 2026-05-15). One row per
+    -- (cluster, language) so persona prose can coexist in EN and AR.
+    language VARCHAR(10) NOT NULL DEFAULT 'en',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_audience_segment_account_cluster_lang
+        UNIQUE (social_account_id, cluster_id, language)
 );
+CREATE INDEX idx_audience_segment_account_lang
+    ON audience_segment(social_account_id, language);
 
 -- ─────────────────────────────────────────
 -- INSIGHT RESULT

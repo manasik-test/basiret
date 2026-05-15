@@ -89,10 +89,15 @@ export function useAccounts() {
 export function useSegments() {
   const accounts = useAccounts()
   const firstAccountId = accounts.data?.[0]?.id
+  const lang = useUiLanguage()
 
+  // queryKey includes `lang` so toggling EN↔AR triggers a fresh fetch.
+  // Backend returns the matching language's persona prose; the rest of the
+  // payload (cluster math, sizes, content-type breakdown) is identical
+  // across languages so the cache miss is cheap.
   return useQuery({
-    queryKey: ['analytics', 'segments', firstAccountId],
-    queryFn: () => fetchSegments(firstAccountId!),
+    queryKey: ['analytics', 'segments', firstAccountId, lang],
+    queryFn: () => fetchSegments(firstAccountId!, lang),
     enabled: !!firstAccountId,
     staleTime: 60_000,
   })
