@@ -650,7 +650,6 @@
     "copy": "Copy",
     "copied": "Copied!",
     "daysBadge": "days",
-    "searchPlaceholder": "Search the plan",
     "regeneratePlan": "Regenerate plan",
     "regenerating": "Regenerating…",
     "preferContentTypeBanner": "Regenerate the plan to weight {{type}} content more heavily.",
@@ -707,6 +706,46 @@
       "sunday": "Sunday"
     },
     "createPost": "✦ Create post",
+    "batch": {
+      "button": "✦ Generate all 7 posts",
+      "runningButton": "Generating…",
+      "dialog": {
+        "title": "Generate 7 posts for the week ahead?",
+        "body": "BASIRET will generate an image and caption for each day. How should we handle them?",
+        "draftsTitle": "Save as drafts",
+        "draftsDesc": "Review each one before scheduling.",
+        "scheduleTitle": "Schedule them automatically",
+        "scheduleDesc": "Each post goes live at the day's planned time. I trust BASIRET.",
+        "remember": "Remember my choice for next time",
+        "cancel": "Cancel",
+        "confirm": "Generate all 7",
+        "recommended": "Recommended"
+      },
+      "progress": {
+        "title": "Generating your week's content…",
+        "subtitle": "{{done}} ready",
+        "queued": "Queued",
+        "image": "Generating image…",
+        "caption": "Generating caption…",
+        "saving": "Saving…",
+        "done": "Ready ✓",
+        "doneFellBack": "Saved as draft (planned time has passed)",
+        "failed": "Generation failed",
+        "runningHint": "Generation continues in the background — you can keep working.",
+        "doneHint": "{{done}} of {{total}} posts ready · {{failed}} failed",
+        "close": "Close",
+        "continueBackground": "Continue in background"
+      },
+      "row": {
+        "generating": "Generating…",
+        "failed": "Generation failed"
+      },
+      "toast": {
+        "success": "Your {{n}} posts are ready",
+        "failure": "Batch generation failed. Check the progress modal for details.",
+        "startError": "Couldn't start the batch. Try again."
+      }
+    },
     "tabs": {
       "ai": "AI Plan",
       "calendar": "Calendar",

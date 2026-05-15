@@ -14,6 +14,7 @@ from app.models.ai_usage_log import AiUsageLog
 from app.models.goal import Goal, GoalMetric, GoalPeriod
 from app.models.recommendation_feedback import RecommendationFeedback, FeedbackKind
 from app.models.scheduled_post import ScheduledPost
+from app.models.batch_generate_progress import BatchGenerateProgress
 
 __all__ = [
     "Organization",
@@ -32,4 +33,5 @@ __all__ = [
     "Goal", "GoalMetric", "GoalPeriod",
     "RecommendationFeedback", "FeedbackKind",
     "ScheduledPost",
+    "BatchGenerateProgress",
 ]

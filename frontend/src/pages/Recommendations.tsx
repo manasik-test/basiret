@@ -6,14 +6,22 @@ import {
   useGenerateCaption,
   useAccounts,
   useRegenerateContentPlan,
+  useStartBatchGenerate,
+  useBatchProgress,
+  useLatestBatchProgress,
 } from '../hooks/useAnalytics'
 import { useIsFeatureLocked } from '../hooks/useBilling'
 import LockedFeature from '../components/LockedFeature'
 import { Icon, I, TypeIcon, normalizeContentType } from '../components/redesign/icons'
-import type { ContentPlanDay } from '../api/analytics'
+import type { ContentPlanDay, BatchGenerateAction } from '../api/analytics'
 import { usePosts, useCalendar, useDeletePost } from '../hooks/useCreator'
 import type { ScheduledPost } from '../api/creator'
 import { cn } from '../lib/utils'
+import BatchGenerateDialog from '../components/content-plan-batch/BatchGenerateDialog'
+import BatchGenerateProgressModal from '../components/content-plan-batch/BatchGenerateProgressModal'
+import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../contexts/AuthContext'
+import { fetchMe } from '../api/auth'
 
 /* ---------------- helpers ---------------- */
 
@@ -135,6 +143,49 @@ const TYPE_THUMB_BG: Record<string, string> = {
 
 /* ---------------- main page ---------------- */
 
+/** Primary "Generate all 7 posts" button in the Content Plan header. Splits
+ *  into a default state, a running state (clickable to reopen the progress
+ *  modal), and a disabled state (incomplete plan). Matches the existing
+ *  cp-regen visual style so the two CTAs live side-by-side coherently. */
+function BatchGenerateButton({
+  onClick,
+  disabled,
+  running,
+  onOpenProgress,
+}: {
+  onClick: () => void
+  disabled: boolean
+  running: boolean
+  onOpenProgress: () => void
+}) {
+  const { t } = useTranslation()
+  if (running) {
+    return (
+      <button
+        type="button"
+        className="cp-batch-btn cp-batch-running"
+        onClick={onOpenProgress}
+        data-testid="batch-generate-running-btn"
+      >
+        <span className="cp-batch-spinner" aria-hidden />
+        <span>{t('contentPlanPage.batch.runningButton')}</span>
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="cp-batch-btn"
+      disabled={disabled}
+      onClick={onClick}
+      data-testid="batch-generate-btn"
+    >
+      <Icon path={I.spark} size={14} />
+      <span>{t('contentPlanPage.batch.button')}</span>
+    </button>
+  )
+}
+
 function ContentPlanContent() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
@@ -164,6 +215,53 @@ function ContentPlanContent() {
   const [filter, setFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all')
   const [captions, setCaptions] = useState<Record<number, string>>({})
   const [generatingIdx, setGeneratingIdx] = useState<number | null>(null)
+
+  // Batch generation state. activeBatchId is the row to poll; setting it to
+  // null stops the polling. The latest-progress query resolves it on mount
+  // when the user navigates back to this page mid-batch.
+  const { user, updateUser } = useAuth()
+  const toast = useToast()
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
+  const [showBatchDialog, setShowBatchDialog] = useState(false)
+  const [showBatchProgress, setShowBatchProgress] = useState(false)
+  // Suppresses the completion toast once we've already shown it for this batch.
+  // Without this, every poll tick on a terminal status would re-fire the toast.
+  const [toastFiredFor, setToastFiredFor] = useState<string | null>(null)
+
+  const startBatch = useStartBatchGenerate()
+  const latestBatchQ = useLatestBatchProgress()
+  const batchProgressQ = useBatchProgress(activeBatchId)
+
+  // Resume polling on page mount if there's a running batch for this user.
+  useEffect(() => {
+    if (activeBatchId) return
+    const latest = latestBatchQ.data
+    if (latest && latest.status === 'running') {
+      setActiveBatchId(latest.id)
+      // Don't auto-open the modal — the spec says generation continues silently
+      // in the background; the user already chose to close it.
+    }
+  }, [latestBatchQ.data, activeBatchId])
+
+  // Fire toast + bust content-plan cache when a polled batch terminates.
+  useEffect(() => {
+    const p = batchProgressQ.data
+    if (!p) return
+    if (p.status === 'running') return
+    if (toastFiredFor === p.id) return
+    setToastFiredFor(p.id)
+    if (p.status === 'completed') {
+      const doneN = Object.values(p.per_day_status || {}).filter(
+        (e) => (e as { status?: string }).status === 'done',
+      ).length
+      toast.success(
+        t('contentPlanPage.batch.toast.success', { n: doneN }),
+        { onClick: () => navigate('/content-plan') },
+      )
+    } else if (p.status === 'failed') {
+      toast.error(t('contentPlanPage.batch.toast.failure'))
+    }
+  }, [batchProgressQ.data, toast, t, navigate, toastFiredFor])
 
   const days: ContentPlanDay[] = data?.days ?? []
   const filtered = useMemo(
@@ -235,6 +333,38 @@ function ContentPlanContent() {
     )
   }
 
+  async function handleStartBatch(action: BatchGenerateAction, remember: boolean) {
+    try {
+      const result = await startBatch.mutateAsync({
+        social_account_id: accountId,
+        language: isAr ? 'ar' : 'en',
+        action,
+        remember,
+      })
+      setActiveBatchId(result.id)
+      setToastFiredFor(null)
+      setShowBatchProgress(true)
+      // Refresh /me so the AuthContext reflects the saved preference — that's
+      // what the next "Generate all 7" click reads to decide whether to skip
+      // the dialog. Best-effort; failures here just delay the skip-dialog
+      // experience by one page navigation.
+      if (remember) {
+        try {
+          const me = await fetchMe()
+          updateUser(me)
+        } catch {
+          /* non-fatal */
+        }
+      }
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : t('contentPlanPage.batch.toast.startError')
+      toast.error(msg)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="rd-canvas"><div className="cp">
@@ -283,11 +413,29 @@ function ContentPlanContent() {
         </div>
 
         <div className="cp-head-act">
-          <div className="cp-search">
-            <Icon path={I.search} size={14} />
-            <span>{t('contentPlanPage.searchPlaceholder')}</span>
-            <kbd>⌘K</kbd>
-          </div>
+          <BatchGenerateButton
+            onClick={() => {
+              // Skip-the-dialog branch — user previously checked "remember"
+              // with a valid action saved on their profile.
+              if (
+                user?.batch_generate_remember &&
+                (user.batch_generate_default_action === 'drafts' ||
+                  user.batch_generate_default_action === 'schedule')
+              ) {
+                void handleStartBatch(user.batch_generate_default_action, true)
+              } else {
+                setShowBatchDialog(true)
+              }
+            }}
+            disabled={
+              startBatch.isPending ||
+              batchProgressQ.data?.status === 'running' ||
+              days.length < 7 ||
+              days.some((d) => !d.topic?.trim())
+            }
+            running={batchProgressQ.data?.status === 'running'}
+            onOpenProgress={() => setShowBatchProgress(true)}
+          />
           <button
             className="cp-regen"
             type="button"
@@ -311,6 +459,25 @@ function ContentPlanContent() {
           </button>
         </div>
       </header>
+
+      <BatchGenerateDialog
+        open={showBatchDialog}
+        initialAction={
+          user?.batch_generate_default_action === 'schedule' ? 'schedule' : 'drafts'
+        }
+        initialRemember={!!user?.batch_generate_remember}
+        onCancel={() => setShowBatchDialog(false)}
+        onConfirm={(action, remember) => {
+          setShowBatchDialog(false)
+          void handleStartBatch(action, remember)
+        }}
+      />
+
+      <BatchGenerateProgressModal
+        open={showBatchProgress}
+        progress={batchProgressQ.data ?? null}
+        onClose={() => setShowBatchProgress(false)}
+      />
 
       {preferType && (
         <div className="cp-prefer-banner" role="status" dir="auto">
@@ -390,6 +557,13 @@ function ContentPlanContent() {
               const hasCaption = !!captions[realIdx]
               const sp = d.scheduled_post ?? null
               const typeLabel = t(`contentPlanPage.filter${tNorm.charAt(0).toUpperCase() + tNorm.slice(1)}` as 'contentPlanPage.filterVideo')
+              const batchEntry = batchProgressQ.data?.per_day_status?.[String(realIdx)]
+              const batchInflight =
+                batchProgressQ.data?.status === 'running' &&
+                batchEntry &&
+                batchEntry.status !== 'done' &&
+                batchEntry.status !== 'failed'
+              const batchFailed = batchEntry?.status === 'failed'
               return (
                 <button
                   key={realIdx}
@@ -412,7 +586,24 @@ function ContentPlanContent() {
                       {sp && (
                         <ScheduledBadge status={sp.status} />
                       )}
-                      {!sp && hasCaption && (
+                      {!sp && batchInflight && (
+                        <span
+                          className="cp-row-batch-gen"
+                          data-testid={`cp-row-batch-gen-${realIdx}`}
+                        >
+                          <span className="cp-batch-spinner" aria-hidden />
+                          {t('contentPlanPage.batch.row.generating')}
+                        </span>
+                      )}
+                      {!sp && !batchInflight && batchFailed && (
+                        <span
+                          className="cp-row-batch-fail"
+                          data-testid={`cp-row-batch-fail-${realIdx}`}
+                        >
+                          ! {t('contentPlanPage.batch.row.failed')}
+                        </span>
+                      )}
+                      {!sp && !batchInflight && !batchFailed && hasCaption && (
                         <span className="cp-row-done">
                           <Icon path={I.check} size={10} /> {t('contentPlanPage.readyTag')}
                         </span>
@@ -1170,11 +1361,25 @@ const CP_STYLES = `
 .cp-sub { font-size:13.5px; color:var(--ink-500); max-width:560px; line-height:1.55; }
 
 .cp-head-act { display:flex; gap:10px; align-items:center; flex-shrink:0; }
-.cp-search { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface); border:1px solid var(--line); border-radius:10px; font-size:13px; color:var(--ink-500); min-width:260px; }
-.cp-search kbd { margin-inline-start:auto; font-size:10.5px; background:var(--ink-100); padding:2px 6px; border-radius:4px; color:var(--ink-600); }
-.cp-regen { display:flex; align-items:center; gap:8px; padding:11px 18px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84,51,194,.55), inset 0 1px 0 rgba(255,255,255,.15); transition:background .12s, transform .12s; }
+.cp-regen { display:flex; align-items:center; gap:8px; padding:11px 18px; background:var(--purple-600); color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84,51,194,.55), inset 0 1px 0 rgba(255,255,255,.15); transition:background .12s, transform .12s; border:none; cursor:pointer; }
 .cp-regen:hover:not(:disabled) { background:var(--purple-700); transform:translateY(-1px); }
 .cp-regen:disabled { opacity:.6; cursor:wait; }
+
+/* "Generate all 7 posts" primary batch button — purple gradient + sparkle
+   icon, same visual weight as cp-regen but uses a slightly more vivid gradient
+   so it reads as the headline CTA on the AI Plan tab. */
+.cp-batch-btn { display:flex; align-items:center; gap:8px; padding:11px 18px; background:linear-gradient(135deg,#5433c2 0%,#7c4dff 100%); color:#fff; border-radius:10px; font-size:13px; font-weight:600; box-shadow:0 6px 16px -6px rgba(84,51,194,.55), inset 0 1px 0 rgba(255,255,255,.18); border:none; cursor:pointer; transition:background .12s, transform .12s, opacity .12s; }
+.cp-batch-btn:hover:not(:disabled) { transform:translateY(-1px); filter:brightness(1.05); }
+.cp-batch-btn:disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
+.cp-batch-running { background:linear-gradient(135deg,#7c4dff 0%,#5433c2 100%); }
+.cp-batch-spinner { display:inline-block; width:12px; height:12px; border-radius:999px; border:2px solid rgba(255,255,255,.5); border-top-color:#fff; animation:cp-batch-spin .8s linear infinite; }
+@keyframes cp-batch-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+
+/* Per-day "Generating…" + "Generation failed" badges shown in the day-row
+   while the batch is running for that day. Visual style matches existing
+   cp-row-sched / cp-row-done badges. */
+.cp-row-batch-gen { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:999px; background:rgba(124,77,255,.12); color:#5433c2; font-size:10.5px; font-weight:600; }
+.cp-row-batch-fail { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:999px; background:rgba(244,63,94,.12); color:#b91c1c; font-size:10.5px; font-weight:600; }
 
 /* Prefer-content-type banner — shown when the user lands here from a "Suggest
    <type> topics" CTA on My Posts. Same accent-blue treatment used elsewhere

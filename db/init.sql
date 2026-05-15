@@ -27,6 +27,8 @@ CREATE TABLE "user" (
     full_name VARCHAR(255),
     role user_role NOT NULL DEFAULT 'viewer',
     is_active BOOLEAN DEFAULT TRUE,
+    batch_generate_default_action VARCHAR(20),
+    batch_generate_remember BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -332,3 +334,23 @@ CREATE INDEX idx_scheduled_post_account_scheduled ON scheduled_post(social_accou
 CREATE INDEX idx_scheduled_post_status_expires ON scheduled_post(status, draft_expires_at);
 -- Stale-publishing recovery scans this index every minute via the dispatcher.
 CREATE INDEX idx_scheduled_post_publishing_started ON scheduled_post(publishing_started_at) WHERE status = 'publishing';
+
+-- ─────────────────────────────────────────
+-- BATCH GENERATE PROGRESS (server-side state for "Generate all 7 posts")
+-- ─────────────────────────────────────────
+CREATE TABLE batch_generate_progress (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    social_account_id UUID NOT NULL REFERENCES social_account(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES "user"(id) ON DELETE SET NULL,
+    language VARCHAR(8) NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    per_day_status JSONB NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    error_message TEXT
+);
+
+CREATE INDEX idx_batch_progress_account_lang_status ON batch_generate_progress(social_account_id, language, status);
+CREATE INDEX idx_batch_progress_org ON batch_generate_progress(organization_id);

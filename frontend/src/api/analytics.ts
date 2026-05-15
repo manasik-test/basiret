@@ -694,3 +694,69 @@ export async function regenerateContentPlan(
   )
   return res.data
 }
+
+// ── Content Plan — "Generate all 7 posts" batch flow ──────────────────────
+
+export type BatchGenerateAction = 'drafts' | 'schedule'
+
+/** Per-day sub-status surfaced by the polling endpoint. Keys are the day_index
+ *  as a string (0-6) so it lines up with the rest of the Content Plan API.
+ *  `fell_back_to_draft` is true when action='schedule' but the day's planned
+ *  time was already in the past — that day was saved as a draft instead. */
+export interface BatchDayStatus {
+  status:
+    | 'queued'
+    | 'generating_image'
+    | 'generating_caption'
+    | 'saving'
+    | 'done'
+    | 'failed'
+  scheduled_post_id: string | null
+  error: string | null
+  fell_back_to_draft: boolean
+}
+
+export interface BatchProgressData {
+  id: string
+  social_account_id: string
+  language: 'en' | 'ar'
+  action: BatchGenerateAction
+  status: 'running' | 'completed' | 'failed'
+  per_day_status: Record<string, BatchDayStatus>
+  started_at: string | null
+  completed_at: string | null
+  error_message: string | null
+}
+
+export interface StartBatchGenerateRequest {
+  social_account_id?: string
+  language: 'en' | 'ar'
+  action: BatchGenerateAction
+  remember: boolean
+}
+
+export async function startBatchGenerate(
+  body: StartBatchGenerateRequest,
+): Promise<BatchProgressData> {
+  const res = await api.post<unknown, ApiResponse<BatchProgressData>>(
+    '/ai-pages/content-plan/batch-generate',
+    body,
+  )
+  return res.data
+}
+
+export async function fetchBatchProgress(batchId: string): Promise<BatchProgressData> {
+  const res = await api.get<unknown, ApiResponse<BatchProgressData>>(
+    `/ai-pages/content-plan/batch-progress?batch_id=${batchId}`,
+  )
+  return res.data
+}
+
+export async function fetchLatestBatchProgress(
+  language: 'en' | 'ar' = 'en',
+): Promise<BatchProgressData | null> {
+  const res = await api.get<unknown, ApiResponse<BatchProgressData | null>>(
+    `/ai-pages/content-plan/batch-progress/latest?language=${language}`,
+  )
+  return res.data
+}

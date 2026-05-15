@@ -11,8 +11,10 @@ import {
   fetchEngagementTimeline,
   fetchCompetitorLeaderboard, fetchCompetitorTopPosts, fetchHashtagTrends,
   updateContentPlanTopic, regenerateContentPlan,
+  startBatchGenerate, fetchBatchProgress, fetchLatestBatchProgress,
   type GenerateCaptionRequest, type RecFeedback,
   type UpdateContentPlanTopicRequest,
+  type StartBatchGenerateRequest,
 } from '../api/analytics'
 
 // Resolve the UI language to the two values our backend accepts (en|ar).
@@ -332,5 +334,64 @@ export function useSentimentResponses() {
     queryKey: ['ai-pages', 'sentiment-responses', lang],
     queryFn: () => fetchSentimentResponses(lang),
     staleTime: 5 * 60_000,
+  })
+}
+
+// ── "Generate all 7 posts" batch flow ────────────────────────────────────
+
+export function useStartBatchGenerate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: StartBatchGenerateRequest) => startBatchGenerate(body),
+    onSuccess: () => {
+      // The latest-progress query backs the "is there a running batch?" check
+      // on Content Plan page mount; refresh it so the user's just-started batch
+      // shows up if they navigate away and back.
+      queryClient.invalidateQueries({ queryKey: ['ai-pages', 'content-plan', 'batch-progress', 'latest'] })
+    },
+  })
+}
+
+/** Poll the batch progress every 4s while running, then back off. Disabled
+ *  when batchId is null so we don't fire the request before the user has
+ *  actually started a batch. The polling stops once status leaves "running"
+ *  by setting refetchInterval to false. */
+export function useBatchProgress(batchId: string | null) {
+  const queryClient = useQueryClient()
+  return useQuery({
+    queryKey: ['ai-pages', 'content-plan', 'batch-progress', batchId],
+    queryFn: () => fetchBatchProgress(batchId!),
+    enabled: !!batchId,
+    // Refetch every 4s while running. The function form lets us stop polling
+    // when the batch reaches a terminal state, so the progress modal isn't
+    // hammering the API after completion.
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (!data) return 4000
+      return data.status === 'running' ? 4000 : false
+    },
+    // On terminal status, bust the content-plan cache once so the per-day
+    // badges (Draft ready / Scheduled ✓ / etc.) update on return to the page.
+    // gcTime kept short so a completed batch doesn't linger forever in cache.
+    gcTime: 60 * 60_000,
+    structuralSharing: (oldData, newData) => {
+      const prev = oldData as { status?: string } | undefined
+      const next = newData as { status?: string } | undefined
+      if (prev?.status === 'running' && next?.status && next.status !== 'running') {
+        queryClient.invalidateQueries({ queryKey: ['ai-pages', 'content-plan'] })
+      }
+      return newData as typeof oldData
+    },
+  })
+}
+
+/** Fetch the most recent batch for the user's primary account+language. Used
+ *  on Content Plan page mount to resume polling if a batch is in flight. */
+export function useLatestBatchProgress() {
+  const lang = useUiLanguage()
+  return useQuery({
+    queryKey: ['ai-pages', 'content-plan', 'batch-progress', 'latest', lang],
+    queryFn: () => fetchLatestBatchProgress(lang),
+    staleTime: 30_000,
   })
 }

@@ -26,6 +26,12 @@ class User(Base):
     full_name = Column(String(255))
     role = Column(Enum(UserRole, name="user_role", create_type=False), nullable=False, default=UserRole.viewer)
     is_active = Column(Boolean, default=True)
+    # "Generate all 7 posts" remember-my-choice preference. NULL action means
+    # the dialog opens fresh each time. When both fields are set (remember=true
+    # AND action in {drafts, schedule}) the frontend skips the dialog and goes
+    # straight to a batch generation with the saved action.
+    batch_generate_default_action = Column(String(20), nullable=True)
+    batch_generate_remember = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

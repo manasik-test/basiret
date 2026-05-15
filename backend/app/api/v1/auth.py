@@ -380,6 +380,11 @@ def me(user: User = Depends(get_current_user)):
             "organization_id": str(user.organization_id),
             "organization_name": user.organization.name,
             "business_profile": user.organization.business_profile,
+            # "Generate all 7 posts" remember-my-choice preference. When both
+            # are set, the frontend can skip the confirmation dialog and go
+            # straight to a batch run with the saved action.
+            "batch_generate_default_action": user.batch_generate_default_action,
+            "batch_generate_remember": bool(user.batch_generate_remember),
         },
     }
 

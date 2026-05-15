@@ -27,6 +27,7 @@ celery.conf.update(
         "app.tasks.account_deletion",
         "app.tasks.draft_cleanup",
         "app.tasks.post_publisher",
+        "app.tasks.content_plan_batch",
     ],
 )
 

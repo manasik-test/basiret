@@ -760,43 +760,45 @@ class CaptionRequest(BaseModel):
     image_analysis: dict | None = None
 
 
-@router.post("/generate-caption")
-def generate_caption(
-    body: CaptionRequest = Body(...),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Generate a single ready-to-copy caption via OpenAI (preferred) or Gemini
-    in EN or AR. AI failures return a degraded response with stale cache when
-    available, else a 503."""
+def generate_caption_text(
+    db: Session,
+    *,
+    account_ids: list,
+    primary_account_id: str | None,
+    content_type: str,
+    topic: str | None,
+    language: str,
+    reference_caption: str | None,
+    post_id: str | None,
+    image_ratio: str | None,
+    image_analysis: dict | None,
+    source: str = "user",
+) -> str:
+    """Generate a caption — same logic as POST /generate-caption, callable from
+    any context (FastAPI handler, Celery task, batch generator).
+
+    Pulled out of the endpoint so the batch-generate Celery task can produce
+    captions without going through HTTP. Raises AIProviderError on quota /
+    invalid-response / upstream failures so the caller can decide whether to
+    degrade gracefully or mark a per-day status as failed.
+    """
     provider = get_provider("captions")
     if not _ai_available():
-        return {
-            "success": True,
-            "data": {"caption": ""},
-            "meta": build_fresh_meta(),
-        }
+        return ""
 
-    account_ids = _org_account_ids(db, user)
-    primary_account_id = str(account_ids[0]) if account_ids else None
-
-    reference = body.reference_caption or ""
-    if body.post_id and not reference and account_ids:
+    body_topic = (topic or "").strip()
+    body_lang = language
+    reference = reference_caption or ""
+    if post_id and not reference and account_ids:
         post = (
             db.query(Post.caption, Post.content_type)
-            .filter(Post.id == body.post_id, Post.social_account_id.in_(account_ids))
+            .filter(Post.id == post_id, Post.social_account_id.in_(account_ids))
             .first()
         )
         if post:
             reference = post.caption or ""
 
-    # Compact, stable summary of the image analysis so the cache key changes
-    # when the picture itself does, but doesn't churn on incidental dict-key
-    # ordering noise from the upstream JSON. Includes brand_name + product_name
-    # so two different products from the same brand don't share a cached
-    # caption, and key_features so a re-analysis that picks up new label
-    # detail invalidates the prior caption.
-    ia = body.image_analysis or {}
+    ia = image_analysis or {}
     ia_summary = (
         f"{(ia.get('product_description') or '').strip()}|"
         f"{(ia.get('brand_name') or '').strip()}|"
@@ -808,11 +810,11 @@ def generate_caption(
 
     cache_payload = json.dumps(
         {
-            "content_type": body.content_type,
-            "topic": (body.topic or "").strip(),
-            "post_id": body.post_id or "",
+            "content_type": content_type,
+            "topic": body_topic,
+            "post_id": post_id or "",
             "reference": reference[:300],
-            "image_ratio": body.image_ratio or "",
+            "image_ratio": image_ratio or "",
             "image_analysis": ia_summary,
         },
         sort_keys=True,
@@ -822,15 +824,11 @@ def generate_caption(
     cache_page_name = f"caption:{cache_hash}"
 
     cached = _cache_get(
-        db, primary_account_id, cache_page_name, body.language,
+        db, primary_account_id, cache_page_name, body_lang,
         ttl_hours=CACHE_CAPTION_TTL_HOURS,
     )
     if cached and cached.get("caption"):
-        return {
-            "success": True,
-            "data": {"caption": cached["caption"]},
-            "meta": build_fresh_meta(),
-        }
+        return cached["caption"]
 
     account_captions: list[str] = []
     if account_ids:
@@ -846,9 +844,6 @@ def generate_caption(
             if c
         ]
 
-    # Top-5 captions by likes — fed back to the model as STYLE EXAMPLES so the
-    # generated caption sounds like the account owner wrote it. This is the
-    # single biggest lever for "feels human, not AI" output.
     style_examples: list[str] = []
     if account_ids:
         style_rows = (
@@ -873,7 +868,7 @@ def generate_caption(
     emoji_rate = _emoji_usage_rate(account_captions)
     allow_emojis = emoji_rate > 0.5
 
-    lang_label = "Arabic" if body.language == "ar" else "English"
+    lang_label = "Arabic" if body_lang == "ar" else "English"
     hashtag_rule = (
         f"On the LAST line include 2-4 hashtags. Prefer these hashtags already used by this "
         f"account: {' '.join(top_hashtags)}. You may add one new relevant tag."
@@ -890,7 +885,7 @@ def generate_caption(
     bp_line = format_business_profile(bp)
     brand_block = _brand_context_block(db, primary_account_id)
     ratio_label = {"1:1": "square", "4:5": "portrait", "16:9": "landscape"}.get(
-        body.image_ratio or ""
+        image_ratio or ""
     )
     ratio_rule = (
         f"This caption is for a {ratio_label} Instagram post. "
@@ -898,12 +893,6 @@ def generate_caption(
         else ""
     )
 
-    # IMAGE ANALYSIS block — only added when the caller passed a vision result.
-    # Helps the model write copy that describes what's actually in the image
-    # instead of falling back to generic "check out our latest!" content.
-    # When vision picked up the brand and/or product name from the packaging,
-    # we promote them to first-class fields and add a SPECIFICITY MANDATE
-    # below — that's what flips captions from generic to product-specific.
     image_block = ""
     brand_name = (ia or {}).get("brand_name") or ""
     product_name = (ia or {}).get("product_name") or ""
@@ -927,10 +916,6 @@ def generate_caption(
             + (f"- Content angle: {first_suggestion}\n" if first_suggestion else "")
         )
 
-    # SPECIFICITY MANDATE — fires only when vision identified a real product.
-    # Without it, the model defaults to generic copy even with the IMAGE
-    # ANALYSIS block in front of it; with it, the caption MUST mention the
-    # product by name.
     specificity_mandate = ""
     if has_product_identity:
         if brand_name and product_name:
@@ -956,11 +941,6 @@ def generate_caption(
         "Write something a small business owner can paste directly into Instagram. "
         "Match Instagram's voice — short, punchy, scannable. "
         "1-3 lines, end with a clear question or call-to-action. "
-        # Natural-voice rule — the second-biggest lever after few-shot examples.
-        # Without this the model defaults to marketer-speak ('transform', 'oasis',
-        # 'dive in', '!!!'). The style examples below show the actual voice; this
-        # rule kills the fallback clichés the model reaches for when the examples
-        # don't cover a similar product/topic.
         "Write in a natural, human voice. Avoid marketing clichés like: "
         "transform, oasis, dive in, sparkling, crystal-clear, unleash, elevate, "
         "indulge, discover, experience (unless the style examples below use them). "
@@ -991,20 +971,16 @@ def generate_caption(
     )
 
     parts = [
-        f"Content type: {body.content_type}",
+        f"Content type: {content_type}",
         f"Target language: {lang_label}",
     ]
     if bp_line:
         parts.append(f"Business context: {bp_line}")
-    if body.topic:
-        parts.append(f"Topic: {body.topic}")
+    if body_topic:
+        parts.append(f"Topic: {body_topic}")
     if top_hashtags:
         parts.append("Preferred hashtags (from this account's own posts): " + " ".join(top_hashtags))
     if style_examples:
-        # The few-shot block. Capping each example at 280 chars keeps the
-        # prompt budget reasonable on accounts with very long captions and
-        # avoids the model copying entire captions verbatim instead of
-        # matching the voice.
         examples_block = "\n".join(
             f"{i + 1}. {ex[:280]}"
             for i, ex in enumerate(style_examples)
@@ -1019,20 +995,56 @@ def generate_caption(
         )
     user_msg = "\n".join(parts)
 
+    text = provider.generate_text(
+        sys, user_msg, temperature=0.85,
+        account_id=primary_account_id, task="captions", source=source,
+        language=body_lang,
+    )
+
+    if text and not allow_emojis:
+        text = _strip_emoji(text)
+    if text:
+        _cache_put(db, primary_account_id, cache_page_name, body_lang, {"caption": text})
+    return text or ""
+
+
+@router.post("/generate-caption")
+def generate_caption(
+    body: CaptionRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a single ready-to-copy caption via OpenAI (preferred) or Gemini
+    in EN or AR. AI failures return a degraded response with stale cache when
+    available, else a 503."""
+    if not _ai_available():
+        return {
+            "success": True,
+            "data": {"caption": ""},
+            "meta": build_fresh_meta(),
+        }
+
+    account_ids = _org_account_ids(db, user)
+    primary_account_id = str(account_ids[0]) if account_ids else None
+
     try:
-        text = provider.generate_text(
-            sys, user_msg, temperature=0.85,
-            account_id=primary_account_id, task="captions", source="user",
+        text = generate_caption_text(
+            db,
+            account_ids=account_ids,
+            primary_account_id=primary_account_id,
+            content_type=body.content_type,
+            topic=body.topic,
             language=body.language,
+            reference_caption=body.reference_caption,
+            post_id=body.post_id,
+            image_ratio=body.image_ratio,
+            image_analysis=body.image_analysis,
+            source="user",
         )
     except AIProviderError as exc:
         # Captions have no useful data-only fallback — entire response is AI.
         return degraded_no_cache_response(exc)
 
-    if text and not allow_emojis:
-        text = _strip_emoji(text)
-    if text:
-        _cache_put(db, primary_account_id, cache_page_name, body.language, {"caption": text})
     return {
         "success": True,
         "data": {"caption": text},
@@ -1652,6 +1664,218 @@ def regenerate_content_plan(
             "language": body.language,
             "deleted": int(deleted),
         },
+    }
+
+
+# ── Content Plan: "Generate all 7 posts" batch flow ─────────────────────
+
+
+BatchAction = Literal["drafts", "schedule"]
+
+
+class BatchGenerateRequest(BaseModel):
+    """Body for POST /content-plan/batch-generate.
+
+    `remember` controls whether `action` is persisted to the user's profile so
+    subsequent clicks can skip the confirmation dialog. False (or omitted) means
+    "this run only" — the user's preference is unchanged."""
+
+    social_account_id: Optional[str] = None
+    language: LanguageParam = "en"
+    action: BatchAction
+    remember: bool = False
+
+
+def _batch_progress_to_dict(row) -> dict:
+    """Serialize a BatchGenerateProgress row to the frontend response shape."""
+    return {
+        "id": str(row.id),
+        "social_account_id": str(row.social_account_id),
+        "language": row.language,
+        "action": row.action,
+        "status": row.status,
+        "per_day_status": row.per_day_status or {},
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "error_message": row.error_message,
+    }
+
+
+@router.post("/content-plan/batch-generate")
+def batch_generate_content_plan_endpoint(
+    body: BatchGenerateRequest = Body(...),
+    user: User = Depends(require_admin_or_manager),
+    _gated: User = Depends(RequireFeature("content_recommendations")),
+    db: Session = Depends(get_db),
+):
+    """Start a "Generate all 7 posts" batch run.
+
+    Creates a BatchGenerateProgress row up-front (so the frontend has a stable
+    batch_id to poll regardless of how Celery handles enqueue), persists the
+    user's remember-my-choice preference when requested, then fires the Celery
+    task. Returns 409 if a batch is already in flight for the same
+    (account, language) — duplicate clicks are silently rejected rather than
+    racing two batches into the same 7 days.
+    """
+    # Late import keeps the FastAPI router file independent of the task
+    # module's transitive deps (Celery is loaded by the app, but the task
+    # module also imports ai_image which has its own slow init paths).
+    from app.models.batch_generate_progress import BatchGenerateProgress
+    from app.tasks.content_plan_batch import (
+        batch_generate_content_plan,
+        _day_status_template,
+    )
+
+    account_ids = _org_account_ids(db, user)
+    if not account_ids:
+        raise HTTPException(status_code=422, detail="No active social accounts.")
+
+    target = body.social_account_id or str(account_ids[0])
+    if target not in [str(a) for a in account_ids]:
+        raise HTTPException(status_code=404, detail="Social account not found")
+
+    # Validate the plan exists in cache before we kick off a Celery task that
+    # would otherwise discover the missing cache and mark the whole batch as
+    # failed — early-422 surfaces the issue to the user in the same HTTP
+    # round-trip rather than via the progress endpoint.
+    cache_row = (
+        db.query(AiPageCache)
+        .filter(
+            AiPageCache.social_account_id == target,
+            AiPageCache.page_name == "content-plan",
+            AiPageCache.language == body.language,
+        )
+        .first()
+    )
+    if not cache_row or not cache_row.content:
+        raise HTTPException(
+            status_code=422,
+            detail="No content plan cached for this account+language yet. Load /content-plan first.",
+        )
+    topics = (cache_row.content or {}).get("topics_by_idx") or {}
+    if sum(1 for k in topics if topics[k]) < 7:
+        raise HTTPException(
+            status_code=422,
+            detail="Content plan is incomplete — fewer than 7 days have topics. Regenerate the plan and try again.",
+        )
+
+    # Guard against duplicate in-flight batches for the same (account, lang).
+    # Two simultaneous "Generate all 7" clicks would race two Celery tasks
+    # creating 14 scheduled_post rows instead of 7.
+    existing = (
+        db.query(BatchGenerateProgress)
+        .filter(
+            BatchGenerateProgress.social_account_id == target,
+            BatchGenerateProgress.language == body.language,
+            BatchGenerateProgress.status == "running",
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "A batch is already running for this account and language.",
+                "batch_id": str(existing.id),
+            },
+        )
+
+    # Persist the user's preference if requested. Unchecking "remember" on a
+    # subsequent click also runs through this branch — we update both fields
+    # so unchecking effectively clears the saved default.
+    user.batch_generate_default_action = body.action if body.remember else None
+    user.batch_generate_remember = body.remember
+
+    progress = BatchGenerateProgress(
+        organization_id=user.organization_id,
+        social_account_id=target,
+        user_id=user.id,
+        language=body.language,
+        action=body.action,
+        status="running",
+        per_day_status=_day_status_template(),
+    )
+    db.add(progress)
+    db.commit()
+    db.refresh(progress)
+
+    try:
+        batch_generate_content_plan.delay(str(progress.id))
+    except Exception:  # noqa: BLE001
+        logger.exception("batch-generate: delay failed batch=%s", progress.id)
+        progress.status = "failed"
+        progress.error_message = "Could not enqueue background task. Try again."
+        progress.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Could not enqueue background task. Try again.",
+        )
+
+    return {
+        "success": True,
+        "data": _batch_progress_to_dict(progress),
+    }
+
+
+@router.get("/content-plan/batch-progress")
+def get_batch_progress(
+    batch_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the current state of a batch run. Polled by the progress modal
+    every ~4s while open."""
+    from app.models.batch_generate_progress import BatchGenerateProgress
+
+    row = (
+        db.query(BatchGenerateProgress)
+        .filter(BatchGenerateProgress.id == batch_id)
+        .first()
+    )
+    if not row or row.organization_id != user.organization_id:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    return {
+        "success": True,
+        "data": _batch_progress_to_dict(row),
+    }
+
+
+@router.get("/content-plan/batch-progress/latest")
+def get_latest_batch_progress(
+    language: LanguageParam = Query("en"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the most recent batch (running or otherwise) for the caller's
+    primary account+language, or `null` when there's never been one. Powers
+    the cross-navigation modal: when the user returns to the Content Plan
+    page mid-batch, the frontend can pick up the polling exactly where it
+    left off.
+    """
+    from app.models.batch_generate_progress import BatchGenerateProgress
+
+    account_ids = _org_account_ids(db, user)
+    if not account_ids:
+        return {"success": True, "data": None}
+    primary = str(account_ids[0])
+
+    row = (
+        db.query(BatchGenerateProgress)
+        .filter(
+            BatchGenerateProgress.social_account_id == primary,
+            BatchGenerateProgress.language == language,
+        )
+        .order_by(BatchGenerateProgress.started_at.desc())
+        .first()
+    )
+    if not row:
+        return {"success": True, "data": None}
+
+    return {
+        "success": True,
+        "data": _batch_progress_to_dict(row),
     }
 
 

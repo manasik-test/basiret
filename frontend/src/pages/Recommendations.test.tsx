@@ -56,6 +56,12 @@ vi.mock('../hooks/useAnalytics', () => ({
   }),
   useGenerateCaption: () => ({ mutate: vi.fn(), isPending: false }),
   useRegenerateContentPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useStartBatchGenerate: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({ id: 'batch-1', status: 'running' }),
+    isPending: false,
+  }),
+  useBatchProgress: () => ({ data: null, isLoading: false }),
+  useLatestBatchProgress: () => ({ data: null, isLoading: false }),
   useLanguageCacheInvalidation: () => {},
 }))
 
@@ -68,6 +74,47 @@ vi.mock('../hooks/useCreator', () => ({
   useCalendar: () => ({ data: {}, isLoading: false }),
   useDeletePost: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 }))
+
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: {
+      id: 'user-1',
+      email: 'demo@test',
+      full_name: 'Demo',
+      role: 'admin',
+      organization_id: 'org-1',
+      organization_name: 'Demo Org',
+      batch_generate_default_action: null,
+      batch_generate_remember: false,
+    },
+    updateUser: vi.fn(),
+  }),
+}))
+
+vi.mock('../contexts/ToastContext', () => ({
+  useToast: () => ({
+    show: vi.fn(),
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    dismiss: vi.fn(),
+  }),
+}))
+
+vi.mock('../api/auth', async () => {
+  const actual = await vi.importActual<typeof import('../api/auth')>('../api/auth')
+  return {
+    ...actual,
+    fetchMe: vi.fn().mockResolvedValue({
+      id: 'user-1',
+      email: 'demo@test',
+      full_name: 'Demo',
+      role: 'admin',
+      organization_id: 'org-1',
+      organization_name: 'Demo Org',
+    }),
+  }
+})
 
 function mountPage() {
   return render(
