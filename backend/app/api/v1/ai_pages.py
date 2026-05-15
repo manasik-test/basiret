@@ -1854,6 +1854,12 @@ def get_latest_batch_progress(
     page mid-batch, the frontend can pick up the polling exactly where it
     left off.
     """
+    # TODO: User who navigates away during batch generation and doesn't
+    # return until after completion gets no toast notification (toast fires
+    # from the polling component, not a global completion listener).
+    # Consider a global completion observer in V2 if users report missing
+    # the completion signal. Acceptable for V1 since the Content Plan page
+    # reflects completed state on next visit.
     from app.models.batch_generate_progress import BatchGenerateProgress
 
     account_ids = _org_account_ids(db, user)
