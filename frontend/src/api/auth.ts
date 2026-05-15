@@ -40,6 +40,12 @@ export interface AuthUser {
   organization_id: string
   organization_name: string
   business_profile?: BusinessProfile | null
+  // "Generate all 7 posts" remember-my-choice preference. When remember is
+  // true AND default_action is set, the Content Plan page skips the
+  // confirmation dialog and goes straight to a batch run with the saved
+  // action.
+  batch_generate_default_action?: 'drafts' | 'schedule' | null
+  batch_generate_remember?: boolean
 }
 
 interface AuthResponse {
