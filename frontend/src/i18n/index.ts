@@ -19,8 +19,11 @@ i18n
 
 // Keep <html dir> and <html lang> in sync globally — runs for every route
 // including public marketing pages, where the app-shell sync (Sidebar/TopBar)
-// is not mounted.
+// is not mounted. Guarded with `typeof document` so this module is safe to
+// import in non-DOM environments (vitest collection runs before jsdom is
+// fully ready in some test-file orderings).
 const syncDocumentDirection = (lang: string) => {
+  if (typeof document === 'undefined') return
   const isAr = lang.toLowerCase().startsWith('ar')
   document.documentElement.dir = isAr ? 'rtl' : 'ltr'
   document.documentElement.lang = isAr ? 'ar' : 'en'

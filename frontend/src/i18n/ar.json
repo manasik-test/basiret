@@ -615,6 +615,7 @@
     "personasTitle": "شخصيات جمهورك",
     "personasSortedBySize": "مرتّبة حسب الحجم",
     "personasClickHint": "انقر لرؤية المواضيع المفضّلة",
+    "languageMismatchHint": "الشرائح بالإنجليزية. اضغط إعادة توليد لتحديثها بالعربية.",
     "createForRowCta": "أنشئ لهم",
     "prefersHeader": "يفضّلون",
     "topicsHeader": "مواضيع يحبّونها",

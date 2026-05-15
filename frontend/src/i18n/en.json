@@ -615,6 +615,7 @@
     "personasTitle": "Your audience personas",
     "personasSortedBySize": "Sorted by size",
     "personasClickHint": "Click to see preferred topics",
+    "languageMismatchHint": "Personas are in English. Click Regenerate Segments to refresh in Arabic.",
     "createForRowCta": "Create for them",
     "prefersHeader": "Prefers",
     "topicsHeader": "Topics they like",

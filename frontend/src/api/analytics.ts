@@ -56,6 +56,15 @@ export interface SegmentCharacteristics {
 
 export interface SegmentsData {
   social_account_id: string
+  /** Language partition the rows were drawn from. Matches the request when
+   * the requested language has rows; falls back to the legacy default
+   * (typically 'en') when no rows match — see `language_mismatch`. */
+  language?: 'en' | 'ar'
+  /** True when the backend served rows from a different language than was
+   * requested (pre-migration accounts have only one language partition).
+   * Frontend renders a "Personas will refresh on next regeneration" hint
+   * so the user knows why the prose doesn't match the UI language. */
+  language_mismatch?: boolean
   segment_count: number
   generated_at: string | null
   segments: Array<{

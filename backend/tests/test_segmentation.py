@@ -399,6 +399,75 @@ def test_bust_ai_caches_for_org_deletes_audience_segment_rows(insights_user):
         db.close()
 
 
+def test_get_segments_returns_language_mismatch_flag_on_fallback(insights_user):
+    """When the requested language has no rows but another language does,
+    the backend serves the fallback rows AND sets `language_mismatch=True`
+    so the frontend can render the 'Personas will refresh on next
+    regeneration' hint. Without this flag the user would silently see
+    wrong-language prose with no indication of why."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.models.social_account import SocialAccount as _SA, Platform as _Platform
+    from fastapi.testclient import TestClient as _TC
+
+    user, org, token = insights_user
+    db = SessionLocal()
+    sa = None
+    try:
+        sa = _SA(
+            organization_id=org.id,
+            platform=_Platform.instagram,
+            platform_account_id=f"ig_{uuid.uuid4().hex[:8]}",
+            username=f"u_{uuid.uuid4().hex[:8]}",
+            access_token_encrypted="fake",
+            token_expires_at=_dt.now(_tz.utc) + _td(days=30),
+            is_active=True,
+        )
+        db.add(sa)
+        db.flush()
+
+        # ONLY an EN row exists — simulating a pre-migration account.
+        db.add(AudienceSegment(
+            social_account_id=sa.id,
+            cluster_id=0,
+            segment_label="Cluster 0",
+            size_estimate=10,
+            language="en",
+            characteristics={"persona_description": "english only"},
+        ))
+        db.commit()
+
+        with _TC(app) as tc:
+            headers = {"Authorization": f"Bearer {token}"}
+            # Request AR — backend has no AR rows, falls back to the EN row.
+            resp = tc.get(
+                "/api/v1/analytics/segments",
+                params={"social_account_id": str(sa.id), "language": "ar"},
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            data = resp.json()["data"]
+            assert data["language_mismatch"] is True
+            assert data["language"] == "ar"
+            assert len(data["segments"]) == 1
+            assert "english only" in data["segments"][0]["characteristics"]["persona_description"]
+
+            # Request EN — fallback path NOT triggered, flag is False.
+            resp_en = tc.get(
+                "/api/v1/analytics/segments",
+                params={"social_account_id": str(sa.id), "language": "en"},
+                headers=headers,
+            )
+            data_en = resp_en.json()["data"]
+            assert data_en["language_mismatch"] is False
+    finally:
+        db.query(AudienceSegment).filter(
+            AudienceSegment.social_account_id == sa.id
+        ).delete() if sa else None
+        db.query(_SA).filter(_SA.id == sa.id).delete() if sa else None
+        db.commit()
+        db.close()
+
+
 def test_get_segments_filters_by_language(insights_user):
     """GET /segments?language=ar returns AR rows; ?language=en returns EN rows.
     Both languages coexist for the same cluster."""

@@ -1098,19 +1098,29 @@ def get_segments(
     # exist under another language (the backfill default), serve those so
     # the page isn't blank. The persona prose will be in the wrong language
     # until the user regenerates, but the rest of the surface is correct.
+    language_mismatch = False
     if not segments:
-        segments = (
+        fallback = (
             db.query(AudienceSegment)
             .filter(AudienceSegment.social_account_id == social_account_id)
             .order_by(AudienceSegment.cluster_id)
             .all()
         )
+        if fallback:
+            segments = fallback
+            # Surface the mismatch to the frontend so it can render a
+            # one-line "Personas will refresh in your language on next
+            # regeneration" banner. We do NOT auto-regenerate here — that
+            # would silently burn Gemini quota on every page visit by a
+            # user whose only sin is being on a pre-migration account.
+            language_mismatch = True
 
     return {
         "success": True,
         "data": {
             "social_account_id": social_account_id,
             "language": language,
+            "language_mismatch": language_mismatch,
             "segment_count": len(segments),
             "generated_at": str(segments[0].created_at) if segments else None,
             "segments": [

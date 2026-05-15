@@ -375,6 +375,16 @@ function AudienceContent() {
 
         <AudHero segments={segments.data} />
 
+        {/* Backend served rows from a different language partition than the
+            current UI language (pre-migration account whose only segments
+            row was generated under the single-language code path). One-line
+            inline notice — no auto-regenerate, user clicks below when ready. */}
+        {segments.data?.language_mismatch && (
+          <div className="aud-lang-banner" role="status" dir="auto">
+            {t('myAudiencePage.languageMismatchHint')}
+          </div>
+        )}
+
         <div className="aud-sec-head">
           <div>
             <h3>{t('myAudiencePage.personasTitle')}</h3>
@@ -488,6 +498,11 @@ const AUD_STYLES = `
 .aud-hero-legend { display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; }
 .aud-hero-l-i { display:flex; gap:5px; align-items:center; font-size:11px; color:var(--ink-600); font-weight:500; }
 .aud-hero-l-i span:first-child { width:8px; height:8px; border-radius:2px; }
+
+/* Language-mismatch banner — shown when the segments served don't match
+   the UI language (pre-migration accounts). Inline info hint above the
+   personas list; no auto-action, user clicks Regenerate when ready. */
+.aud-lang-banner { padding:10px 14px; margin-top:2px; background:rgba(165,221,236,.22); border:1px solid rgba(84,51,194,.18); border-radius:10px; font-size:12.5px; color:var(--ink-700); line-height:1.4; }
 
 /* Section header */
 .aud-sec-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:6px; flex-wrap:wrap; }
