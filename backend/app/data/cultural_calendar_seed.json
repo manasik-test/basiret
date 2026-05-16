@@ -1,0 +1,838 @@
+{
+  "_meta": {
+    "schema_version": "1.0",
+    "phase": "1C-batch-1",
+    "batch_description": "7 shared lunar + 8 Saudi (2 fixed + 6 seasonal/lunar) + 7 UAE (3 fixed + 4 seasonal) = 22 entries",
+    "generated_on": "2026-05-16",
+    "generated_by": "claude-opus-4-7 + manual cross-reference against Wikipedia AR, visitsaudi.com/ar/, visitdubai.com/ar/, visitsharjah.com, foundingday.sa, experiencealula.com, diriyahseason.sa",
+    "next_batch": "1C-batch-2: ~28 entries (Qatar + Kuwait + Oman + Bahrain + 5 cross-country shared) — paused pending user approval of this batch",
+    "reference_file_note": "The uploaded /mnt/user-data/uploads/gcc_cultural_calendar_comprehensive.json was not accessible to the agent during this batch (Linux-style path on Windows host). Entries were built from the explicit checklist in the Phase 1C prompt + independent web verification. The user may wish to reconcile this file against the upload before approving."
+  },
+
+  "_entry_notes": {
+    "mawlid_al_nabi": "VERIFICATION FLAG: Mawlid is NOT a public holiday in Saudi Arabia (Wahhabi/Salafi tradition rejects celebration of the Prophet's birthday) and is generally low-key/avoided in mainstream Saudi public life. It IS an official public holiday in the UAE and most other GCC states. Modeled here as country_iso=NULL (shared lunar) because the date itself is shared, but content_guidelines.avoid explicitly flags Saudi audience sensitivity. Consider whether to split this into per-country entries in a future iteration, or to drop country_iso=NULL and create AE/QA/KW/OM/BH variants in Batch 2.",
+    "abu_dhabi_art": "DATE CORRECTION: Phase 1C prompt listed this as 'Apr, arts/luxury'. The actual event runs in November (2026 edition: 19–22 Nov as 'Frieze Abu Dhabi' — Frieze took over the fair starting 2026; the legacy 'Abu Dhabi Art' brand ran through 2025). Used corrected November dates. Event key kept as 'abu_dhabi_art' for continuity with the checklist. User should decide whether to rename event_key to 'frieze_abu_dhabi' before Batch 2 lands.",
+    "uae_commemoration_day": "Marked annually on Nov 30 (date of first Emirati soldier's death, 1971); public-holiday observance was moved to Dec 1 starting 2019. Modeled here with gregorian_month=11, gregorian_day=30 + duration_days=2 to cover both the commemoration itself and the following public-holiday day, since Content Plan surfacing benefits from the wider window. If you'd rather pin to the public holiday date (Dec 1) — say so.",
+    "riyadh_season": "Riyadh Season 2025-26 actually opens Oct 10 and runs through ~May 2 (Boulevard World closes May 2). Modeled here as seasonal Oct-Mar per the Phase 1C checklist; this captures the bulk of activity. If you'd like the wider Oct-Apr window for late-season tail, say so.",
+    "alula_season": "Officially branded 'AlUla Moments' for the 2025-26 season. The full season runs ~Sep through the following summer per Experience AlUla. Modeled here as seasonal Sep-Apr (8-month window) — wider than the Phase 1C prompt's 'Oct-Apr' to match the official Sep start, but trimmed before summer to keep the active-tourism window honest.",
+    "winter_at_tantora": "2025-26 edition ran Dec 18 2025 → Jan 10 2026. Modeled as seasonal Dec-Jan to match this annual pattern.",
+    "janadriyah_festival": "Originally an annual heritage festival run by the Saudi National Guard since 1985; transferred to Ministry of Culture in 2019. 2026 edition referenced in Saudi gov sources but exact 2026 dates not confirmed by an official source page at curation time — using historical Feb pattern. Source confidence set to 'secondary' as a result.",
+    "hajj_season": "Categorized under Saudi (country_iso=SA) per the Phase 1C checklist, even though it is religiously observed across all GCC. Rationale: Hajj rituals occur in Saudi territory and are managed by Saudi authorities, so content sensitivity (e.g. avoiding promotional posts during the pilgrimage period) is most acute for Saudi audiences. Eid al-Adha (which immediately follows) remains shared lunar with country_iso=NULL.",
+    "saudi_founding_day": "Established as a public holiday in January 2022 by royal decree of King Salman, commemorating Imam Muhammad bin Saud's ascendancy in 1727. Distinct from National Day (which commemorates the 1932 unification under King Abdulaziz). Both are now annual non-religious public holidays."
+  },
+
+  "_translation_notes": {
+    "ramadan": "verified: Arabic Wikipedia uses 'شهر رمضان' or simply 'رمضان' — used 'شهر رمضان' for clarity in content contexts",
+    "laylat_al_qadr": "verified: 'ليلة القدر' is the canonical MSA name (Quranic origin, Surat Al-Qadr)",
+    "eid_al_fitr": "verified: 'عيد الفطر' — universal MSA, no regional variation",
+    "day_of_arafah": "verified: 'يوم عرفة' — universal MSA",
+    "eid_al_adha": "verified: 'عيد الأضحى' — universal MSA",
+    "islamic_new_year": "verified: 'رأس السنة الهجرية' — standard MSA. 'العام الهجري الجديد' also seen but the former is more common in calendar contexts.",
+    "mawlid_al_nabi": "verified: 'المولد النبوي الشريف' — full formal name. 'المولد النبوي' (without 'الشريف') is also widely used; I picked the fuller form because it's the more reverent/formal version.",
+    "saudi_national_day": "verified: 'اليوم الوطني السعودي' — official, matches Saudi gov usage",
+    "saudi_founding_day": "verified: 'يوم التأسيس' — official, matches foundingday.sa wordmark",
+    "riyadh_season": "verified: 'موسم الرياض' — official, matches Riyadh Season Instagram + visitsaudi.com/ar/",
+    "janadriyah_festival": "verified: 'مهرجان الجنادرية' — common shortened form; full official name is 'مهرجان الجنادرية للتراث والثقافة' (Janadriyah Festival for Heritage and Culture). Used the shortened form for UI compactness; full name in content_guidelines.tone if needed.",
+    "diriyah_season": "verified: 'موسم الدرعية' — official, matches diriyahseason.sa + visitsaudi.com/ar/",
+    "winter_at_tantora": "verified: 'شتاء طنطورة' — official, matches Experience AlUla Arabic site. 'طنطورة' refers to the traditional AlUla sundial, kept as Arabic transliteration.",
+    "alula_season": "best_effort: 'موسم العلا' is the direct translation matching the seasonal naming convention (Riyadh Season → موسم الرياض, etc.). The brand also uses 'لحظات العلا' (AlUla Moments) for the 2025-26 program. Picked the seasonal-pattern name for consistency; flagging for user review.",
+    "hajj_season": "verified: 'موسم الحج' — universal MSA",
+    "uae_national_day": "verified: 'اليوم الوطني لدولة الإمارات' — official, matches UAE gov usage. Shorter 'اليوم الوطني الإماراتي' also acceptable.",
+    "uae_commemoration_day": "verified: 'يوم الشهيد' (Yawm Al-Shahid, lit. 'Martyr's Day') is the official Arabic name. English 'Commemoration Day' is the diplomatic-export rendering; Arabic-language UAE government communications consistently use 'يوم الشهيد'. Using the official Arabic form.",
+    "uae_flag_day": "verified: 'يوم العلم' — official, matches mediaoffice.abudhabi/ar usage",
+    "dubai_shopping_festival": "verified: 'مهرجان دبي للتسوق' — official, matches visitdubai.com/ar/",
+    "dubai_summer_surprises": "verified: 'مفاجآت صيف دبي' — official, matches visitdubai.com/ar/",
+    "sharjah_heritage_days": "verified: 'أيام الشارقة التراثية' — official, matches visitsharjah.com Arabic pages",
+    "abu_dhabi_art": "best_effort: 'معرض أبوظبي للفنون' is the long-standing Arabic name for Abu Dhabi Art (running through 2025). For 2026 the fair rebrands to 'Frieze Abu Dhabi'; the Arabic 'فريز أبوظبي' is plausible but not yet established in official Arabic communications. Kept the legacy 'معرض أبوظبي للفنون' since the audience association is stronger with that name. Flagging for user review — may need to switch when Frieze's Arabic naming convention solidifies."
+  },
+
+  "entries": [
+
+    {
+      "event_key": "ramadan",
+      "name_en": "Ramadan",
+      "name_ar": "شهر رمضان",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 9,
+      "hijri_day": 1,
+      "duration_days": 30,
+      "cultural_significance": 10,
+      "lead_time_days": 21,
+      "industries_high_relevance": ["food_delivery", "fmcg", "retail", "fashion", "telco", "banking", "fitness", "media_entertainment", "charity_nonprofit"],
+      "content_guidelines": {
+        "avoid": ["public daytime eating or drinking", "loud party scenes or nightclub aesthetics", "irreverent humor around fasting", "scantily-clad models", "alcohol references however incidental", "music-heavy posts during daytime hours"],
+        "prefer": ["family iftar tables", "warm low-light photography", "gold and emerald palettes", "lantern (fanous) and crescent motifs", "charitable/zakat themes", "moments of reflection and community"],
+        "tone": ["reverent", "warm", "communal", "generous"],
+        "best_post_times": ["19:30", "21:00", "23:00"],
+        "industries_neutral": ["b2b_saas", "real_estate", "automotive"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["gold", "emerald", "deep_navy", "warm_amber"]
+      },
+      "audience_behavior": {
+        "peak_hours": "20:00-02:00",
+        "engagement_shift": "strongly evening-heavy; daytime engagement collapses; spike around iftar (~sunset) and again post-taraweeh prayer",
+        "shopping_behavior": "night-centered; supermarket trolleys peak immediately after iftar; fashion/abaya/decor purchases anticipatory in the 2 weeks prior",
+        "social_media_activity": "significantly elevated in evenings; Snapchat/TikTok consumption highest in GCC of any month",
+        "food_delivery_spike": "extreme — both at iftar (~sunset) and suhoor (pre-dawn)"
+      },
+      "year_specific_notes": {
+        "2026": "Ramadan 1447 AH falls in winter (~Feb 18 → Mar 19 2026 per UMQ). Cooler evenings enable outdoor majlis/iftar content; audience more physically active post-iftar than in prior summer cycles."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Ramadan",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "laylat_al_qadr",
+      "name_en": "Laylat al-Qadr",
+      "name_ar": "ليلة القدر",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 9,
+      "hijri_day": 27,
+      "duration_days": 1,
+      "cultural_significance": 9,
+      "lead_time_days": 7,
+      "industries_high_relevance": ["charity_nonprofit", "media_entertainment", "fmcg", "retail", "banking"],
+      "content_guidelines": {
+        "avoid": ["promotional/sales-led messaging", "celebratory or party imagery", "any framing that overshadows the spiritual significance", "humor"],
+        "prefer": ["Quran/mosque imagery treated reverently", "soft candle or lantern light", "themes of supplication and reflection", "zakat al-fitr reminders for charity sector"],
+        "tone": ["solemn", "reverent", "contemplative"],
+        "best_post_times": ["21:00", "23:00", "03:00"],
+        "industries_neutral": ["fashion", "automotive", "telco"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["deep_navy", "gold", "soft_cream"]
+      },
+      "audience_behavior": {
+        "peak_hours": "23:00-04:00",
+        "engagement_shift": "late-night spike; many Muslims observe i'tikaf (mosque retreat) so social use shifts to brief reflective shares rather than scrolling",
+        "shopping_behavior": "muted; spending pivots to charitable giving (zakat al-fitr)",
+        "social_media_activity": "moderate; reflective content outperforms promotional",
+        "food_delivery_spike": "moderate around suhoor"
+      },
+      "year_specific_notes": {
+        "2026": "Falls on the night of approximately 16 → 17 March 2026 (27 Ramadan 1447 AH per UMQ). Traditionally observed on one of the odd nights of the last 10 days of Ramadan; the 27th is the most widely-observed canonical date in GCC."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Laylat_al-Qadr",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "eid_al_fitr",
+      "name_en": "Eid al-Fitr",
+      "name_ar": "عيد الفطر",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 10,
+      "hijri_day": 1,
+      "duration_days": 3,
+      "cultural_significance": 10,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["fashion", "retail", "fmcg", "food_delivery", "travel", "telco", "banking", "automotive", "beauty_grooming"],
+      "content_guidelines": {
+        "avoid": ["discount-only messaging without family/spiritual context", "generic 'happy holidays' translations", "imagery that conflates Eid with Christmas/New Year aesthetics", "alcohol references", "irreverent humor"],
+        "prefer": ["family gatherings", "children in new clothes (kiswat al-Eid)", "ka'ak and ma'amoul biscuits", "henna and traditional dress", "gift-giving (eidiya) themes", "morning Eid prayer scenes"],
+        "tone": ["joyful", "celebratory", "family-centered", "generous"],
+        "best_post_times": ["08:00", "11:00", "20:00"],
+        "industries_neutral": ["b2b_saas", "real_estate"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["pastel_pink", "mint_green", "gold", "lavender"]
+      },
+      "audience_behavior": {
+        "peak_hours": "08:00-12:00 (morning prayer + family visits) and 20:00-00:00",
+        "engagement_shift": "morning spike unusual for GCC — driven by Eid prayer and family visit posts; secondary evening peak",
+        "shopping_behavior": "anticipatory peak in the 7-14 days prior (Eid clothing, gifts); muted during the holiday itself except food/sweets",
+        "social_media_activity": "highest engagement day of the post-Ramadan month; selfies, family videos dominate",
+        "food_delivery_spike": "elevated for sweets/breakfast catering"
+      },
+      "year_specific_notes": {
+        "2026": "1 Shawwal 1447 AH ≈ 20 March 2026 per UMQ. Saudi Supreme Court announcement may shift by ±1 day based on moon sighting. Most GCC states observe a 3-day public holiday window."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Eid_al-Fitr",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "day_of_arafah",
+      "name_en": "Day of Arafah",
+      "name_ar": "يوم عرفة",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 12,
+      "hijri_day": 9,
+      "duration_days": 1,
+      "cultural_significance": 9,
+      "lead_time_days": 7,
+      "industries_high_relevance": ["charity_nonprofit", "media_entertainment", "travel"],
+      "content_guidelines": {
+        "avoid": ["promotional/sales-led messaging", "celebratory or party imagery", "frivolous humor", "any framing that overshadows the day's spiritual weight (it is the pinnacle of Hajj)"],
+        "prefer": ["pilgrim imagery from Mount Arafat (where rights-cleared)", "supplication and fasting themes", "messages of community with pilgrims", "charitable giving prompts"],
+        "tone": ["solemn", "reverent", "supplicatory"],
+        "best_post_times": ["10:00", "16:00", "19:00"],
+        "industries_neutral": ["fashion", "automotive", "telco"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["white", "soft_cream", "muted_gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "10:00-19:00",
+        "engagement_shift": "daytime-leaning (many Muslims fast and break fast quietly); spiritual posts outperform commercial",
+        "shopping_behavior": "muted",
+        "social_media_activity": "moderate; quote/Quran verse content outperforms",
+        "food_delivery_spike": "below baseline (widespread fasting)"
+      },
+      "year_specific_notes": null,
+      "source_url": "https://en.wikipedia.org/wiki/Day_of_Arafah",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "eid_al_adha",
+      "name_en": "Eid al-Adha",
+      "name_ar": "عيد الأضحى",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 12,
+      "hijri_day": 10,
+      "duration_days": 4,
+      "cultural_significance": 10,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["fashion", "retail", "fmcg", "food_delivery", "travel", "telco", "automotive", "livestock"],
+      "content_guidelines": {
+        "avoid": ["graphic depictions of qurban (sacrifice) — sensitive even when culturally relevant", "discount-only messaging without family/spiritual context", "imagery that crosses into vegan-shaming or celebration-of-meat in a way that excludes other dietary preferences", "alcohol references"],
+        "prefer": ["family gatherings around shared meals", "themes of charity (one-third of qurban is for those in need)", "morning Eid prayer scenes", "travel and reunion imagery", "children in traditional dress"],
+        "tone": ["joyful", "communal", "reverent", "generous"],
+        "best_post_times": ["08:00", "11:00", "20:00"],
+        "industries_neutral": ["b2b_saas", "real_estate"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["earth_tones", "deep_red", "gold", "olive_green"]
+      },
+      "audience_behavior": {
+        "peak_hours": "08:00-12:00 and 20:00-00:00",
+        "engagement_shift": "morning prayer + family-visit posts dominate; secondary evening peak; outbound travel posts strong",
+        "shopping_behavior": "anticipatory peak 7-14 days prior (clothing, gifts, livestock); spending pivots to travel/leisure during the holiday",
+        "social_media_activity": "high; significant 'away' content (travel, family reunions)",
+        "food_delivery_spike": "elevated for catering and sweets; quieter for individual delivery (people are eating at family gatherings)"
+      },
+      "year_specific_notes": {
+        "2026": "10 Dhul Hijjah 1447 AH ≈ 27 May 2026 per UMQ. Falls right after Hajj. 4-day public holiday standard across GCC."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Eid_al-Adha",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "islamic_new_year",
+      "name_en": "Islamic New Year",
+      "name_ar": "رأس السنة الهجرية",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 1,
+      "hijri_day": 1,
+      "duration_days": 1,
+      "cultural_significance": 8,
+      "lead_time_days": 7,
+      "industries_high_relevance": ["media_entertainment", "fmcg", "telco", "education"],
+      "content_guidelines": {
+        "avoid": ["fireworks/champagne aesthetics (those belong to Gregorian New Year, not Hijri)", "loud party imagery", "year-end retrospectives that lift Western format wholesale", "secular celebratory messaging"],
+        "prefer": ["historical/heritage themes (Hijra journey)", "reflective content about the year ahead", "calligraphic Hijri date treatments", "themes of renewal and intention"],
+        "tone": ["reflective", "reverent", "hopeful"],
+        "best_post_times": ["09:00", "19:00"],
+        "industries_neutral": ["fashion", "automotive", "real_estate"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["deep_navy", "gold", "soft_cream"]
+      },
+      "audience_behavior": {
+        "peak_hours": "09:00-22:00 (no strong daypart bias — unlike Eids)",
+        "engagement_shift": "moderate uplift; less commercial activity than the Eids",
+        "shopping_behavior": "neutral; no anticipatory spike",
+        "social_media_activity": "moderate; reflective and historical content outperforms",
+        "food_delivery_spike": "baseline"
+      },
+      "year_specific_notes": {
+        "2026": "1 Muharram 1448 AH ≈ 15 June 2026 per UMQ (the Hijri new year that begins during Gregorian 2026)."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Islamic_New_Year",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "mawlid_al_nabi",
+      "name_en": "Mawlid al-Nabi (Prophet's Birthday)",
+      "name_ar": "المولد النبوي الشريف",
+      "country_iso": null,
+      "event_type": "lunar_hijri",
+      "hijri_month": 3,
+      "hijri_day": 12,
+      "duration_days": 1,
+      "cultural_significance": 7,
+      "lead_time_days": 7,
+      "industries_high_relevance": ["media_entertainment", "education", "fmcg"],
+      "content_guidelines": {
+        "avoid": ["FOR SAUDI/QATAR AUDIENCES: celebratory or festival framing — Mawlid is NOT observed publicly in Saudi Arabia (Wahhabi/Salafi tradition rejects it) and is similarly low-key in Qatar. Avoid Mawlid hashtags or congratulatory messaging when targeting those markets.", "any imagery of the Prophet (universally avoided across all Muslim audiences)", "music-heavy or party imagery"],
+        "prefer": ["FOR UAE/KUWAIT/OMAN/BAHRAIN AUDIENCES: themes of the Prophet's life and teachings, mosque imagery, calligraphy of the shahada, community lecture/madrasa scenes", "for mixed-GCC audiences: neutral reflective content that doesn't take a position on observance"],
+        "tone": ["reverent", "educational"],
+        "best_post_times": ["10:00", "20:00"],
+        "industries_neutral": ["fashion", "automotive", "telco", "retail"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["green", "white", "gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "10:00-22:00",
+        "engagement_shift": "highly country-dependent; strong uplift in UAE/Kuwait/Oman/Bahrain, near-baseline in Saudi Arabia and Qatar",
+        "shopping_behavior": "neutral",
+        "social_media_activity": "elevated in observing countries, baseline elsewhere",
+        "food_delivery_spike": "baseline"
+      },
+      "year_specific_notes": {
+        "2026": "12 Rabi al-Awwal 1448 AH ≈ 26 August 2026 per UMQ. SA does NOT have a public holiday; UAE does."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Mawlid",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "saudi_national_day",
+      "name_en": "Saudi National Day",
+      "name_ar": "اليوم الوطني السعودي",
+      "country_iso": "SA",
+      "event_type": "fixed_gregorian",
+      "gregorian_month": 9,
+      "gregorian_day": 23,
+      "duration_days": 1,
+      "cultural_significance": 10,
+      "lead_time_days": 21,
+      "industries_high_relevance": ["retail", "automotive", "telco", "banking", "fmcg", "travel", "real_estate", "fashion", "media_entertainment"],
+      "content_guidelines": {
+        "avoid": ["foreign visual elements (no generic 'patriotic' iconography that could read as any country)", "mixing with non-Saudi national symbols (e.g. UAE/Qatar flags in the same composition)", "generic patriotic clichés or stock-photo 'celebration' imagery", "irreverent humor about the kingdom or royal family", "any imagery that could be read as critical of Vision 2030 themes"],
+        "prefer": ["Saudi flag (green with shahada) — handled with respect, never on the ground or below the waist", "King Abdulaziz unification imagery (1932 founding)", "modern Vision 2030 themes (NEOM, Diriyah, Riyadh skyline)", "traditional ardha sword dance", "national palm-and-swords emblem", "green-and-white palette throughout"],
+        "tone": ["proud", "celebratory", "modern", "respectful"],
+        "best_post_times": ["09:00", "19:00", "21:00"],
+        "industries_neutral": ["b2b_saas", "education"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["saudi_green_#006C35", "white", "gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "19:00-23:00 (concerts, fireworks, family outings)",
+        "engagement_shift": "evening-heavy; major fireworks shows in Riyadh/Jeddah drive a sharp peak; #اليوم_الوطني_السعودي trends nationally",
+        "shopping_behavior": "elevated for fashion (greenwear), automotive (national-day promotions are a major category), home decor",
+        "social_media_activity": "year's-highest day in Saudi Arabia for Instagram and TikTok",
+        "food_delivery_spike": "elevated for evening family gatherings"
+      },
+      "year_specific_notes": {
+        "2026": "Marks 96th anniversary of the 1932 unification. Government and large brands typically reveal campaigns 14-21 days in advance."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Saudi_National_Day",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "saudi_founding_day",
+      "name_en": "Saudi Founding Day",
+      "name_ar": "يوم التأسيس",
+      "country_iso": "SA",
+      "event_type": "fixed_gregorian",
+      "gregorian_month": 2,
+      "gregorian_day": 22,
+      "duration_days": 1,
+      "cultural_significance": 9,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["retail", "fashion", "media_entertainment", "education", "tourism_heritage", "fmcg", "banking", "automotive"],
+      "content_guidelines": {
+        "avoid": ["conflating with National Day (Sep 23) — Founding Day marks 1727 by Imam Muhammad bin Saud, NOT the 1932 unification", "modern Vision 2030 skyscraper imagery (use heritage instead — that's the day's spirit)", "foreign aesthetics or generic patriotic stock", "Saudi flag with shahada (use historical Saudi state flags or Najdi banner motifs instead — Founding Day branding deliberately uses pre-modern symbols)"],
+        "prefer": ["Diriyah / At-Turaif (UNESCO site) imagery", "traditional Najdi architecture (mud-brick, geometric patterns)", "ardha sword dance, falconry, equestrian heritage", "the official Founding Day visual identity (palm-frond + sword + horse motif)", "earthy tones referencing Najd desert palette"],
+        "tone": ["proud", "heritage-reverent", "rooted", "historical"],
+        "best_post_times": ["09:00", "19:00", "21:00"],
+        "industries_neutral": ["b2b_saas", "fitness"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["deep_brown", "ochre", "terracotta", "muted_gold", "deep_green"]
+      },
+      "audience_behavior": {
+        "peak_hours": "19:00-23:00",
+        "engagement_shift": "heritage-themed content outperforms; expect strong Diriyah-related posts; #يوم_التأسيس trends",
+        "shopping_behavior": "elevated for traditional dress, heritage-themed home decor, gold/jewelry",
+        "social_media_activity": "high in Saudi Arabia; family heritage content surges",
+        "food_delivery_spike": "elevated for traditional Najdi cuisine (kabsa, jareesh)"
+      },
+      "year_specific_notes": {
+        "2026": "5th annual observance since establishment in 2022. Still 'building' as a brand vs. the long-established National Day."
+      },
+      "source_url": "https://foundingday.sa/en",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "riyadh_season",
+      "name_en": "Riyadh Season",
+      "name_ar": "موسم الرياض",
+      "country_iso": "SA",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 10,
+      "seasonal_end_month": 3,
+      "duration_days": 1,
+      "cultural_significance": 8,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["entertainment", "hospitality", "retail", "food_delivery", "fashion", "travel", "media_entertainment", "ride_hailing"],
+      "content_guidelines": {
+        "avoid": ["dated 'Saudi as conservative' framing — Riyadh Season is the headline expression of post-Vision-2030 entertainment opening", "any sense that international acts are 'compromising' for Saudi audiences", "imagery of the season as foreign-imposed (it is GEA-led, Saudi-branded)", "alcohol references (Riyadh Season is alcohol-free)"],
+        "prefer": ["Boulevard City and Boulevard World skyline shots", "concert and event photography", "food zone variety (the season hosts hundreds of restaurants)", "family-day-out imagery", "themed zones (Anime Village, WWE, etc. when topical)"],
+        "tone": ["energetic", "modern", "inclusive", "world-class"],
+        "best_post_times": ["18:00", "21:00", "23:00"],
+        "industries_neutral": ["b2b_saas", "education"],
+        "industries_low_relevance": ["alcohol_distribution"],
+        "color_palette": ["vibrant_purple", "electric_blue", "neon_pink", "gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "19:00-02:00 (evenings + late nights)",
+        "engagement_shift": "evenings; weekend (Thu-Sat) spike; ride-hailing demand surges around Boulevard zones",
+        "shopping_behavior": "elevated for season-tied merchandise, food/beverage, event tickets",
+        "social_media_activity": "sustained 5-month elevation in Saudi Arabia, especially TikTok/Snapchat among 18-34",
+        "food_delivery_spike": "elevated near Boulevard zones"
+      },
+      "year_specific_notes": {
+        "2026": "2025-26 edition opened Oct 10 2025; Boulevard World extension runs to ~May 2 2026. 11 zones, 200+ concerts, 34 exhibitions, 15 world championships."
+      },
+      "source_url": "https://www.visitsaudi.com/en/seasons/riyadh-season",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "janadriyah_festival",
+      "name_en": "Janadriyah Festival",
+      "name_ar": "مهرجان الجنادرية",
+      "country_iso": "SA",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 2,
+      "seasonal_end_month": 2,
+      "duration_days": 1,
+      "cultural_significance": 7,
+      "lead_time_days": 10,
+      "industries_high_relevance": ["tourism_heritage", "media_entertainment", "education", "crafts_artisan", "fmcg"],
+      "content_guidelines": {
+        "avoid": ["modern/futurist aesthetics (this is a heritage festival, not Vision-2030 imagery)", "framing as a 'tourist trap' or staged spectacle", "any content that flattens regional diversity into a generic 'Saudi' palette — the festival's whole point is showcasing each region's distinct heritage"],
+        "prefer": ["region-by-region heritage themes (Najd, Hijaz, Asir, Eastern Province all represented)", "traditional crafts (weaving, pottery, leatherwork, swordsmithing)", "ardha sword dance, mizmar music", "traditional dress per region", "calligraphy and poetry stages"],
+        "tone": ["heritage-rich", "warm", "educational", "rooted"],
+        "best_post_times": ["10:00", "16:00", "20:00"],
+        "industries_neutral": ["b2b_saas", "automotive"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["earth_tones", "ochre", "deep_red", "muted_gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "16:00-22:00 (visitor evenings)",
+        "engagement_shift": "evening-heavy; weekend spike",
+        "shopping_behavior": "elevated for traditional crafts, jewelry, regional food products",
+        "social_media_activity": "moderate uplift, strongest among 35+ heritage-interested audience",
+        "food_delivery_spike": "baseline (visitors eat on-site)"
+      },
+      "year_specific_notes": null,
+      "source_url": "https://my.gov.sa/en/events/11068",
+      "source_confidence": "secondary",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "diriyah_season",
+      "name_en": "Diriyah Season",
+      "name_ar": "موسم الدرعية",
+      "country_iso": "SA",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 11,
+      "seasonal_end_month": 3,
+      "duration_days": 1,
+      "cultural_significance": 7,
+      "lead_time_days": 10,
+      "industries_high_relevance": ["tourism_heritage", "hospitality", "fine_dining", "luxury_retail", "fashion", "media_entertainment", "automotive"],
+      "content_guidelines": {
+        "avoid": ["lumping it together with Riyadh Season — Diriyah Season is positioned as the heritage/culture counterpart to Riyadh Season's entertainment positioning", "modern skyscraper backdrops (use At-Turaif and Najdi mud-brick architecture instead)", "loud party aesthetics — this season's vibe is curated, slower, more high-end"],
+        "prefer": ["At-Turaif UNESCO heritage site (golden-hour shots are iconic)", "Bujairi Terrace fine-dining scenes", "Layali Diriyah musical evenings", "TYN (Clay) Festival craft imagery", "Diriyah Storytelling Festival", "Wadi Safar overlooks"],
+        "tone": ["heritage-rich", "elevated", "curated", "rooted-but-modern"],
+        "best_post_times": ["17:30", "20:00", "22:00"],
+        "industries_neutral": ["b2b_saas", "education"],
+        "industries_low_relevance": ["fast_fashion", "alcohol_distribution"],
+        "color_palette": ["warm_terracotta", "deep_brown", "gold", "muted_olive"]
+      },
+      "audience_behavior": {
+        "peak_hours": "18:00-23:00 (golden hour through evening)",
+        "engagement_shift": "evening-heavy; high-engagement content tends to be At-Turaif sunset shots",
+        "shopping_behavior": "elevated for luxury/fine-dining bookings, traditional crafts",
+        "social_media_activity": "strong uplift in lifestyle/travel segments; outsized international audience interest",
+        "food_delivery_spike": "baseline (dining is destination-on-site)"
+      },
+      "year_specific_notes": {
+        "2026": "2025-26 edition runs Nov 1 2025 → Mar 23 2026. Theme: 'Where You Experience Legacy'. Drew 1.3M+ visitors mid-season."
+      },
+      "source_url": "https://www.diriyah.sa/en/diriyahseason",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "winter_at_tantora",
+      "name_en": "Winter at Tantora",
+      "name_ar": "شتاء طنطورة",
+      "country_iso": "SA",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 12,
+      "seasonal_end_month": 1,
+      "duration_days": 1,
+      "cultural_significance": 6,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["tourism_heritage", "hospitality", "luxury_retail", "fine_dining", "travel", "media_entertainment", "automotive"],
+      "content_guidelines": {
+        "avoid": ["beach/summer aesthetics", "any framing that treats AlUla as a 'desert resort' rather than a heritage destination", "modern skyscraper imagery", "neon/club aesthetics"],
+        "prefer": ["Maraya mirrored concert hall (most-photographed UAE-region structure in 2020s)", "Hegra (Madain Saleh) rock-cut tombs at golden hour", "candlelit AlUla Old Town nights", "polo + cycling sports season imagery", "Banyan Tree / Habitas tented camps", "Bedouin storytelling under stars"],
+        "tone": ["curated", "atmospheric", "heritage-rich", "elevated"],
+        "best_post_times": ["07:30 (sunrise)", "17:00 (sunset)", "21:00"],
+        "industries_neutral": ["b2b_saas", "fitness"],
+        "industries_low_relevance": ["fast_fashion", "alcohol_distribution"],
+        "color_palette": ["sandstone_orange", "deep_amber", "midnight_blue", "soft_gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "17:00-22:00 (golden hour through evening events)",
+        "engagement_shift": "sunset and concert photography drives strong evening peaks; international/expat audience tilts the timezone profile",
+        "shopping_behavior": "high-value travel bookings (hotels, flights to AlUla airport); concert ticket purchases",
+        "social_media_activity": "outsized international engagement vs. typical KSA event",
+        "food_delivery_spike": "baseline (on-site dining)"
+      },
+      "year_specific_notes": {
+        "2026": "2025-26 edition ran Dec 18 2025 → Jan 10 2026. Concerts at Maraya, AlManshiyah Carnival, Old Town Nights, candlelit classical concerts at AlUla Fort."
+      },
+      "source_url": "https://www.experiencealula.com/en/whats-on/festivals/winter-at-tantora",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "alula_season",
+      "name_en": "AlUla Season (AlUla Moments)",
+      "name_ar": "موسم العلا",
+      "country_iso": "SA",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 9,
+      "seasonal_end_month": 4,
+      "duration_days": 1,
+      "cultural_significance": 6,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["tourism_heritage", "hospitality", "fine_dining", "luxury_retail", "travel", "fitness", "arts_culture"],
+      "content_guidelines": {
+        "avoid": ["treating AlUla as 'just a tourist site' — the brand positioning is curated cultural destination, not theme park", "summer-month content (the season deliberately ends April when temperatures rise)", "imagery that hides the landscape behind crowds — solo / small-group framings dominate the brand voice"],
+        "prefer": ["Hegra rock-cut tombs", "Elephant Rock", "Maraya mirrored hall", "Desert X open-air art installations", "trail running / cycling routes", "Banyan Tree / Habitas / Our Habitas tented stays", "Ancient Kingdoms Festival imagery"],
+        "tone": ["curated", "atmospheric", "rooted", "considered"],
+        "best_post_times": ["07:30 (sunrise)", "17:00 (sunset)", "21:00"],
+        "industries_neutral": ["b2b_saas", "education"],
+        "industries_low_relevance": ["fast_fashion", "alcohol_distribution"],
+        "color_palette": ["sandstone_orange", "terracotta", "midnight_blue", "soft_gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "Sunrise + sunset windows dominate engagement curve",
+        "engagement_shift": "landscape-photography-driven; international travel audience visible in engagement timing",
+        "shopping_behavior": "high-value bookings (premium hotels, charter flights)",
+        "social_media_activity": "moderate but very high-engagement-per-post (low-volume, high-aspirational segment)",
+        "food_delivery_spike": "baseline"
+      },
+      "year_specific_notes": {
+        "2026": "200+ events across the 2025-26 season. Marquee festivals include Winter at Tantora (separate entry), Ancient Kingdoms Festival (Nov), AlUla Tour cycling (Jan 27-31), Desert X (Jan 28-Feb 1)."
+      },
+      "source_url": "https://www.experiencealula.com/en/whats-on/alula-moments",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "hajj_season",
+      "name_en": "Hajj Season",
+      "name_ar": "موسم الحج",
+      "country_iso": "SA",
+      "event_type": "lunar_hijri",
+      "hijri_month": 12,
+      "hijri_day": 8,
+      "duration_days": 6,
+      "cultural_significance": 10,
+      "lead_time_days": 21,
+      "industries_high_relevance": ["travel", "telco", "charity_nonprofit", "media_entertainment", "tourism_heritage", "automotive"],
+      "content_guidelines": {
+        "avoid": ["any promotional/sales messaging during the pilgrimage window — Saudi authorities are explicit about treating Hajj with reverence", "imagery that frames Hajj as 'spectacle' or tourist activity", "stock pilgrim imagery without permissioning (Saudi authorities issue official Hajj photography)", "showing the Kaaba in any context that doesn't make Hajj/Umrah the subject", "any framing that excludes non-pilgrims (most of the local audience are not pilgrims this year)"],
+        "prefer": ["respectful coverage of pilgrim journey themes", "messages of solidarity with the millions of pilgrims", "spiritual reflection content", "for non-religious brands: pause cadence on commercial campaigns during the peak days"],
+        "tone": ["solemn", "reverent", "respectful"],
+        "best_post_times": ["10:00", "19:00", "22:00"],
+        "industries_neutral": ["fashion (cautious)", "fmcg (cautious)", "real_estate"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution", "entertainment_promotion"],
+        "color_palette": ["white", "soft_cream", "muted_gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "19:00-23:00 (post-prayer)",
+        "engagement_shift": "Saudi domestic audience is fragmented (some performing Hajj, others observing); commercial content sees a 5-7 day soft pause",
+        "shopping_behavior": "muted on luxury/discretionary; elevated on travel/tour packages for the season",
+        "social_media_activity": "moderate; spiritual content far outperforms commercial",
+        "food_delivery_spike": "elevated in Mecca region, baseline elsewhere"
+      },
+      "year_specific_notes": {
+        "2026": "8-13 Dhul Hijjah 1447 AH ≈ 25-30 May 2026 per UMQ. Eid al-Adha falls during this window (10 Dhul Hijjah = May 27). Saudi MoH/MoHU typically issues pre-Hajj guidance in early Shawwal."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Hajj",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "uae_national_day",
+      "name_en": "UAE National Day",
+      "name_ar": "اليوم الوطني لدولة الإمارات",
+      "country_iso": "AE",
+      "event_type": "fixed_gregorian",
+      "gregorian_month": 12,
+      "gregorian_day": 2,
+      "duration_days": 2,
+      "cultural_significance": 10,
+      "lead_time_days": 21,
+      "industries_high_relevance": ["retail", "automotive", "telco", "banking", "fmcg", "travel", "real_estate", "fashion", "media_entertainment", "hospitality"],
+      "content_guidelines": {
+        "avoid": ["mixing UAE flag with non-UAE national symbols in same composition", "generic patriotic stock imagery", "any framing that singles out one emirate at the expense of the federation theme — Dec 2 is about the union", "humor about the ruling families", "alcohol references"],
+        "prefer": ["UAE flag (red, green, white, black) treated reverently", "Sheikh Zayed founding-father imagery (50+ year anniversary themes)", "all 7 emirates represented (often via 7-element compositions)", "Burj Khalifa light show imagery (where rights-cleared)", "Falcon imagery (national bird)", "traditional dress (kandura, abaya) alongside modern UAE"],
+        "tone": ["proud", "celebratory", "modern", "unified", "warm"],
+        "best_post_times": ["09:00", "19:00", "21:00"],
+        "industries_neutral": ["b2b_saas", "education"],
+        "industries_low_relevance": ["alcohol_distribution"],
+        "color_palette": ["uae_red_#EF3340", "uae_green_#009639", "white", "black"]
+      },
+      "audience_behavior": {
+        "peak_hours": "19:00-00:00",
+        "engagement_shift": "evening-heavy; Burj Khalifa light show and Saadiyat/Yas fireworks drive sharp peaks; UAE-wide trends",
+        "shopping_behavior": "elevated for fashion (UAE-color-themed), automotive (major National Day promotions), home decor",
+        "social_media_activity": "year's-highest day in UAE; visiting tourist content elevated too",
+        "food_delivery_spike": "elevated for evening family/community gatherings"
+      },
+      "year_specific_notes": {
+        "2026": "55th National Day (UAE founded Dec 2 1971). Public holiday observed Dec 2-3 standard. Major brand activations typically begin Nov 15 onward."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/National_Day_(United_Arab_Emirates)",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "uae_commemoration_day",
+      "name_en": "Commemoration Day (Martyr's Day)",
+      "name_ar": "يوم الشهيد",
+      "country_iso": "AE",
+      "event_type": "fixed_gregorian",
+      "gregorian_month": 11,
+      "gregorian_day": 30,
+      "duration_days": 2,
+      "cultural_significance": 9,
+      "lead_time_days": 10,
+      "industries_high_relevance": ["media_entertainment", "telco", "banking", "education", "real_estate"],
+      "content_guidelines": {
+        "avoid": ["promotional/sales-led messaging — this is a day of national mourning, not commercial celebration", "imagery that conflates Commemoration Day with National Day (which immediately follows) — they have opposite tonal registers", "loud celebratory aesthetics", "humor of any kind"],
+        "prefer": ["1-minute-silence imagery (Wahat Al Karama memorial in Abu Dhabi)", "themes of sacrifice and service", "respectful UAE flag at half-mast (typical observance protocol)", "messages honoring UAE armed forces and emergency services"],
+        "tone": ["solemn", "respectful", "honoring"],
+        "best_post_times": ["08:00 (around the official 11:30 moment of silence)", "11:00", "18:00"],
+        "industries_neutral": ["b2b_saas", "fashion"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution", "entertainment_promotion"],
+        "color_palette": ["black", "deep_grey", "muted_red", "white"]
+      },
+      "audience_behavior": {
+        "peak_hours": "11:00-12:00 (around the moment of silence) and 18:00-22:00",
+        "engagement_shift": "morning-spike unusual for UAE; driven by the official 11:30 1-minute silence observance",
+        "shopping_behavior": "muted on promotional content; brands typically pause campaigns",
+        "social_media_activity": "elevated; tribute content sees high engagement",
+        "food_delivery_spike": "baseline"
+      },
+      "year_specific_notes": {
+        "2026": "Commemoration is on Nov 30 (date of first Emirati soldier's death, 1971). Public holiday observed Dec 1 since 2019 — so this entry's 2-day duration covers both. Flag-at-half-mast 8am-11:30am with national moment of silence at 11:30."
+      },
+      "source_url": "https://en.wikipedia.org/wiki/Commemoration_Day",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "uae_flag_day",
+      "name_en": "UAE Flag Day",
+      "name_ar": "يوم العلم",
+      "country_iso": "AE",
+      "event_type": "fixed_gregorian",
+      "gregorian_month": 11,
+      "gregorian_day": 3,
+      "duration_days": 1,
+      "cultural_significance": 7,
+      "lead_time_days": 7,
+      "industries_high_relevance": ["education", "media_entertainment", "telco", "banking", "real_estate", "retail"],
+      "content_guidelines": {
+        "avoid": ["partisan or political framing — Flag Day is consensus-national", "humor", "any imagery showing the flag below ground level or in inappropriate positions"],
+        "prefer": ["large-scale flag-raising ceremonies (schools, ministries, malls)", "communal flag-raising imagery (citizens + residents alike)", "themes of unity across the 7 emirates", "Sheikh Mohammed bin Rashid quotes (he founded the day in 2013)", "behind-the-scenes flag-design history (designed in 1971 by Abdullah Mohammed Al Maainah at age 19)"],
+        "tone": ["proud", "communal", "unified", "warm"],
+        "best_post_times": ["10:00 (around the 11am flag raising)", "17:00", "20:00"],
+        "industries_neutral": ["fashion", "automotive", "b2b_saas"],
+        "industries_low_relevance": ["nightlife", "alcohol_distribution"],
+        "color_palette": ["uae_red_#EF3340", "uae_green_#009639", "white", "black"]
+      },
+      "audience_behavior": {
+        "peak_hours": "10:00-12:00 (flag-raising ceremonies) and 18:00-21:00",
+        "engagement_shift": "morning peak (unusual for UAE) driven by ceremony coverage; secondary evening peak",
+        "shopping_behavior": "neutral (no major commercial moment)",
+        "social_media_activity": "moderate; school/community content dominates",
+        "food_delivery_spike": "baseline"
+      },
+      "year_specific_notes": null,
+      "source_url": "https://en.wikipedia.org/wiki/Flag_Day_(United_Arab_Emirates)",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "dubai_shopping_festival",
+      "name_en": "Dubai Shopping Festival",
+      "name_ar": "مهرجان دبي للتسوق",
+      "country_iso": "AE",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 12,
+      "seasonal_end_month": 1,
+      "duration_days": 1,
+      "cultural_significance": 8,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["retail", "fashion", "fmcg", "luxury_retail", "automotive", "electronics", "fine_dining", "travel", "hospitality", "entertainment"],
+      "content_guidelines": {
+        "avoid": ["generic 'sale' messaging that doesn't lean into the DSF brand — DSF is a 30-year-old anchor that audiences expect specific brand cues", "any imagery suggesting it's a quiet/curated event — it's a high-energy citywide spectacle", "competing with Black Friday framing (DSF positions as the Gulf's equivalent of London/NYC holiday shopping)"],
+        "prefer": ["citywide drone light shows and fireworks", "raffle/jackpot imagery (cars, gold, cash, vouchers are signature prizes)", "concert + family entertainment", "Global Village imagery (runs concurrent)", "tourist+resident-mixed family scenes", "mall + souk juxtaposition"],
+        "tone": ["energetic", "festive", "inclusive", "value-driven"],
+        "best_post_times": ["18:00", "20:00", "22:00"],
+        "industries_neutral": ["b2b_saas", "education"],
+        "industries_low_relevance": ["alcohol_distribution"],
+        "color_palette": ["vibrant_purple", "gold", "electric_blue", "neon_pink"]
+      },
+      "audience_behavior": {
+        "peak_hours": "18:00-00:00",
+        "engagement_shift": "evening-heavy; Thursday-Saturday peak; tourist content adds international engagement",
+        "shopping_behavior": "sharp elevation across all retail categories; international tourist arrivals spike",
+        "social_media_activity": "sustained 5-week elevation; concert + raffle reveals drive viral moments",
+        "food_delivery_spike": "elevated near event venues"
+      },
+      "year_specific_notes": {
+        "2026": "31st edition ran Dec 5 2025 → Jan 11 2026 (~38 days). Future editions follow the same December-start pattern."
+      },
+      "source_url": "https://www.visitdubai.com/en/festivals-and-events/dsf",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "dubai_summer_surprises",
+      "name_en": "Dubai Summer Surprises",
+      "name_ar": "مفاجآت صيف دبي",
+      "country_iso": "AE",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 7,
+      "seasonal_end_month": 8,
+      "duration_days": 1,
+      "cultural_significance": 7,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["retail", "fashion", "fmcg", "family_entertainment", "hospitality", "fine_dining", "travel", "amusement_parks"],
+      "content_guidelines": {
+        "avoid": ["beach/outdoor-activity framing during the hottest hours — temperatures hit 45°C+, audience is indoors", "any messaging that treats summer-in-Dubai as a downturn (DSS is engineered to counter the slump)", "tourist-only framing — DSS is targeted at residents and intra-GCC travelers, not the December European tourist segment"],
+        "prefer": ["air-conditioned indoor experiences (malls, indoor theme parks, hotel staycations)", "family-with-kids imagery (school summer break is the target window)", "splash parks, waterparks, indoor snow", "hotel staycation packages", "deal-of-the-day raffle imagery"],
+        "tone": ["family-friendly", "value-driven", "fun", "indoor-oriented"],
+        "best_post_times": ["10:00", "16:00", "20:00"],
+        "industries_neutral": ["b2b_saas", "automotive"],
+        "industries_low_relevance": ["outdoor_sports (peak heat)", "alcohol_distribution"],
+        "color_palette": ["aqua_blue", "sunset_orange", "lemon_yellow", "white"]
+      },
+      "audience_behavior": {
+        "peak_hours": "10:00-12:00 + 16:00-23:00 (heat-driven indoor pattern)",
+        "engagement_shift": "two-peak daily pattern (mid-morning + late afternoon-evening); audience is families with school-aged children",
+        "shopping_behavior": "elevated on fashion, kids' goods, electronics; significant staycation booking activity",
+        "social_media_activity": "moderate; lower-volume than DSF but high-conversion family segment",
+        "food_delivery_spike": "elevated all day (heat reduces dining-out)"
+      },
+      "year_specific_notes": {
+        "2026": "DSS 2026 runs Jul 2 → Aug 30 (~59 days). Organized by Dubai Festivals and Retail Establishment (DFRE)."
+      },
+      "source_url": "https://www.visitdubai.com/en/festivals-and-events/dss",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "sharjah_heritage_days",
+      "name_en": "Sharjah Heritage Days",
+      "name_ar": "أيام الشارقة التراثية",
+      "country_iso": "AE",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 2,
+      "seasonal_end_month": 2,
+      "duration_days": 1,
+      "cultural_significance": 6,
+      "lead_time_days": 7,
+      "industries_high_relevance": ["tourism_heritage", "crafts_artisan", "education", "fmcg", "fine_dining", "media_entertainment"],
+      "content_guidelines": {
+        "avoid": ["modern/futurist aesthetics — this is heritage", "any framing that flattens 'Sharjah' into 'Dubai-adjacent' — Sharjah has a distinct cultural identity (UNESCO designated it the cultural capital of the Arab world in 1998 and the Arab capital of culture 2014)", "tourist-marketing aesthetic (the festival is for residents + heritage enthusiasts first)"],
+        "prefer": ["Heart of Sharjah (historic district) imagery", "traditional Emirati crafts (sadu weaving, talli embroidery, palm-frond work)", "luqaimat (Emirati sweet dumplings), Arabic coffee ceremonies", "dama (board game), pearl-diving heritage", "national poet/storyteller stages", "international participant pavilions (the festival also showcases other cultures)"],
+        "tone": ["heritage-rich", "warm", "educational", "rooted"],
+        "best_post_times": ["10:00", "17:00", "20:00"],
+        "industries_neutral": ["b2b_saas", "automotive", "telco"],
+        "industries_low_relevance": ["fast_fashion", "nightlife", "alcohol_distribution"],
+        "color_palette": ["earth_tones", "deep_red", "muted_gold", "warm_cream"]
+      },
+      "audience_behavior": {
+        "peak_hours": "17:00-22:00 (visitor evenings; pleasant Feb weather enables long outdoor evenings)",
+        "engagement_shift": "evening-heavy; weekend spike; family + heritage-interested 30+ segment",
+        "shopping_behavior": "elevated for traditional crafts, regional food products",
+        "social_media_activity": "moderate; outsized engagement from Sharjah-resident + UAE heritage segments",
+        "food_delivery_spike": "baseline (food is consumed on-site)"
+      },
+      "year_specific_notes": {
+        "2026": "23rd edition ran Feb 4-15 2026, theme 'Glow of Authenticity'. Held across 7 locations in the emirate (Sharjah City, Khorfakkan, Kalba, Dibba Al Hisn, Al Dhaid, Wadi Al Helo, Al Hamriyah)."
+      },
+      "source_url": "https://www.visitsharjah.com/events/sharjah-heritage-days/",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    },
+
+    {
+      "event_key": "abu_dhabi_art",
+      "name_en": "Abu Dhabi Art / Frieze Abu Dhabi",
+      "name_ar": "معرض أبوظبي للفنون",
+      "country_iso": "AE",
+      "event_type": "seasonal_range",
+      "seasonal_start_month": 11,
+      "seasonal_end_month": 11,
+      "duration_days": 1,
+      "cultural_significance": 6,
+      "lead_time_days": 14,
+      "industries_high_relevance": ["arts_culture", "luxury_retail", "fine_dining", "hospitality", "media_entertainment", "fashion", "real_estate_luxury"],
+      "content_guidelines": {
+        "avoid": ["mass-market tone — this is a high-end art fair targeting collectors, galleries, and the international art press", "treating the event as 'just another art exhibition' — it is the GCC's flagship contemporary art moment", "any imagery without rights clearance for the represented artists/galleries"],
+        "prefer": ["Manarat Al Saadiyat venue imagery", "Saadiyat Cultural District context (Louvre Abu Dhabi, Zayed Museum)", "gallery booth photography (with proper credit)", "collector / opening-night portraiture", "MENA + international artist representation balance", "design-week aesthetics — minimalist, considered, gallery-light"],
+        "tone": ["elevated", "considered", "international", "discerning"],
+        "best_post_times": ["11:00", "18:00", "20:00"],
+        "industries_neutral": ["b2b_saas", "automotive_luxury"],
+        "industries_low_relevance": ["fmcg", "fast_fashion", "alcohol_distribution"],
+        "color_palette": ["gallery_white", "soft_grey", "deep_charcoal", "muted_gold"]
+      },
+      "audience_behavior": {
+        "peak_hours": "18:00-22:00 (opening-night and evening-program windows)",
+        "engagement_shift": "high-engagement-per-post but lower volume than mass-market events; international art-collector audience visible in timezone distribution",
+        "shopping_behavior": "high-value art purchases (the audience is collectors)",
+        "social_media_activity": "moderate; strong Instagram engagement, lower TikTok",
+        "food_delivery_spike": "baseline"
+      },
+      "year_specific_notes": {
+        "2026": "First edition under the Frieze brand (announced as 'Frieze Abu Dhabi') runs Nov 19-22 2026 at Manarat Al Saadiyat, replacing the legacy Abu Dhabi Art fair that ran through 2025. Organized by Frieze in partnership with the Department of Culture and Tourism — Abu Dhabi."
+      },
+      "source_url": "https://www.abudhabiart.ae/",
+      "source_confidence": "verified",
+      "last_verified": "2026-05-16"
+    }
+
+  ]
+}
