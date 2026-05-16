@@ -24,6 +24,7 @@ from app.core.hijri import (
     hijri_to_gregorian,
     lunar_event_in_gregorian_year,
     resolve_event_dates,
+    resolve_event_dates_for_range,
 )
 
 
@@ -299,3 +300,126 @@ def test_resolve_rejects_year_out_of_range(bad_year):
             gregorian_month=1,
             gregorian_day=1,
         )
+
+
+# ── POSITIVE: resolve_event_dates_for_range ────────────────────
+
+def test_for_range_fixed_event_in_window():
+    """Saudi National Day Sep 23 falls in a Jun→Dec 2026 window."""
+    ranges = resolve_event_dates_for_range(
+        event_type="fixed_gregorian",
+        from_date=date(2026, 6, 1),
+        to_date=date(2026, 12, 31),
+        gregorian_month=9,
+        gregorian_day=23,
+    )
+    assert ranges == [(date(2026, 9, 23), date(2026, 9, 23))]
+
+
+def test_for_range_fixed_event_outside_window():
+    """Saudi National Day Sep 23 does NOT appear in a Jan→Jun 2026 window."""
+    ranges = resolve_event_dates_for_range(
+        event_type="fixed_gregorian",
+        from_date=date(2026, 1, 1),
+        to_date=date(2026, 6, 30),
+        gregorian_month=9,
+        gregorian_day=23,
+    )
+    assert ranges == []
+
+
+def test_for_range_seasonal_wraparound_started_previous_year():
+    """Riyadh Season Oct 2025 → Mar 2026 should appear in a Jan→Feb 2026 window
+    even though it STARTED in 2025."""
+    ranges = resolve_event_dates_for_range(
+        event_type="seasonal_range",
+        from_date=date(2026, 1, 15),
+        to_date=date(2026, 2, 15),
+        seasonal_start_month=10,
+        seasonal_end_month=3,
+    )
+    # The 2025 occurrence (Oct 1 2025 → Mar 31 2026) overlaps.
+    assert (date(2025, 10, 1), date(2026, 3, 31)) in ranges
+
+
+def test_for_range_lunar_ramadan_2026():
+    """Ramadan 1447 AH should resolve in a Feb→Apr 2026 window."""
+    ranges = resolve_event_dates_for_range(
+        event_type="lunar_hijri",
+        from_date=date(2026, 2, 1),
+        to_date=date(2026, 4, 30),
+        hijri_month=9,
+        hijri_day=1,
+        duration_days=30,
+    )
+    assert (date(2026, 2, 18), date(2026, 3, 19)) in ranges
+
+
+def test_for_range_cross_year_window_returns_both_years():
+    """A window from Dec 2026 → Feb 2027 should return National Day events
+    from both years (Saudi National Day Sep 23 wouldn't appear, but a
+    Dec-25 fixed event would yield 2026 only since Dec 25 2027 is past
+    to_date)."""
+    # Use a Dec 25 fixed event with a tight window
+    ranges = resolve_event_dates_for_range(
+        event_type="fixed_gregorian",
+        from_date=date(2026, 12, 1),
+        to_date=date(2027, 2, 28),
+        gregorian_month=12,
+        gregorian_day=25,
+    )
+    assert ranges == [(date(2026, 12, 25), date(2026, 12, 25))]
+
+    # Widen to include both Dec 25s
+    ranges_wide = resolve_event_dates_for_range(
+        event_type="fixed_gregorian",
+        from_date=date(2026, 1, 1),
+        to_date=date(2027, 12, 31),
+        gregorian_month=12,
+        gregorian_day=25,
+    )
+    assert (date(2026, 12, 25), date(2026, 12, 25)) in ranges_wide
+    assert (date(2027, 12, 25), date(2027, 12, 25)) in ranges_wide
+
+
+def test_for_range_results_sorted_ascending():
+    """Multi-year wide window: results sorted by start ASC."""
+    ranges = resolve_event_dates_for_range(
+        event_type="fixed_gregorian",
+        from_date=date(2026, 1, 1),
+        to_date=date(2028, 12, 31),
+        gregorian_month=2,
+        gregorian_day=22,
+    )
+    starts = [r[0] for r in ranges]
+    assert starts == sorted(starts)
+    assert len(ranges) == 3
+
+
+# ── NEGATIVE: resolve_event_dates_for_range ────────────────────
+
+def test_for_range_rejects_from_after_to():
+    with pytest.raises(ValueError, match="from_date"):
+        resolve_event_dates_for_range(
+            event_type="fixed_gregorian",
+            from_date=date(2026, 6, 1),
+            to_date=date(2026, 5, 31),
+            gregorian_month=1,
+            gregorian_day=1,
+        )
+
+
+def test_for_range_year_outside_umq_silently_skipped():
+    """Window crossing into year 2080 (above UMQ max 2077) — in-range
+    portion still returns, no exception."""
+    ranges = resolve_event_dates_for_range(
+        event_type="lunar_hijri",
+        from_date=date(2076, 1, 1),
+        to_date=date(2085, 12, 31),  # past UMQ
+        hijri_month=9,
+        hijri_day=1,
+        duration_days=30,
+    )
+    # We don't assert exact dates (depends on UMQ table) — only that it
+    # returned something rather than raised.
+    assert isinstance(ranges, list)

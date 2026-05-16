@@ -12,6 +12,7 @@ from app.api.v1.ai_pages import router as ai_pages_router
 from app.api.v1.goals import router as goals_router
 from app.api.v1.market import router as market_router
 from app.api.v1.posts_creator import router as posts_creator_router
+from app.api.v1.cultural_events import router as cultural_events_router
 
 app = FastAPI(
     title="BASIRET API",
@@ -39,6 +40,7 @@ app.include_router(ai_pages_router, prefix="/api/v1/ai-pages", tags=["ai-pages"]
 app.include_router(goals_router, prefix="/api/v1/goals", tags=["goals"])
 app.include_router(market_router, prefix="/api/v1", tags=["market"])
 app.include_router(posts_creator_router, prefix="/api/v1", tags=["creator"])
+app.include_router(cultural_events_router, prefix="/api/v1/cultural-events", tags=["cultural-events"])
 
 
 @app.get("/")

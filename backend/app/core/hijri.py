@@ -83,7 +83,12 @@ def lunar_event_in_gregorian_year(hm: int, hd: int, year: int) -> list[date]:
 
     Silently skips Hijri years where (hm, hd) is invalid (e.g. day 30 in a
     29-day month) — those simply don't contribute an occurrence that year.
-    Re-raises any other ``hijridate`` error.
+
+    Near the UMQ table boundaries (year 2077 in particular), ``date(year,
+    12, 31)`` can fall past the supported maximum (Nov 16, 2077) and cause
+    ``hijridate`` to raise ``OverflowError`` rather than ``ValueError``.
+    Caught here and the end-of-year hijri lookup falls back to the start
+    so the function returns whatever in-range occurrences it can find.
     """
     if not (1 <= hm <= 12):
         raise ValueError(f"hijri_month must be 1..12, got {hm}")
@@ -95,14 +100,22 @@ def lunar_event_in_gregorian_year(hm: int, hd: int, year: int) -> list[date]:
         )
 
     hy_start, _, _ = gregorian_to_hijri(date(year, 1, 1))
-    hy_end, _, _ = gregorian_to_hijri(date(year, 12, 31))
+    try:
+        hy_end, _, _ = gregorian_to_hijri(date(year, 12, 31))
+    except (OverflowError, ValueError):
+        # Near the UMQ table's far boundary (Nov 16, 2077) — fall back to the
+        # year-start hijri year. We may miss the second-hijri-year overlap
+        # at the very edge of the table; acceptable since callers can rely
+        # on the documented behavior.
+        hy_end = hy_start
 
     results: list[date] = []
     for hy in range(hy_start, hy_end + 1):
         try:
             g = hijri_to_gregorian(hy, hm, hd)
-        except ValueError:
-            # Day-out-of-range for this specific Hijri month — skip silently.
+        except (ValueError, OverflowError):
+            # Day-out-of-range for this specific Hijri month, or hijri year
+            # at the very edge of the UMQ table — skip silently.
             continue
         if g.year == year:
             results.append(g)
@@ -200,3 +213,72 @@ def resolve_event_dates(
     last_day = calendar.monthrange(end_year, seasonal_end_month)[1]
     end = date(end_year, seasonal_end_month, last_day)
     return [(start, end)]
+
+
+def resolve_event_dates_for_range(
+    *,
+    event_type: str,
+    from_date: date,
+    to_date: date,
+    gregorian_month: int | None = None,
+    gregorian_day: int | None = None,
+    hijri_month: int | None = None,
+    hijri_day: int | None = None,
+    seasonal_start_month: int | None = None,
+    seasonal_end_month: int | None = None,
+    duration_days: int = 1,
+) -> list[tuple[date, date]]:
+    """Return every (start, end) range that OVERLAPS [from_date, to_date].
+
+    Composes ``resolve_event_dates`` across every Gregorian year touched by
+    the window, then filters to occurrences where::
+
+        event_end >= from_date AND event_start <= to_date
+
+    The year span scanned is ``[from_date.year - 1 .. to_date.year]`` —
+    ``from_date.year - 1`` is included so a seasonal wraparound that started
+    in the previous year (e.g. Riyadh Season Oct prev → Mar this) and rolls
+    into the window is still surfaced.
+
+    Years outside the UMQ-supported range (1924..2077) are silently skipped
+    so a long window straddling the boundary still returns the in-range
+    portion rather than raising.
+
+    Returns the merged occurrences sorted ascending by start date,
+    deduplicated. Most events yield 0 or 1 ranges per window; lunar events
+    near a year boundary can yield 2.
+    """
+    if from_date > to_date:
+        raise ValueError(
+            f"from_date {from_date} must be <= to_date {to_date}"
+        )
+
+    # range(a, b) is exclusive of b; we want from-1 .. to inclusive.
+    years_to_scan = range(from_date.year - 1, to_date.year + 1)
+
+    occurrences: set[tuple[date, date]] = set()
+    for year in years_to_scan:
+        try:
+            ranges = resolve_event_dates(
+                event_type=event_type,
+                year=year,
+                gregorian_month=gregorian_month,
+                gregorian_day=gregorian_day,
+                hijri_month=hijri_month,
+                hijri_day=hijri_day,
+                seasonal_start_month=seasonal_start_month,
+                seasonal_end_month=seasonal_end_month,
+                duration_days=duration_days,
+            )
+        except (ValueError, OverflowError):
+            # Year outside hijridate's supported range, invalid per-type
+            # date for that year, or near the UMQ table's far boundary
+            # (where hijridate raises OverflowError rather than ValueError)
+            # — skip silently per the docstring contract.
+            continue
+        for start, end in ranges:
+            # Overlap test: event_end >= from_date AND event_start <= to_date.
+            if end >= from_date and start <= to_date:
+                occurrences.add((start, end))
+
+    return sorted(occurrences)
