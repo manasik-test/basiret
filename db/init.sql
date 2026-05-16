@@ -354,3 +354,84 @@ CREATE TABLE batch_generate_progress (
 
 CREATE INDEX idx_batch_progress_account_lang_status ON batch_generate_progress(social_account_id, language, status);
 CREATE INDEX idx_batch_progress_org ON batch_generate_progress(organization_id);
+
+-- ─────────────────────────────────────────
+-- CULTURAL EVENT (GCC cultural calendar — Week 2 Phase 1A)
+-- Single table for fixed-gregorian, lunar-hijri, and seasonal-range events
+-- across SA/AE/QA/KW/OM/BH (country_iso NULL = cross-GCC / shared).
+-- Lunar events store the Hijri tuple; Gregorian dates are resolved at query
+-- time by the Phase 1B utility, so the table needs no annual maintenance.
+-- ─────────────────────────────────────────
+CREATE TABLE cultural_event (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_key VARCHAR(64) NOT NULL UNIQUE,
+    name_en VARCHAR(128) NOT NULL,
+    name_ar VARCHAR(128) NOT NULL,
+    country_iso CHAR(2),
+    event_type VARCHAR(20) NOT NULL,
+    gregorian_month SMALLINT,
+    gregorian_day SMALLINT,
+    hijri_month SMALLINT,
+    hijri_day SMALLINT,
+    duration_days SMALLINT NOT NULL DEFAULT 1,
+    seasonal_start_month SMALLINT,
+    seasonal_end_month SMALLINT,
+    cultural_significance SMALLINT NOT NULL,
+    lead_time_days SMALLINT NOT NULL DEFAULT 7,
+    industries_high_relevance TEXT[] NOT NULL DEFAULT '{}'::text[],
+    content_guidelines JSONB NOT NULL,
+    audience_behavior JSONB NOT NULL,
+    year_specific_notes JSONB,
+    source_url VARCHAR(512),
+    source_confidence VARCHAR(20) NOT NULL DEFAULT 'secondary',
+    last_verified DATE NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT cultural_event_type_chk
+        CHECK (event_type IN ('fixed_gregorian','lunar_hijri','seasonal_range')),
+    CONSTRAINT cultural_event_source_conf_chk
+        CHECK (source_confidence IN ('verified','secondary','inferred')),
+    CONSTRAINT cultural_event_country_chk
+        CHECK (country_iso IS NULL OR country_iso IN ('SA','AE','QA','KW','OM','BH')),
+    CONSTRAINT cultural_event_significance_chk
+        CHECK (cultural_significance BETWEEN 1 AND 10),
+    CONSTRAINT cultural_event_duration_chk CHECK (duration_days >= 1),
+    CONSTRAINT cultural_event_lead_time_chk CHECK (lead_time_days >= 0),
+    -- Per-type date column requirements. Explicit IS NOT NULL guards are
+    -- required: without them, `NULL BETWEEN 1 AND 12` evaluates to NULL and
+    -- `NULL OR FALSE` is NULL, which Postgres treats as a CHECK pass (only
+    -- FALSE rejects). The IS NOT NULL terms force a deterministic boolean.
+    CONSTRAINT cultural_event_fixed_dates_chk CHECK (
+        (event_type = 'fixed_gregorian'
+         AND gregorian_month IS NOT NULL AND gregorian_day IS NOT NULL
+         AND gregorian_month BETWEEN 1 AND 12
+         AND gregorian_day BETWEEN 1 AND 31
+         AND hijri_month IS NULL AND hijri_day IS NULL
+         AND seasonal_start_month IS NULL AND seasonal_end_month IS NULL)
+        OR event_type <> 'fixed_gregorian'
+    ),
+    CONSTRAINT cultural_event_lunar_dates_chk CHECK (
+        (event_type = 'lunar_hijri'
+         AND hijri_month IS NOT NULL AND hijri_day IS NOT NULL
+         AND hijri_month BETWEEN 1 AND 12
+         AND hijri_day BETWEEN 1 AND 30
+         AND gregorian_month IS NULL AND gregorian_day IS NULL
+         AND seasonal_start_month IS NULL AND seasonal_end_month IS NULL)
+        OR event_type <> 'lunar_hijri'
+    ),
+    CONSTRAINT cultural_event_seasonal_dates_chk CHECK (
+        (event_type = 'seasonal_range'
+         AND seasonal_start_month IS NOT NULL AND seasonal_end_month IS NOT NULL
+         AND seasonal_start_month BETWEEN 1 AND 12
+         AND seasonal_end_month BETWEEN 1 AND 12
+         AND gregorian_month IS NULL AND gregorian_day IS NULL
+         AND hijri_month IS NULL AND hijri_day IS NULL)
+        OR event_type <> 'seasonal_range'
+    )
+);
+
+CREATE INDEX idx_cultural_event_country_significance
+    ON cultural_event(country_iso, cultural_significance DESC);
+CREATE INDEX idx_cultural_event_type ON cultural_event(event_type);
+CREATE INDEX idx_cultural_event_updated ON cultural_event(updated_at DESC);

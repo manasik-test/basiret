@@ -15,6 +15,7 @@ from app.models.goal import Goal, GoalMetric, GoalPeriod
 from app.models.recommendation_feedback import RecommendationFeedback, FeedbackKind
 from app.models.scheduled_post import ScheduledPost
 from app.models.batch_generate_progress import BatchGenerateProgress
+from app.models.cultural_event import CulturalEvent, EventType, SourceConfidence
 
 __all__ = [
     "Organization",
@@ -34,4 +35,5 @@ __all__ = [
     "RecommendationFeedback", "FeedbackKind",
     "ScheduledPost",
     "BatchGenerateProgress",
+    "CulturalEvent", "EventType", "SourceConfidence",
 ]
