@@ -1,4 +1,10 @@
 {
+  "_curation_rules": {
+    "uncertain_event_rule": "If an event's 2026 occurrence is in question (postponed, cancelled, indefinitely deferred), set is_active=false. Reactivate when official dates are confirmed by a verifiable source. is_active=true is required for Content Plan to surface this event.",
+    "secondary_confidence_meaning": "source_confidence='secondary' means the event runs annually but a definitive 2026 date page wasn't independently sourced at curation time. All 'secondary' entries in this file are seasonal_range (month-windowed) by design — the month-range modeling absorbs date imprecision, so a secondary-confidence seasonal entry can still surface accurately to Content Plan without risking a misleading specific date.",
+    "translation_confidence_meaning": "_translation_notes flag each name_ar as 'verified: <source>' or 'best_effort: <reasoning>'. Best-effort translations are descriptive Arabic phrases (typically for cross-country signals like summer_heat_peak or back_to_school that have no canonical event name)."
+  },
+
   "_meta": {
     "schema_version": "1.0",
     "phase": "1C-batches-1-and-2",
@@ -29,7 +35,7 @@
 
     "qatar_national_sports_day": "Modeled as seasonal_range Feb-Feb (not fixed_gregorian) because the date shifts year to year — it's officially the 2nd Tuesday of February. Hardcoding a specific Feb day would be wrong by 2027. year_specific_notes pins the actual 2026 date (Feb 10) for that year's surfacing.",
     "oman_sultan_accession_day": "Canonical date is Jan 11 (Sultan Haitham took the throne Jan 11 2020). However Oman's advance-announcement public-holiday policy can shift the OBSERVED day-off year to year. In 2026, the observed holiday is Thursday Jan 15 (likely shifted from Sunday Jan 11 to create a Thu-Fri-Sat extended weekend). Stored Jan 11 as the canonical date; year_specific_notes carries the observed-day shift. Content Plan should surface Jan 11 for thematic content but flag the Jan 15 holiday for behaviorally-tied content.",
-    "spring_of_culture": "VERIFICATION FLAG: The 20th edition of Spring of Culture was scheduled for March-May 2026 but has been POSTPONED (no rescheduled date announced as of curation time). Kept the entry with seasonal Mar-May (the historical pattern) and source_confidence=secondary. When the 2026 edition is rescheduled or formally cancelled, update year_specific_notes accordingly. Worth a follow-up search closer to the originally-planned start.",
+    "spring_of_culture": "2026 edition postponed; reactivate when official dates confirmed. is_active=true required for Content Plan to surface this event. The 20th edition was scheduled for March-May 2026 but has been POSTPONED (no rescheduled date announced as of curation time). Kept entry shape with seasonal Mar-May (the historical pattern) and source_confidence=secondary so the row's available the moment new dates land — just flip is_active back to true. Worth a follow-up search closer to the originally-planned start.",
     "pearling_festival": "VERIFICATION FLAG: A standalone annual 'Pearling Festival' in Bahrain wasn't independently confirmable during curation — pearling heritage in Bahrain is sometimes programmed as part of the Bahrain Summer Festival (Jul-Aug) and sometimes appears as standalone events in Muharraq district. Kept the entry per the original Phase 1C checklist with source_confidence=secondary; user should verify with Bahrain Authority for Culture whether to keep as standalone November programming or fold into Summer Festival.",
     "khareef_salalah": "Moved from Oman (country_iso=OM) to cross-country shared (country_iso=NULL) per user's Batch 2 architectural principle. Rationale: Khareef tourism is driven heavily by GCC travelers (especially UAE residents escaping summer heat — Oman Air launched dedicated DXB-Salalah flights for the season). The behavioral pattern is cross-border. industries_high_relevance enumerates tourism + travel verticals; relevance is personalization, not geography.",
     "f1_abu_dhabi_grand_prix": "Modeled as country_iso=NULL (cross-country shared) per user's Batch 2 architectural principle — F1 races attract cross-GCC luxury/sports audiences. industries_high_relevance includes sports, hospitality, luxury_retail, and premium hotels per the user's example. Located in UAE but relevance is cross-border, not geographic.",
@@ -1471,6 +1477,7 @@
       "duration_days": 1,
       "cultural_significance": 7,
       "lead_time_days": 14,
+      "is_active": false,
       "industries_high_relevance": ["arts_culture", "media_entertainment", "fine_dining", "hospitality", "tourism_heritage", "education", "luxury_retail"],
       "content_guidelines": {
         "avoid": ["mass-commercial framing — Spring of Culture is the high-art Bahrain Authority for Culture flagship", "Saudi/UAE-styled large-spectacle aesthetics — this is a curated, salon-style festival", "alcohol references at family programming"],
