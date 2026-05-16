@@ -41,3 +41,7 @@ python-bidi==0.4.2
 # Post Creator — multipart uploads + R2 (S3-compatible) storage.
 python-multipart==0.0.9
 boto3==1.34.34
+# Cultural calendar — Umm al-Qura Hijri ↔ Gregorian conversion.
+# `hijridate` is the maintained successor to `hijri-converter` (deprecated).
+# Same UMQ algorithm + tables; covers 1343–1500 AH (1924–2077 CE).
+hijridate==2.5.0
